@@ -782,7 +782,7 @@ ssh <vserver> 'tailscale ip -4'   # → SUCHLAGE_BIND_IP notieren
 ```bash
 cd ~/dev/personal/drk/suchlage
 SUCHLAGE_BIND_IP=<ip> deploy/render.sh
-rsync -a --delete --exclude records/ deploy/ <vserver>:/srv/suchlage/deploy/
+rsync -a --delete --exclude records/ --exclude smoke.sh deploy/ <vserver>:/srv/suchlage/deploy/   # smoke.sh nie auf den Server: überschreibt Geheimnisse, löscht Mitschnitte
 ssh <vserver> 'mkdir -p /srv/suchlage/records && cd /srv/suchlage/deploy && docker compose up -d --build && docker compose ps'
 SUCHLAGE_BIND_IP=127.0.0.1 deploy/render.sh   # lokale Dateien wieder auf Testwerte
 ```
@@ -806,6 +806,7 @@ und die Probe wiederholen.
 
 ```bash
 curl -sf http://<ip>:8080/ | grep -q Suchlage && echo ok
+curl -sf http://<ip>:8080/config.js >/dev/null && echo ok   # 403 hier = Dateimodus von config.js; lokal nicht nachstellbar
 ffmpeg -loglevel error -re -f lavfi -i testsrc=size=640x360:rate=25 -t 15 -c:v libx264 -preset ultrafast -g 25 -f flv \
   "rtmp://<ip>:1935/live/probe?user=pilot&pass=$(op read op://DRK/suchlage-mqtt/rtmp-pilot)" &
 sleep 5; open "http://<ip>:8889/live/probe"; wait

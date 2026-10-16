@@ -3,11 +3,17 @@
 # Läuft gegen Testgeheimnisse (op-Attrappe), nie gegen 1Password: kein Freigabedialog, keine echten DJI-Schlüssel in lokalen Dateien.
 set -u
 cd "$(dirname "$0")"
+# Schutz vor einem Lauf auf dem vServer: Der Test überschreibt die Geheimnisse, leert ../records und stoppt den Stack.
+[ -z "$(docker ps -aq --filter label=com.docker.compose.project=suchlage)" ] || {
+  echo "Stack suchlage existiert – smoke.sh nur auf einer leeren lokalen Umgebung"; exit 1; }
+# Nur eigene Testdaten (Marker .smoke) werden kommentarlos gelöscht, echte Mitschnitte nur mit --force.
+[ "${1:-}" = --force ] || [ -f ../records/.smoke ] || [ -z "$(ls -A ../records 2>/dev/null)" ] || {
+  echo "../records enthält Daten, die nicht von smoke.sh stammen – Abbruch (überschreiben mit --force)"; exit 1; }
 export SUCHLAGE_BIND_IP=127.0.0.1
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# op-Attrappe: `op read <ref>` und `op inject -f -i <in> -o <out>`; Wert deterministisch je Referenz,
+# op-Attrappe: `op read <ref>` und `op inject -f [--file-mode <m>] -i <in> -o <out>`; Wert deterministisch je Referenz,
 # damit render.sh und smoke.sh unabhängig voneinander dieselben Geheimnisse sehen.
 cat > "$TMP/op" <<'EOF'
 #!/bin/sh
@@ -16,9 +22,9 @@ val() { printf 'test%s' "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
 case $1 in
   read) val "$2" ;;
   inject)
-    shift; in= out=
-    while [ $# -gt 0 ]; do case $1 in -i) in=$2; shift ;; -o) out=$2; shift ;; esac; shift; done
-    cp "$in" "$out"
+    shift; in= out= mode=0600
+    while [ $# -gt 0 ]; do case $1 in -i) in=$2; shift ;; -o) out=$2; shift ;; --file-mode) mode=$2; shift ;; esac; shift; done
+    cp "$in" "$out" && chmod "$mode" "$out"  # wie echtes op: Default 0600
     grep -o '{{ op://[^ ]* }}' "$in" | sort -u | while read -r _ ref _; do
       sed -i.bak "s|{{ $ref }}|$(val "$ref")|g" "$out" && rm -f "$out.bak"
     done ;;
@@ -39,7 +45,7 @@ sub_one() { dc exec -T mqtt mosquitto_sub -h localhost -u "$1" -P "$2" -t "$3" -
 # pub <user> <pass> <topic> <payload>
 pub() { dc exec -T mqtt mosquitto_pub -h localhost -u "$1" -P "$2" -t "$3" -m "$4"; }
 
-rm -rf ../records && mkdir -p ../records
+rm -rf ../records && mkdir -p ../records && touch ../records/.smoke
 dc up -d --build --wait mqtt recorder || dc up -d --build mqtt recorder
 sleep 2
 
@@ -119,6 +125,8 @@ dc up -d pilot; sleep 1
 curl -sf http://127.0.0.1:8080/ | grep -q "Suchlage"; check $? "Pilot-Seite erreichbar"
 curl -sf http://127.0.0.1:8080/config.js | grep -q "tcp://127.0.0.1:1883"; check $? "config.js gerendert"
 [ -f pilot/config.js ] && ! grep -q "op://" pilot/config.js; check $? "keine offenen op://-Referenzen"
+# Docker Desktop liefert auch 0600-Dateien aus, auf dem vServer gäbe das 403 – daher den Modus direkt prüfen
+[ "$(stat -f %Lp pilot/config.js 2>/dev/null || stat -c %a pilot/config.js)" = 644 ]; check $? "config.js für nginx lesbar (0644)"
 node --test pilot/ >/dev/null 2>&1; check $? "pilot.js-Unit-Tests"
 
 dc down

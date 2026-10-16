@@ -12,5 +12,6 @@ docker run --rm -v "$PWD/mosquitto:/m" eclipse-mosquitto:2.0.22 sh -c \
   "rm -f /m/passwd && mosquitto_passwd -b -c /m/passwd suchlage $TOOL_PASS && mosquitto_passwd -b /m/passwd rc-plus-01 $RC_PASS && chmod 0644 /m/passwd"
 op inject -f -i mediamtx.tpl.yml -o mediamtx.yml >/dev/null
 sed -i.bak "s/__BIND_IP__/$SUCHLAGE_BIND_IP/g" mediamtx.yml && rm -f mediamtx.yml.bak
-op inject -f -i pilot/config.tpl.js -o pilot/config.js >/dev/null
+# 0644 statt op-Default 0600: rsync -a übernimmt den Modus, und nginx (uid 101) muss config.js auf dem vServer lesen dürfen
+op inject -f --file-mode 0644 -i pilot/config.tpl.js -o pilot/config.js >/dev/null
 sed -i.bak "s/__BIND_IP__/$SUCHLAGE_BIND_IP/g" pilot/config.js && rm -f pilot/config.js.bak

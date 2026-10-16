@@ -16,10 +16,12 @@
   <button id="live">Livestream manuell starten</button>
   <div id="log"></div>
   <script type="module">
-    import cfg from "./config.js";
     import { connect, startManualLive } from "./pilot.js";
     const out = document.getElementById("log");
     const log = (m) => { out.textContent += `${new Date().toLocaleTimeString("de-DE")} ${m}\n`; };
+    // Dynamisch statt statisch: Ein Ladefehler (z. B. 403) erscheint im Log, statt die ganze Seite stumm zu lassen
+    let cfg;
+    import("./config.js").then((m) => { cfg = m.default; }, (e) => log(`config.js nicht geladen: ${e.message}`));
     window.onThingConnect = (state) => log(`MQTT verbunden: ${state}`);
     window.onLiveStatus = (status) => log(`Live-Status: ${status}`);
     const run = (fn) => { try { fn(cfg, window.djiBridge, log); } catch (e) { log(`Abbruch bei ${e.message}`); } };
