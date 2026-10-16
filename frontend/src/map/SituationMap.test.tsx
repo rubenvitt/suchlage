@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { ConfigProvider, theme } from 'antd';
 import type { ReactElement } from 'react';
 import { snapshotFlying } from '../contract/fixtures.generated';
+import type { Freshness } from '../live/freshness';
+import { farbenHell } from '../theme/tokens';
 import { SituationMap } from './SituationMap';
 
 // jsdom hat kein WebGL: Die Karte selbst ersetzt ein Double, das festhält, was die Komponente ihr sagt.
@@ -47,7 +49,10 @@ const { FakeMap, maps } = vi.hoisted(() => {
 });
 vi.mock('maplibre-gl', () => ({ Map: FakeMap }));
 vi.mock('./maplibreWorker', () => ({}));
-vi.mock('./glyphs', () => ({ aircraftGlyph: () => ({}), homeGlyph: () => ({}) }));
+vi.mock('./glyphs', () => ({
+  aircraftGlyph: (color: string, outlineOnly: boolean) => ({ color, outlineOnly }),
+  homeGlyph: () => ({}),
+}));
 vi.mock('./unitSign', () => ({ registerUnitSign: () => {}, UNIT_IMAGE: 'unit-drone-team' }));
 
 const s = snapshotFlying;
@@ -65,6 +70,8 @@ const light = (ui: ReactElement) => (
 const dark = (ui: ReactElement) => (
   <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>{ui}</ConfigProvider>
 );
+const layout = (map: InstanceType<typeof FakeMap>, id: string) =>
+  map.addLayer.mock.calls.map(([l]) => l).find((l) => l.id === id).layout;
 const loaded = () => {
   const map = maps.at(-1)!;
   act(() => map.handlers.get('load')!({}));
@@ -146,4 +153,28 @@ test('Flugdetail zeigt nur die Spur, ohne Live-Zeichen und ohne Bedienung', () =
     [10.0134, 52.4321],
   ]);
   expect(screen.queryByRole('button', { name: 'Folgen' })).not.toBeInTheDocument();
+});
+
+test('jede Frische hat ihre Kursglyphe: frisch und verzögert gefüllt, verloren nur als Kontur', () => {
+  render(light(<SituationMap {...live} />));
+  const map = loaded();
+  // Record statt Liste: Kommt eine Frische hinzu, fehlt sie hier schon beim Übersetzen.
+  const glyph: Record<Freshness, { color: string; outlineOnly: boolean }> = {
+    fresh: { color: farbenHell.bedien, outlineOnly: false },
+    delayed: { color: farbenHell.gedaempft, outlineOnly: false },
+    lost: { color: farbenHell.schwach, outlineOnly: true },
+  };
+  for (const [freshness, image] of Object.entries(glyph)) {
+    expect(map.addImage).toHaveBeenCalledWith(`aircraft-${freshness}`, image, expect.anything());
+  }
+  expect(layout(map, 'aircraft')['icon-image']).toEqual(['concat', 'aircraft-', ['get', 'freshness']]);
+});
+
+test('Zeichen bleiben stehen, auch wenn ihre Beschriftungen einander überdecken', () => {
+  render(light(<SituationMap {...live} />));
+  const map = loaded();
+  // Drohne und Fernsteuerung stehen am Boden wenige Meter auseinander.
+  for (const id of ['gateways', 'aircraft']) {
+    expect(layout(map, id)).toMatchObject({ 'icon-allow-overlap': true, 'text-allow-overlap': true });
+  }
 });

@@ -124,6 +124,8 @@ export function SituationMap({
         layout: {
           'icon-image': UNIT_IMAGE,
           'icon-allow-overlap': true,
+          // Ohne das fiele mit verdeckter Beschriftung das ganze Zeichen weg (Icon und Text gehören zusammen).
+          'text-allow-overlap': true,
           'text-field': [
             'case',
             ['==', ['get', 'age'], ''],
@@ -159,6 +161,7 @@ export function SituationMap({
           'icon-rotate': ['get', 'heading'],
           'icon-rotation-alignment': 'map',
           'icon-allow-overlap': true,
+          'text-allow-overlap': true,
           'text-field': ['get', 'age'],
           'text-font': ['noto_sans_regular'],
           'text-size': 12,
