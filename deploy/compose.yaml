@@ -15,3 +15,10 @@ services:
     command: ["sh", "-c", "exec mosquitto_sub -h mqtt -u suchlage -P \"$$MQTT_TOOL_PASS\" -t 'thing/#' -t 'sys/#' -F '%j' >> /records/$$(date -u +%Y%m%dT%H%M%SZ).jsonl"]
     volumes: ["../records:/records"]
     restart: unless-stopped
+
+  topo:
+    build: ./tools
+    depends_on: [mqtt]
+    environment: { MQTT_TOOL_PASS: "${MQTT_TOOL_PASS:?}" }
+    command: ["/tools/topo-responder.sh"]
+    restart: unless-stopped

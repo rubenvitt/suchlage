@@ -284,35 +284,39 @@ git commit -m "M0: MQTT-Broker mit Mitschnitt und Smoke-Test"
 - Consumes: `mqtt`, Benutzer `suchlage`, `MQTT_TOOL_PASS`, `sub_one`/`pub`/`check` aus `smoke.sh`.
 - Produces: Service `topo` (antwortet auf `sys/product/{gw}/status` mit `update_topo` auf `…/status_reply`); Werkzeug `docker compose run --rm topo /tools/live.sh start|stop|lens <gateway_sn> <video_id> [rtmp_url|lens]`.
 
-- [ ] **Step 1: Failing Tests in `smoke.sh` ergänzen** (vor der Zeile `# --- weitere Prüfungen folgen`)
+- [x] **Step 1: Failing Tests in `smoke.sh` ergänzen** (vor der Zeile `# --- weitere Prüfungen folgen`)
 
 ```sh
 dc up -d --build topo; sleep 2
 
 # Ungültiges JSON bricht den Responder nicht (Review Focus 2), gültiges update_topo wird beantwortet
 pub rc-plus-01 "$RC_PASS" sys/product/TEST/status 'kein json'
-( sub_one rc-plus-01 "$RC_PASS" sys/product/TEST/status_reply > /tmp/suchlage-topo.out ) &
+( sub_one rc-plus-01 "$RC_PASS" sys/product/TEST/status_reply > "$TMP/topo.out" ) &
 sleep 1
-pub rc-plus-01 "$RC_PASS" sys/product/TEST/status '{"bid":"b1","tid":"t1","timestamp":1,"method":"update_topo","data":{"sub_devices":[]}}'
+pub rc-plus-01 "$RC_PASS" sys/product/TEST/status "$(printf '{"bid": "b1", "tid": "t1",\n "timestamp": 1, "method": "update_topo", "data": {"sub_devices": []}}')"
 wait
-jq -e '.bid=="b1" and .tid=="t1" and .method=="update_topo" and .data.result==0' /tmp/suchlage-topo.out >/dev/null
-check $? "update_topo wird beantwortet, auch nach ungültigem JSON"
+jq -e '.bid=="b1" and .tid=="t1" and .method=="update_topo" and .data.result==0' "$TMP/topo.out" >/dev/null
+check $? "update_topo wird beantwortet, auch nach ungültigem JSON und mit Zeilenumbruch"
+# Ein Absturz würde durch restart: unless-stopped verdeckt – daher Neustarts zählen
+[ "$(docker inspect -f '{{.RestartCount}}' "$(dc ps -q topo)")" = 0 ]; check $? "Responder ohne Neustart"
 
 # Live-Befehl erreicht das Gerät mit korrektem Format
-( sub_one rc-plus-01 "$RC_PASS" thing/product/TEST/services > /tmp/suchlage-live.out ) &
+( sub_one rc-plus-01 "$RC_PASS" thing/product/TEST/services > "$TMP/live.out" ) &
 sleep 1
-dc run --rm -T topo /tools/live.sh start TEST TEST/39-0-7/normal-0 rtmp://127.0.0.1:1935/live/m350
+dc run --rm -T topo /tools/live.sh start TEST TEST/39-0-7/normal-0 rtmp://127.0.0.1:1935/live/m350 >/dev/null
 wait
-jq -e '.method=="live_start_push" and .data.url_type==1 and .data.video_id=="TEST/39-0-7/normal-0" and (.bid|length)>0' /tmp/suchlage-live.out >/dev/null
+jq -e '.method=="live_start_push" and .data.url_type==1 and .data.video_id=="TEST/39-0-7/normal-0" and (.bid|length)>0' "$TMP/live.out" >/dev/null
 check $? "live_start_push hat das DJI-Format"
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag sehen**
+> **Abweichung (Ausführung 16.10.2026):** Hilfsdateien unter `$TMP` (siehe Task 1). Der gültige `update_topo`-Payload enthält einen Zeilenumbruch und Leerzeichen (Review Focus 1). Neue Prüfung „Responder ohne Neustart": Ein Absturz bei ungültigem JSON würde sonst durch `restart: unless-stopped` verdeckt, weil der Container rechtzeitig für die nächste Nachricht wieder läuft. Die Ausgabe von `live.sh` geht nach `/dev/null`, damit der Smoke-Test nur `ok`/`FAIL`-Zeilen zeigt.
+
+- [x] **Step 2: Test laufen lassen, Fehlschlag sehen**
 
 Run: `deploy/smoke.sh`
 Expected: Fehler beim Bauen bzw. `FAIL update_topo …` und `FAIL live_start_push …` (Skripte fehlen).
 
-- [ ] **Step 3: Responder schreiben**
+- [x] **Step 3: Responder schreiben**
 
 `deploy/tools/topo-responder.sh`:
 
@@ -333,7 +337,7 @@ while IFS= read -r line; do
 done
 ```
 
-- [ ] **Step 4: Live-Werkzeug schreiben**
+- [x] **Step 4: Live-Werkzeug schreiben**
 
 `deploy/tools/live.sh`:
 
@@ -362,7 +366,7 @@ echo "gesendet: $method an $gw – Antwort im Mitschnitt unter thing/product/$gw
 
 `chmod +x deploy/tools/*.sh`
 
-- [ ] **Step 5: Service in `compose.yaml` ergänzen**
+- [x] **Step 5: Service in `compose.yaml` ergänzen**
 
 ```yaml
   topo:
@@ -373,12 +377,12 @@ echo "gesendet: $method an $gw – Antwort im Mitschnitt unter thing/product/$gw
     restart: unless-stopped
 ```
 
-- [ ] **Step 6: Tests laufen lassen**
+- [x] **Step 6: Tests laufen lassen**
 
 Run: `deploy/smoke.sh`
 Expected: alle Zeilen `ok`, Exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add deploy/tools deploy/compose.yaml deploy/smoke.sh

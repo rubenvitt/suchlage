@@ -70,6 +70,27 @@ pub rc-plus-01 "$RC_PASS" thing/product/TEST/osd '{"after":"restart"}'
 sleep 2
 grep -q 'after.*restart' ../records/*.jsonl; check $? "Mitschnitt überlebt Broker-Neustart"
 
+dc up -d --build topo; sleep 2
+
+# Ungültiges JSON bricht den Responder nicht (Review Focus 2), gültiges update_topo wird beantwortet
+pub rc-plus-01 "$RC_PASS" sys/product/TEST/status 'kein json'
+( sub_one rc-plus-01 "$RC_PASS" sys/product/TEST/status_reply > "$TMP/topo.out" ) &
+sleep 1
+pub rc-plus-01 "$RC_PASS" sys/product/TEST/status "$(printf '{"bid": "b1", "tid": "t1",\n "timestamp": 1, "method": "update_topo", "data": {"sub_devices": []}}')"
+wait
+jq -e '.bid=="b1" and .tid=="t1" and .method=="update_topo" and .data.result==0' "$TMP/topo.out" >/dev/null
+check $? "update_topo wird beantwortet, auch nach ungültigem JSON und mit Zeilenumbruch"
+# Ein Absturz würde durch restart: unless-stopped verdeckt – daher Neustarts zählen
+[ "$(docker inspect -f '{{.RestartCount}}' "$(dc ps -q topo)")" = 0 ]; check $? "Responder ohne Neustart"
+
+# Live-Befehl erreicht das Gerät mit korrektem Format
+( sub_one rc-plus-01 "$RC_PASS" thing/product/TEST/services > "$TMP/live.out" ) &
+sleep 1
+dc run --rm -T topo /tools/live.sh start TEST TEST/39-0-7/normal-0 rtmp://127.0.0.1:1935/live/m350 >/dev/null
+wait
+jq -e '.method=="live_start_push" and .data.url_type==1 and .data.video_id=="TEST/39-0-7/normal-0" and (.bid|length)>0' "$TMP/live.out" >/dev/null
+check $? "live_start_push hat das DJI-Format"
+
 # --- weitere Prüfungen folgen in Task 2–4 ---
 
 dc down
