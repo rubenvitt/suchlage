@@ -1,0 +1,149 @@
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { ConfigProvider, theme } from 'antd';
+import type { ReactElement } from 'react';
+import { snapshotFlying } from '../contract/fixtures.generated';
+import { SituationMap } from './SituationMap';
+
+// jsdom hat kein WebGL: Die Karte selbst ersetzt ein Double, das festhält, was die Komponente ihr sagt.
+const { FakeMap, maps } = vi.hoisted(() => {
+  const maps: InstanceType<typeof FakeMap>[] = [];
+  class FakeMap {
+    handlers = new Map<string, (e: object) => void>();
+    sources = new Map<string, { setData: ReturnType<typeof vi.fn> }>();
+    center: unknown;
+    zoom: number;
+    touchZoomRotate = { disableRotation: vi.fn() };
+    keyboard = { disableRotation: vi.fn() };
+    addImage = vi.fn();
+    addLayer = vi.fn();
+    fitBounds = vi.fn();
+    easeTo = vi.fn();
+    zoomIn = vi.fn();
+    remove = vi.fn();
+    constructor(public options: { center: unknown; zoom: number }) {
+      this.center = options.center;
+      this.zoom = options.zoom;
+      maps.push(this);
+    }
+    on(event: string, handler: (e: object) => void) {
+      this.handlers.set(event, handler);
+    }
+    hasImage = () => false;
+    addSource(id: string) {
+      this.sources.set(id, { setData: vi.fn() });
+    }
+    getSource(id: string) {
+      return this.sources.get(id);
+    }
+    getCenter = () => this.center;
+    getZoom = () => this.zoom;
+    /** Zuletzt gesetzte Features einer Quelle. */
+    features(id: string) {
+      return this.sources.get(id)!.setData.mock.calls.at(-1)![0].features;
+    }
+  }
+  return { FakeMap, maps };
+});
+vi.mock('maplibre-gl', () => ({ Map: FakeMap }));
+vi.mock('./maplibreWorker', () => ({}));
+vi.mock('./glyphs', () => ({ aircraftGlyph: () => ({}), homeGlyph: () => ({}) }));
+vi.mock('./unitSign', () => ({ registerUnitSign: () => {}, UNIT_IMAGE: 'unit-drone-team' }));
+
+const s = snapshotFlying;
+const live = {
+  gateways: s.gateways,
+  aircraft: s.aircraft,
+  tracks: s.active_flights.map((f) => f.segments),
+  serverNow: s.server_time_ms,
+  thresholds: s.freshness,
+};
+// Beide mit `theme`, sonst baut antd den Baum um und die Karte würde neu eingehängt statt umgefärbt.
+const light = (ui: ReactElement) => (
+  <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm }}>{ui}</ConfigProvider>
+);
+const dark = (ui: ReactElement) => (
+  <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>{ui}</ConfigProvider>
+);
+const loaded = () => {
+  const map = maps.at(-1)!;
+  act(() => map.handlers.get('load')!({}));
+  return map;
+};
+
+beforeEach(() => {
+  maps.length = 0;
+});
+
+test('zeigt Fluggerät, Trupp, Spur und Startpunkt der Lage', () => {
+  render(light(<SituationMap {...live} />));
+  const map = loaded();
+  expect(map.features('aircraft')).toHaveLength(1);
+  expect(map.features('gateways')[0].properties.label).toBe('RC Plus 1');
+  expect(map.features('track')).toHaveLength(2);
+  expect(map.features('home')).toHaveLength(1);
+});
+
+test('holt die Lage einmal ins Bild, danach bestimmt der Nutzer den Ausschnitt', () => {
+  const { rerender } = render(light(<SituationMap {...live} />));
+  const map = loaded();
+  // Der Trupp steht südwestlich der Spur und gehört mit ins Bild.
+  expect(map.fitBounds).toHaveBeenCalledTimes(1);
+  expect(map.fitBounds.mock.calls[0]![0]).toEqual([
+    [10.0097, 52.4296],
+    [10.0134, 52.4321],
+  ]);
+  rerender(light(<SituationMap {...live} serverNow={live.serverNow + 1_000} />));
+  expect(map.fitBounds).toHaveBeenCalledTimes(1);
+});
+
+test('Folgen führt die Karte mit dem Fluggerät', () => {
+  render(light(<SituationMap {...live} follow />));
+  const map = loaded();
+  expect(map.easeTo.mock.calls.at(-1)![0].center).toEqual([10.0134, 52.4321]);
+  expect(map.fitBounds).not.toHaveBeenCalled();
+});
+
+test('Folgen ist ein Schalter', async () => {
+  const onFollowChange = vi.fn();
+  render(light(<SituationMap {...live} onFollowChange={onFollowChange} />));
+  const button = screen.getByRole('button', { name: 'Folgen' });
+  expect(button).toHaveAttribute('aria-pressed', 'false');
+  await userEvent.click(button);
+  expect(onFollowChange).toHaveBeenCalledWith(true);
+});
+
+test('wer die Karte selbst verschiebt, beendet das Folgen', () => {
+  const onFollowChange = vi.fn();
+  render(light(<SituationMap {...live} follow onFollowChange={onFollowChange} />));
+  const map = loaded();
+  act(() => map.handlers.get('dragstart')!({}));
+  expect(onFollowChange).not.toHaveBeenCalled();
+  act(() => map.handlers.get('dragstart')!({ originalEvent: new MouseEvent('mousedown') }));
+  expect(onFollowChange).toHaveBeenCalledWith(false);
+});
+
+test('der Wechsel Hell/Dunkel behält den Ausschnitt', () => {
+  const { rerender } = render(light(<SituationMap {...live} />));
+  const first = loaded();
+  first.center = { lng: 10.02, lat: 52.44 };
+  first.zoom = 15.5;
+  rerender(dark(<SituationMap {...live} />));
+  expect(first.remove).toHaveBeenCalled();
+  expect(maps).toHaveLength(2);
+  expect(maps[1]!.options).toMatchObject({ center: { lng: 10.02, lat: 52.44 }, zoom: 15.5 });
+  loaded();
+  expect(maps[1]!.fitBounds).not.toHaveBeenCalled();
+});
+
+test('Flugdetail zeigt nur die Spur, ohne Live-Zeichen und ohne Bedienung', () => {
+  render(light(<SituationMap {...live} staticFit />));
+  const map = loaded();
+  expect(map.features('aircraft')).toHaveLength(0);
+  expect(map.features('gateways')).toHaveLength(0);
+  expect(map.fitBounds.mock.calls[0]![0]).toEqual([
+    [10.01, 52.43],
+    [10.0134, 52.4321],
+  ]);
+  expect(screen.queryByRole('button', { name: 'Folgen' })).not.toBeInTheDocument();
+});
