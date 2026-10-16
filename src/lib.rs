@@ -5,6 +5,7 @@ pub mod dji;
 pub mod error;
 pub mod extract;
 pub mod sim;
+pub mod situation;
 pub mod static_files;
 pub mod time;
 
