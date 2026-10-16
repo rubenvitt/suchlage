@@ -33,11 +33,14 @@ export function connectLive({
     source = src;
     src.onopen = () => onStatus('open');
     src.onmessage = (m) => {
+      let event: LiveEvent;
       try {
-        onEvent(JSON.parse(m.data) as LiveEvent);
+        event = JSON.parse(m.data) as LiveEvent;
       } catch {
         console.warn('Live-Nachricht nicht lesbar – übersprungen');
+        return;
       }
+      onEvent(event);
     };
     src.onerror = () => {
       onStatus('reconnecting');

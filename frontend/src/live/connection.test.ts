@@ -46,6 +46,21 @@ test('meldet Status, reicht Ereignisse weiter und überspringt kaputte Nachricht
   warn.mockRestore();
 });
 
+test('Fehler beim Verarbeiten gelten nicht als unlesbare Nachricht', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  connectLive({
+    url: '/api/live',
+    onEvent: () => {
+      throw new TypeError('Verarbeitung');
+    },
+    onStatus: () => {},
+    create,
+  });
+  expect(() => FakeSource.last.onmessage?.({ data: '{"type":"system"}' })).toThrow('Verarbeitung');
+  expect(warn).not.toHaveBeenCalled();
+  warn.mockRestore();
+});
+
 test('baut die Verbindung neu auf, wenn der Browser aufgibt', () => {
   vi.useFakeTimers();
   const stop = connectLive({ url: '/api/live', onEvent: () => {}, onStatus: () => {}, create });

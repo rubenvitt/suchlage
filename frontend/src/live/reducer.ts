@@ -83,5 +83,9 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
       return { ...s, streams: { ...s.streams, [e.stream.gateway_sn]: e.stream } };
     case 'system':
       return { ...s, system: e.system };
+    default:
+      // Ein lange offener Tab kann einen neueren Server erleben; dessen neue Ereignisse lassen den Stand stehen.
+      console.warn('Unbekanntes Live-Ereignis – übersprungen');
+      return s;
   }
 }

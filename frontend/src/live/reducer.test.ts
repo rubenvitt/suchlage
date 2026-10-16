@@ -54,3 +54,11 @@ test('Flugstart legt einen leeren Flug an, Stream und System werden übernommen'
   s = applyEvent(s, ev('system'), 0);
   expect(s.system!.unknown_fields[0]!.key).toBe('aircraft.wind_speed_extra');
 });
+
+test('Unbekanntes Ereignis eines neueren Servers lässt den Stand unverändert', () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const s = flying();
+  expect(applyEvent(s, { type: 'future' } as unknown as LiveEvent, 0)).toBe(s);
+  expect(warn).toHaveBeenCalledOnce();
+  warn.mockRestore();
+});
