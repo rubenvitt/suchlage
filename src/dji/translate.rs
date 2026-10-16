@@ -158,7 +158,12 @@ impl Translator {
             out.observations.push(diag(at_ms, vec![], 1));
             return;
         };
+        // update_topo ist maßgeblich: Die eigene SN ist Fernsteuerung, die Unterknoten sind keine.
         self.gateways.insert(gateway.to_string());
+        self.aircraft_gateway.remove(gateway);
+        for device in &topo.sub_devices {
+            self.gateways.remove(&device.sn);
+        }
         let aircraft = topo
             .sub_devices
             .iter()
@@ -201,7 +206,10 @@ impl Translator {
             out.observations.push(diag(at_ms, vec![], 1));
             return;
         };
-        let is_gateway = env.gateway.as_deref() == Some(sn) || self.gateways.contains(sn);
+        // Ein bekanntes Fluggerät wird nie zur Fernsteuerung, auch nicht durch eine Nachricht mit
+        // `gateway` = eigene SN; sonst bliebe es das bis zum nächsten update_topo und darüber hinaus.
+        let is_gateway = !self.aircraft_gateway.contains_key(sn)
+            && (env.gateway.as_deref() == Some(sn) || self.gateways.contains(sn));
         let (prefix, documented) = if is_gateway {
             ("gateway", wire::GATEWAY_DOCUMENTED)
         } else {
@@ -371,8 +379,10 @@ fn deep_merge(target: &mut Map<String, Value>, patch: &Map<String, Value>) {
 }
 
 fn geo(obj: &Map<String, Value>, lat: &str, lon: &str, invalid: &mut bool) -> Option<GeoPoint> {
-    let la = ok(wire::number(obj, lat), invalid)?;
-    let lo = ok(wire::number(obj, lon), invalid)?;
+    // Beide Werte prüfen, bevor `?` greift: Sonst bliebe ein falscher Längengrad ungezählt.
+    let la = ok(wire::number(obj, lat), invalid);
+    let lo = ok(wire::number(obj, lon), invalid);
+    let (la, lo) = (la?, lo?);
     // DJI meldet vor dem GNSS-Fix 0/0; das ist keine Position.
     let in_range =
         (-90.0..=90.0).contains(&la) && (-180.0..=180.0).contains(&lo) && !(la == 0.0 && lo == 0.0);
@@ -794,6 +804,81 @@ mod tests {
                 .any(|o| matches!(o.observation, Observation::Diagnostics { .. })),
             "der alte Fehler zählt nicht noch einmal"
         );
+    }
+
+    #[test]
+    fn wrong_longitude_alone_is_counted() {
+        let mut t = Translator::new();
+        run(
+            &mut t,
+            0,
+            "thing/product/AC1/osd",
+            json!({"gateway": "RC1", "data": {"latitude": 52.0, "longitude": 10.0}}),
+        );
+        let tr = run(
+            &mut t,
+            1,
+            "thing/product/AC1/osd",
+            json!({"gateway": "RC1", "data": {"longitude": "x"}}),
+        );
+        assert!(tr.observations.iter().any(|o| matches!(
+            o.observation,
+            Observation::Diagnostics {
+                invalid_messages: 1,
+                ..
+            }
+        )));
+        assert_eq!(aircraft_telemetry(&tr).unwrap().position, None);
+    }
+
+    #[test]
+    fn aircraft_claiming_to_be_its_own_gateway_stays_aircraft() {
+        let mut t = Translator::new();
+        run(
+            &mut t,
+            0,
+            "sys/product/RC1/status",
+            json!({"tid": "t", "bid": "b", "method": "update_topo", "data": {"sub_devices": [{"sn": "AC1", "type": 89}]}}),
+        );
+        run(
+            &mut t,
+            1,
+            "thing/product/AC1/osd",
+            json!({"gateway": "AC1", "data": {"latitude": 52.0, "longitude": 10.0}}),
+        );
+        let tr = run(
+            &mut t,
+            2,
+            "thing/product/AC1/osd",
+            json!({"gateway": "RC1", "data": {"latitude": 52.001}}),
+        );
+        assert!(aircraft_telemetry(&tr).is_some());
+        assert_eq!(t.persisted("AC1").unwrap().0, "RC1");
+    }
+
+    #[test]
+    fn update_topo_corrects_a_wrongly_classified_gateway() {
+        let mut t = Translator::new();
+        run(
+            &mut t,
+            0,
+            "thing/product/AC1/osd",
+            json!({"gateway": "AC1", "data": {"latitude": 52.0, "longitude": 10.0}}),
+        );
+        run(
+            &mut t,
+            1,
+            "sys/product/RC1/status",
+            json!({"tid": "t", "bid": "b", "method": "update_topo", "data": {"sub_devices": [{"sn": "AC1", "type": 89}]}}),
+        );
+        let tr = run(
+            &mut t,
+            2,
+            "thing/product/AC1/osd",
+            json!({"gateway": "RC1", "data": {"latitude": 52.001}}),
+        );
+        assert!(aircraft_telemetry(&tr).is_some());
+        assert_eq!(t.persisted("AC1").unwrap().0, "RC1");
     }
 
     #[test]
