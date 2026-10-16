@@ -8,6 +8,9 @@ use axum::response::{IntoResponse, Response};
 pub enum AppError {
     #[error("Nicht angemeldet")]
     Unauthorized,
+    /// 401 mit eigener Meldung (z. B. ungültiger Zugangslink).
+    #[error("{0}")]
+    UnauthorizedWith(String),
     #[error("Keine Berechtigung für diese Aktion")]
     Forbidden,
     #[error("Nicht gefunden")]
@@ -32,7 +35,7 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
-            AppError::Unauthorized => StatusCode::UNAUTHORIZED,
+            AppError::Unauthorized | AppError::UnauthorizedWith(_) => StatusCode::UNAUTHORIZED,
             AppError::Forbidden => StatusCode::FORBIDDEN,
             AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Validation(_) => StatusCode::BAD_REQUEST,

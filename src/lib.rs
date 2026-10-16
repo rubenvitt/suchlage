@@ -1,4 +1,5 @@
 pub mod app;
+pub mod auth;
 pub mod config;
 pub mod contract;
 pub mod db;
@@ -12,6 +13,7 @@ pub mod static_files;
 pub mod store;
 pub mod time;
 pub mod token;
+pub mod web;
 
 #[cfg(test)]
 pub(crate) mod testing;
