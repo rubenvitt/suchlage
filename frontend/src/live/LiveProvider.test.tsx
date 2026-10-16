@@ -1,0 +1,97 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, render, screen } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import type { ReactNode } from 'react';
+import { useFlights } from '../api/queries';
+import { flightList, liveEvents, snapshotFlying } from '../contract/fixtures.generated';
+import type { LiveEvent } from '../contract/generated/LiveEvent';
+import { server } from '../test/server';
+import { LiveProvider, useConnectionStatus, useLive, useServerNow } from './LiveProvider';
+import { createLiveStore } from './situationStore';
+
+class FakeSource {
+  static last: FakeSource;
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  readyState = 0;
+  constructor(public url: string) {
+    FakeSource.last = this;
+  }
+  close() {}
+}
+
+const send = (e: LiveEvent) => act(() => FakeSource.last.onmessage?.({ data: JSON.stringify(e) }));
+
+function withClient(children: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+function Probe() {
+  const status = useConnectionStatus();
+  const count = useLive((s) => Object.keys(s.aircraft).length);
+  const flights = useFlights();
+  return (
+    <p>
+      {status} · {count} Fluggeräte · {flights.data?.length ?? '–'} Flüge
+    </p>
+  );
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+test('verbindet sich selbst, zeigt Live-Stand und erneuert die Flugliste bei Flugereignissen', async () => {
+  vi.stubGlobal('EventSource', FakeSource);
+  let flightRequests = 0;
+  server.use(
+    http.get('/api/flights', () => {
+      flightRequests += 1;
+      return HttpResponse.json(flightList);
+    }),
+  );
+  render(withClient(<LiveProvider url="/api/live"><Probe /></LiveProvider>));
+  expect(FakeSource.last.url).toBe('/api/live');
+  expect(await screen.findByText(`connecting · 0 Fluggeräte · ${flightList.length} Flüge`)).toBeInTheDocument();
+  expect(flightRequests).toBe(1);
+
+  act(() => FakeSource.last.onopen?.());
+  send({ type: 'snapshot', snapshot: snapshotFlying });
+  expect(screen.getByText(`open · 1 Fluggeräte · ${flightList.length} Flüge`)).toBeInTheDocument();
+
+  send(liveEvents.find((e) => e.type === 'aircraft')!);
+  expect(flightRequests).toBe(1);
+  send(liveEvents.find((e) => e.type === 'flight_ended')!);
+  await vi.waitFor(() => expect(flightRequests).toBe(2));
+});
+
+test('ein übergebener Speicher ersetzt die Verbindung', () => {
+  const create = vi.fn();
+  vi.stubGlobal('EventSource', create);
+  const store = createLiveStore(() => snapshotFlying.server_time_ms);
+  store.dispatch({ type: 'snapshot', snapshot: snapshotFlying });
+  render(withClient(<LiveProvider store={store}><Probe /></LiveProvider>));
+  expect(screen.getByText(/1 Fluggeräte/)).toBeInTheDocument();
+  expect(create).not.toHaveBeenCalled();
+});
+
+test('Serverzeit läuft sekündlich mit dem gemessenen Versatz', () => {
+  vi.useFakeTimers({ now: 1_000_000 });
+  const store = createLiveStore(() => snapshotFlying.server_time_ms - 2_000);
+  store.dispatch({ type: 'snapshot', snapshot: snapshotFlying });
+  function Now() {
+    return <p>{useServerNow()}</p>;
+  }
+  render(withClient(<LiveProvider store={store}><Now /></LiveProvider>));
+  expect(screen.getByText(String(1_002_000))).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1_000));
+  expect(screen.getByText(String(1_003_000))).toBeInTheDocument();
+});
+
+test('ohne Provider ein klarer Fehler', () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  expect(() => render(<Probe />)).toThrow('useLive außerhalb von <LiveProvider>');
+});

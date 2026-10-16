@@ -1,0 +1,56 @@
+import { liveEvents, snapshotEmpty, snapshotFlying } from '../contract/fixtures.generated';
+import type { LiveEvent } from '../contract/generated/LiveEvent';
+import { applyEvent, initialLiveState } from './reducer';
+
+const ev = <T extends LiveEvent['type']>(type: T) =>
+  liveEvents.find((e) => e.type === type) as Extract<LiveEvent, { type: T }>;
+const flying = () =>
+  applyEvent(initialLiveState, { type: 'snapshot', snapshot: snapshotFlying }, snapshotFlying.server_time_ms - 500);
+
+test('Snapshot ersetzt den Stand und misst den Uhrversatz', () => {
+  const s = flying();
+  expect(s.ready).toBe(true);
+  expect(s.serverOffsetMs).toBe(500);
+  expect(Object.keys(s.aircraft)).toEqual(['ACSIM0001']);
+  expect(s.flights[7]!.segments).toHaveLength(2);
+  const empty = applyEvent(s, { type: 'snapshot', snapshot: snapshotEmpty }, 0);
+  expect(empty.aircraft).toEqual({});
+});
+
+test('Spurpunkt hängt an das richtige Segment, Duplikate fallen weg', () => {
+  const point = ev('track_point');
+  const before = flying();
+  const once = applyEvent(before, point, 0);
+  expect(once.flights[7]!.segments[1]!.at(-1)).toEqual(point.point);
+  expect(before.flights[7]!.segments[1]).toHaveLength(2);
+  const twice = applyEvent(once, point, 0);
+  expect(twice).toBe(once);
+  const newSegment = applyEvent(
+    once,
+    { ...point, segment: 2, point: { ...point.point, t_ms: point.point.t_ms + 20_000 } },
+    0,
+  );
+  expect(newSegment.flights[7]!.segments).toHaveLength(3);
+  expect(newSegment.flights[7]!.segments[0]).toBe(once.flights[7]!.segments[0]);
+});
+
+test('Spurpunkt eines unbekannten Flugs ändert nichts', () => {
+  const s = flying();
+  expect(applyEvent(s, { ...ev('track_point'), flight_id: 99 }, 0)).toBe(s);
+});
+
+test('Flugende entfernt den aktiven Flug und merkt ihn je Fluggerät', () => {
+  const s = applyEvent(flying(), ev('flight_ended'), 0);
+  expect(s.flights[7]).toBeUndefined();
+  expect(s.ended['ACSIM0001']!.end_reason).toBe('landed');
+});
+
+test('Flugstart legt einen leeren Flug an, Stream und System werden übernommen', () => {
+  let s = applyEvent(initialLiveState, { type: 'snapshot', snapshot: snapshotEmpty }, 0);
+  s = applyEvent(s, ev('flight_started'), 0);
+  expect(s.flights[7]!.segments).toEqual([]);
+  s = applyEvent(s, ev('stream'), 0);
+  expect(s.streams['RCSIM0001']!.phase).toBe('failed');
+  s = applyEvent(s, ev('system'), 0);
+  expect(s.system!.unknown_fields[0]!.key).toBe('aircraft.wind_speed_extra');
+});

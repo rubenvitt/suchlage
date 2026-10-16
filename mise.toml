@@ -6,3 +6,7 @@ pnpm = "11.10.0"
 [tasks.check]
 description = "Qualitäts-Gate: Modulgrenzen, Rust, Vertrag, Frontend, Pilot-Seite"
 run = "scripts/check.sh"
+
+[tasks.ui]
+description = "Oberfläche ohne Backend ansehen: Beispieldaten und abgespielter Flug (Vorschau-Modus)"
+run = "pnpm -C frontend dev --mode demo --host 127.0.0.1"
