@@ -1,0 +1,7 @@
+# Spike: Seriennummern sind vor dem ersten Flug unbekannt, daher noch keine Einschränkung je Gerät (kommt in M1).
+user suchlage
+topic readwrite #
+
+user rc-plus-01
+topic readwrite thing/product/#
+topic readwrite sys/product/#

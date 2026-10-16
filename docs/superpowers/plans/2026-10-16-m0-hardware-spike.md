@@ -67,6 +67,8 @@ records/                       # Mitschnitte (ungetrackt)
 
 - [ ] **Step 1: 1Password-Item für Spike-Passwörter anlegen**
 
+> **Offen (16.10.2026):** Nicht ausgeführt – `op` lief in der agentischen Ausführung nur in „authorization timeout" (Touch-ID-Freigabe fehlte). Vor Task 5 von Hand nachholen; vorher `op item get suchlage-mqtt --vault DRK` prüfen.
+
 ```bash
 op item create --vault DRK --category password --title suchlage-mqtt \
   "suchlage[password]=$(openssl rand -hex 24)" \
@@ -76,7 +78,7 @@ op item create --vault DRK --category password --title suchlage-mqtt \
 op read op://DRK/suchlage-mqtt/rc-plus-01 | wc -c   # erwartet: 49
 ```
 
-- [ ] **Step 2: `.gitignore` ergänzen**
+- [x] **Step 2: `.gitignore` ergänzen**
 
 Anhängen:
 
@@ -88,7 +90,7 @@ deploy/pilot/config.js
 records/
 ```
 
-- [ ] **Step 3: Broker-Konfiguration schreiben**
+- [x] **Step 3: Broker-Konfiguration schreiben**
 
 `deploy/mosquitto/mosquitto.conf`:
 
@@ -122,7 +124,7 @@ COPY *.sh /tools/
 ENTRYPOINT []
 ```
 
-- [ ] **Step 4: Compose mit Broker und Mitschnitt**
+- [x] **Step 4: Compose mit Broker und Mitschnitt**
 
 `deploy/compose.yaml`:
 
@@ -146,7 +148,7 @@ services:
     restart: unless-stopped
 ```
 
-- [ ] **Step 5: Render-Skript (MQTT-Teil)**
+- [x] **Step 5: Render-Skript (MQTT-Teil)**
 
 `deploy/render.sh`:
 
@@ -162,23 +164,52 @@ RC_PASS=$(op read "$ITEM/rc-plus-01")
 
 printf 'SUCHLAGE_BIND_IP=%s\nMQTT_TOOL_PASS=%s\n' "$SUCHLAGE_BIND_IP" "$TOOL_PASS" > .env
 docker run --rm -v "$PWD/mosquitto:/m" eclipse-mosquitto:2.0.22 sh -c \
-  "mosquitto_passwd -b -c /m/passwd suchlage $TOOL_PASS && mosquitto_passwd -b /m/passwd rc-plus-01 $RC_PASS && chmod 0644 /m/passwd"
+  "rm -f /m/passwd && mosquitto_passwd -b -c /m/passwd suchlage $TOOL_PASS && mosquitto_passwd -b /m/passwd rc-plus-01 $RC_PASS && chmod 0644 /m/passwd"
 ```
 
 `chmod +x deploy/render.sh`
 
-- [ ] **Step 6: Smoke-Test schreiben (MQTT-Teil)**
+> **Abweichung (Ausführung 16.10.2026):** `rm -f /m/passwd` vor `-c`. Sonst warnt `mosquitto_passwd` bei jedem erneuten Rendern über die 0644-Datei vom letzten Lauf. Der Broker selbst warnt weiter („world readable … Future versions will refuse"); 0644 bleibt nötig, weil Mosquitto die root-eigene Datei im ro-Mount als Benutzer `mosquitto` lesen muss. Vor einem Mosquitto-Upgrade klären (M1).
+
+- [x] **Step 6: Smoke-Test schreiben (MQTT-Teil)**
 
 `deploy/smoke.sh`:
+
+> **Abweichung (Ausführung 16.10.2026):** Der Smoke-Test läuft gegen eine `op`-Attrappe statt gegen 1Password. `op` wartet bei jedem Aufruf auf eine Freigabe per Touch ID; ohne Mensch am Rechner bricht es mit „authorization timeout" ab. Außerdem soll ein Test nicht bei jedem Lauf den echten DJI App Key in lokale Dateien schreiben. Die Attrappe beantwortet `op read` und `op inject` mit Testwerten, die je Referenz deterministisch sind, weil `render.sh` und `smoke.sh` dieselben Felder getrennt lesen. `render.sh` bleibt unverändert und wird mit echtem `op` erst in Task 5 benutzt. Weitere Änderungen: Hilfsdateien in einem `mktemp -d`-Verzeichnis statt `/tmp/suchlage-*`, `docker compose --progress quiet` für lesbare Ausgabe, und der ACL-Test leitet nur stdout in die Prüfdatei, weil `mosquitto_sub -W` bei Zeitüberschreitung „Timed out" auf stderr schreibt und die Prüfung sonst immer scheitert.
 
 ```sh
 #!/bin/sh
 # Lokaler Ende-zu-Ende-Test des Spike-Stacks. Startet den Stack auf 127.0.0.1 und prüft jeden Baustein.
+# Läuft gegen Testgeheimnisse (op-Attrappe), nie gegen 1Password: kein Freigabedialog, keine echten DJI-Schlüssel in lokalen Dateien.
 set -u
 cd "$(dirname "$0")"
 export SUCHLAGE_BIND_IP=127.0.0.1
-./render.sh
-dc() { docker compose "$@"; }
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+# op-Attrappe: `op read <ref>` und `op inject -f -i <in> -o <out>`; Wert deterministisch je Referenz,
+# damit render.sh und smoke.sh unabhängig voneinander dieselben Geheimnisse sehen.
+cat > "$TMP/op" <<'EOF'
+#!/bin/sh
+set -eu
+val() { printf 'test%s' "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+case $1 in
+  read) val "$2" ;;
+  inject)
+    shift; in= out=
+    while [ $# -gt 0 ]; do case $1 in -i) in=$2; shift ;; -o) out=$2; shift ;; esac; shift; done
+    cp "$in" "$out"
+    grep -o '{{ op://[^ ]* }}' "$in" | sort -u | while read -r _ ref _; do
+      sed -i.bak "s|{{ $ref }}|$(val "$ref")|g" "$out" && rm -f "$out.bak"
+    done ;;
+  *) echo "op-Attrappe: $1 nicht unterstützt" >&2; exit 2 ;;
+esac
+EOF
+chmod +x "$TMP/op"
+export PATH="$TMP:$PATH"
+
+./render.sh || { echo "FAIL render.sh"; exit 1; }
+dc() { docker compose --progress quiet "$@"; }
 FAIL=0
 check() { if [ "$1" = 0 ]; then echo "ok   $2"; else echo "FAIL $2"; FAIL=1; fi; }
 TOOL_PASS=$(op read op://DRK/suchlage-mqtt/suchlage)
@@ -209,9 +240,9 @@ after=$(cat ../records/*.jsonl | wc -l)
 [ $((after - before)) -eq 1 ]; check $? "mehrzeiliger Payload = eine Mitschnittzeile"
 
 # ACL: rc-plus-01 darf nicht außerhalb seiner Topics publizieren
-( sub_one suchlage "$TOOL_PASS" foo/bar > /tmp/suchlage-acl.out 2>&1 ) &
+( sub_one suchlage "$TOOL_PASS" foo/bar > "$TMP/acl.out" 2>/dev/null ) &
 sleep 1; pub rc-plus-01 "$RC_PASS" foo/bar verboten; wait
-[ ! -s /tmp/suchlage-acl.out ]; check $? "ACL blockt fremde Topics"
+[ ! -s "$TMP/acl.out" ]; check $? "ACL blockt fremde Topics"
 
 # Broker-Neustart: Mitschnitt läuft weiter (Review Focus 4)
 dc restart mqtt; sleep 3
@@ -227,15 +258,17 @@ exit $FAIL
 
 `chmod +x deploy/smoke.sh`
 
-- [ ] **Step 7: Smoke-Test laufen lassen**
+- [x] **Step 7: Smoke-Test laufen lassen**
 
 Run: `deploy/smoke.sh`
 Expected: alle Zeilen `ok`, Exit 0. Falls „Mitschnitt überlebt Broker-Neustart" scheitert: `mosquitto_sub` endet beim Verbindungsabbruch, `restart: unless-stopped` startet ihn neu – dann im Test nach `dc restart mqtt` zusätzlich `sleep 5` und erneut prüfen; scheitert es weiter, `dc logs recorder` ansehen.
 
-- [ ] **Step 8: Commit**
+> **Befund (Ausführung 16.10.2026):** `mosquitto_sub` 2.0.22 verbindet sich nach dem Broker-Neustart selbst neu und schreibt in dieselbe Datei weiter; eine neue Datei entsteht nur, wenn der Container neu startet. `-F '%j'` liefert den Payload wie erwartet als escapten String (`"payload":"{\"a\":\n1}"`), also genau eine Zeile je Nachricht.
+
+- [x] **Step 8: Commit**
 
 ```bash
-git add .gitignore deploy/compose.yaml deploy/mosquitto deploy/tools/Dockerfile deploy/render.sh deploy/smoke.sh
+git add .gitignore deploy/compose.yaml deploy/mosquitto/mosquitto.conf deploy/mosquitto/acl deploy/tools/Dockerfile deploy/render.sh deploy/smoke.sh
 git commit -m "M0: MQTT-Broker mit Mitschnitt und Smoke-Test"
 ```
 

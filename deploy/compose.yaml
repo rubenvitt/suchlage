@@ -1,0 +1,17 @@
+name: suchlage
+
+services:
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    ports: ["${SUCHLAGE_BIND_IP:?}:1883:1883"]
+    volumes: ["./mosquitto:/mosquitto/config:ro"]
+    restart: unless-stopped
+
+  recorder:
+    build: ./tools
+    depends_on: [mqtt]
+    environment: { MQTT_TOOL_PASS: "${MQTT_TOOL_PASS:?}" }
+    # %j: eine JSON-Zeile je Nachricht inkl. Zeitstempel, Payload als escapter String; neue Datei je Start, nichts wird überschrieben
+    command: ["sh", "-c", "exec mosquitto_sub -h mqtt -u suchlage -P \"$$MQTT_TOOL_PASS\" -t 'thing/#' -t 'sys/#' -F '%j' >> /records/$$(date -u +%Y%m%dT%H%M%SZ).jsonl"]
+    volumes: ["../records:/records"]
+    restart: unless-stopped

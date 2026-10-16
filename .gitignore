@@ -5,3 +5,8 @@ dist
 .DS_Store
 *.log
 data/
+deploy/.env
+deploy/mosquitto/passwd
+deploy/mediamtx.yml
+deploy/pilot/config.js
+records/
