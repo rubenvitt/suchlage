@@ -2,4 +2,5 @@
 
 pub mod record;
 pub mod topic;
+pub mod translate;
 pub mod wire;
