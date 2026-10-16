@@ -22,3 +22,15 @@ services:
     environment: { MQTT_TOOL_PASS: "${MQTT_TOOL_PASS:?}" }
     command: ["/tools/topo-responder.sh"]
     restart: unless-stopped
+
+  media:
+    image: bluenviron/mediamtx:1.21.2
+    ports:
+      - "${SUCHLAGE_BIND_IP:?}:1935:1935"
+      - "${SUCHLAGE_BIND_IP:?}:8888:8888"
+      - "${SUCHLAGE_BIND_IP:?}:8889:8889"
+      - "${SUCHLAGE_BIND_IP:?}:8189:8189/udp"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ../records/video:/recordings
+    restart: unless-stopped

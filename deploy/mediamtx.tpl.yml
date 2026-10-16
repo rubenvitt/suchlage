@@ -1,0 +1,35 @@
+logLevel: info
+rtsp: no
+srt: no
+moq: no
+api: no
+rtmp: yes
+rtmpAddress: :1935
+hls: yes
+hlsAddress: :8888
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts: [__BIND_IP__]
+
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+      - action: playback
+  - user: pilot
+    pass: "{{ op://DRK/suchlage-mqtt/rtmp-pilot }}"
+    ips: []
+    permissions:
+      - action: publish
+
+pathDefaults:
+  record: yes
+  recordFormat: fmp4
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+
+paths:
+  all_others:

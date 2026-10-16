@@ -91,6 +91,30 @@ wait
 jq -e '.method=="live_start_push" and .data.url_type==1 and .data.video_id=="TEST/39-0-7/normal-0" and (.bid|length)>0' "$TMP/live.out" >/dev/null
 check $? "live_start_push hat das DJI-Format"
 
+dc up -d media
+RTMP_PASS=$(op read op://DRK/suchlage-mqtt/rtmp-pilot)
+push() { ffmpeg -loglevel error -re -f lavfi -i testsrc=size=640x360:rate=25 -t "$2" -c:v libx264 -preset ultrafast -g 25 -f flv "$1"; }
+# poll <sekunden> <befehl…>: wiederholt, bis der Befehl gelingt
+poll() { n=$1; shift; while [ "$n" -gt 0 ]; do "$@" && return 0; n=$((n - 1)); sleep 1; done; return 1; }
+# Erst wenn MediaMTX lauscht, beweisen die Ablehnungen unten etwas (sonst scheitert ffmpeg schon am Verbindungsaufbau)
+poll 10 curl -s -o /dev/null http://127.0.0.1:8888/; check $? "MediaMTX lauscht"
+
+# Publish ohne bzw. mit falschem Passwort wird abgelehnt (Review Focus 3)
+push "rtmp://127.0.0.1:1935/live/smoke" 2 2>/dev/null
+[ $? -ne 0 ]; check $? "RTMP ohne Passwort abgelehnt"
+push "rtmp://127.0.0.1:1935/live/smoke?user=pilot&pass=falsch" 2 2>/dev/null
+[ $? -ne 0 ]; check $? "RTMP mit falschem Passwort abgelehnt"
+
+# Gültiger Publish ist per HLS abrufbar und wird aufgezeichnet
+push "rtmp://127.0.0.1:1935/live/smoke?user=pilot&pass=$RTMP_PASS" 15 &
+# -L: MediaMTX 1.21 leitet die erste HLS-Anfrage für einen Cookie-Test einmal um (302 auf ?cookieCheck=1)
+hls_ok() { curl -sfL http://127.0.0.1:8888/live/smoke/index.m3u8 | grep -q EXTM3U; }
+poll 12 hls_ok; check $? "HLS liefert Playlist"
+curl -sf -o /dev/null http://127.0.0.1:8889/live/smoke; check $? "WebRTC-Player erreichbar"
+wait
+sleep 2
+ls ../records/video/live/smoke/*.mp4 >/dev/null 2>&1; check $? "Aufzeichnung liegt vor"
+
 # --- weitere Prüfungen folgen in Task 2–4 ---
 
 dc down

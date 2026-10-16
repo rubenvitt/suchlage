@@ -401,12 +401,16 @@ git commit -m "M0: update_topo-Responder und Live-Befehle"
 - Consumes: 1Password-Feld `op://DRK/suchlage-mqtt/rtmp-pilot`, `SUCHLAGE_BIND_IP`.
 - Produces: RTMP-Ingest `rtmp://<BIND_IP>:1935/live/<name>?user=pilot&pass=<rtmp-pilot>`; WebRTC-Player `http://<BIND_IP>:8889/live/<name>`; HLS `http://<BIND_IP>:8888/live/<name>/index.m3u8`; Aufzeichnung unter `records/video/live/<name>/`.
 
-- [ ] **Step 1: Failing Tests in `smoke.sh` ergänzen** (vor `# --- weitere Prüfungen folgen`)
+- [x] **Step 1: Failing Tests in `smoke.sh` ergänzen** (vor `# --- weitere Prüfungen folgen`)
 
 ```sh
-dc up -d media; sleep 2
+dc up -d media
 RTMP_PASS=$(op read op://DRK/suchlage-mqtt/rtmp-pilot)
 push() { ffmpeg -loglevel error -re -f lavfi -i testsrc=size=640x360:rate=25 -t "$2" -c:v libx264 -preset ultrafast -g 25 -f flv "$1"; }
+# poll <sekunden> <befehl…>: wiederholt, bis der Befehl gelingt
+poll() { n=$1; shift; while [ "$n" -gt 0 ]; do "$@" && return 0; n=$((n - 1)); sleep 1; done; return 1; }
+# Erst wenn MediaMTX lauscht, beweisen die Ablehnungen unten etwas (sonst scheitert ffmpeg schon am Verbindungsaufbau)
+poll 10 curl -s -o /dev/null http://127.0.0.1:8888/; check $? "MediaMTX lauscht"
 
 # Publish ohne bzw. mit falschem Passwort wird abgelehnt (Review Focus 3)
 push "rtmp://127.0.0.1:1935/live/smoke" 2 2>/dev/null
@@ -415,21 +419,27 @@ push "rtmp://127.0.0.1:1935/live/smoke?user=pilot&pass=falsch" 2 2>/dev/null
 [ $? -ne 0 ]; check $? "RTMP mit falschem Passwort abgelehnt"
 
 # Gültiger Publish ist per HLS abrufbar und wird aufgezeichnet
-push "rtmp://127.0.0.1:1935/live/smoke?user=pilot&pass=$RTMP_PASS" 12 &
-sleep 8
-curl -sf http://127.0.0.1:8888/live/smoke/index.m3u8 | grep -q EXTM3U; check $? "HLS liefert Playlist"
+push "rtmp://127.0.0.1:1935/live/smoke?user=pilot&pass=$RTMP_PASS" 15 &
+# -L: MediaMTX 1.21 leitet die erste HLS-Anfrage für einen Cookie-Test einmal um (302 auf ?cookieCheck=1)
+hls_ok() { curl -sfL http://127.0.0.1:8888/live/smoke/index.m3u8 | grep -q EXTM3U; }
+poll 12 hls_ok; check $? "HLS liefert Playlist"
 curl -sf -o /dev/null http://127.0.0.1:8889/live/smoke; check $? "WebRTC-Player erreichbar"
 wait
 sleep 2
 ls ../records/video/live/smoke/*.mp4 >/dev/null 2>&1; check $? "Aufzeichnung liegt vor"
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag sehen**
+> **Abweichung (Ausführung 16.10.2026):**
+> - Neue Prüfung „MediaMTX lauscht" vor den Ablehnungstests. Ohne sie bestehen „RTMP ohne/mit falschem Passwort abgelehnt" auch dann, wenn MediaMTX gar nicht läuft (ffmpeg scheitert dann an „Connection refused"). Das war im Fehlschlag-Lauf in Step 2 genau so zu sehen.
+> - HLS-Abruf mit `curl -L` und Poll-Schleife statt `sleep 8`. MediaMTX 1.21.2 beantwortet die erste HLS-Anfrage mit `302` auf `?cookieCheck=1` und setzt dabei ein `Secure`-Cookie; ohne `-L` scheitert die Prüfung immer. Für M1 merken: HLS über Cloudflare/Traefik muss diese Umleitung durchreichen.
+> - Gültiger Testpush 15 s statt 12 s, damit die Poll-Schleife (max. 12 s) und der WebRTC-Abruf sicher in den laufenden Stream fallen.
+
+- [x] **Step 2: Test laufen lassen, Fehlschlag sehen**
 
 Run: `deploy/smoke.sh`
 Expected: `no such service: media` bzw. `FAIL` bei den Video-Prüfungen.
 
-- [ ] **Step 3: MediaMTX-Vorlage**
+- [x] **Step 3: MediaMTX-Vorlage**
 
 `deploy/mediamtx.tpl.yml`:
 
@@ -437,6 +447,7 @@ Expected: `no such service: media` bzw. `FAIL` bei den Video-Prüfungen.
 logLevel: info
 rtsp: no
 srt: no
+moq: no
 api: no
 rtmp: yes
 rtmpAddress: :1935
@@ -470,14 +481,16 @@ paths:
   all_others:
 ```
 
-- [ ] **Step 4: Render-Skript ergänzen** (ans Ende von `deploy/render.sh`)
+> **Abweichung (Ausführung 16.10.2026):** `moq: no` ergänzt. MediaMTX 1.21.2 startet sonst zusätzlich einen MoQ-Server auf 8892/8893 (TCP/UDP) und erzeugt dafür ein Zertifikat. Die übrigen Schlüssel der Vorlage hat MediaMTX 1.21.2 ohne Fehler geladen.
+
+- [x] **Step 4: Render-Skript ergänzen** (ans Ende von `deploy/render.sh`)
 
 ```sh
 op inject -f -i mediamtx.tpl.yml -o mediamtx.yml >/dev/null
 sed -i.bak "s/__BIND_IP__/$SUCHLAGE_BIND_IP/g" mediamtx.yml && rm -f mediamtx.yml.bak
 ```
 
-- [ ] **Step 5: Service in `compose.yaml` ergänzen**
+- [x] **Step 5: Service in `compose.yaml` ergänzen**
 
 ```yaml
   media:
@@ -493,12 +506,12 @@ sed -i.bak "s/__BIND_IP__/$SUCHLAGE_BIND_IP/g" mediamtx.yml && rm -f mediamtx.ym
     restart: unless-stopped
 ```
 
-- [ ] **Step 6: Tests laufen lassen**
+- [x] **Step 6: Tests laufen lassen**
 
 Run: `deploy/smoke.sh`
 Expected: alle Zeilen `ok`. Scheitert „RTMP ohne Passwort abgelehnt", prüfen, ob `authInternalUsers` die `any`-Zeile ohne `publish` hat; `docker compose logs media` zeigt die Auth-Entscheidung.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add deploy/mediamtx.tpl.yml deploy/compose.yaml deploy/render.sh deploy/smoke.sh
