@@ -18,7 +18,13 @@ export const queryKeys = {
   kioskTokens: ['kiosk-tokens'] as const,
 };
 
-/** 401 ist kein Fehler, sondern „nicht angemeldet“: `null`. */
+/** Abstand der Selbstheilung, solange `/api/me` noch nie geantwortet hat. */
+export const ME_RETRY_MS = 5_000;
+
+/**
+ * 401 ist kein Fehler, sondern „nicht angemeldet“: `null`. Scheitert schon der erste Abruf, fragt
+ * die Abfrage alle `ME_RETRY_MS` neu: Das Großbild hat keine Bedienung und muss sich selbst fangen.
+ */
 export function useMe() {
   return useQuery({
     queryKey: queryKeys.me,
@@ -31,6 +37,7 @@ export function useMe() {
       }
     },
     staleTime: 60_000,
+    refetchInterval: (q) => (q.state.status === 'error' && q.state.data === undefined ? ME_RETRY_MS : false),
   });
 }
 

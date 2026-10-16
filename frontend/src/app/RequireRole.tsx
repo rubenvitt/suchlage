@@ -1,12 +1,12 @@
 import { Button } from 'antd';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useLocation } from 'react-router';
-import { useMe } from '../api/queries';
+import { ME_RETRY_MS, useMe } from '../api/queries';
 import type { Role } from '../contract/generated/Role';
 
 /** Schranke für angemeldete Seiten: ohne Sitzung zur Anmeldung, mit falscher Rolle ein Hinweis. */
 export function RequireRole({ roles, children }: { roles: Role[]; children: ReactNode }) {
-  const { data: me, isPending, isError, isFetching, refetch } = useMe();
+  const { data: me, isPending, isLoadingError, isFetching, refetch } = useMe();
   const location = useLocation();
   if (isPending) {
     return (
@@ -15,11 +15,12 @@ export function RequireRole({ roles, children }: { roles: Role[]; children: Reac
       </p>
     );
   }
-  if (isError) {
+  // Nur ohne Daten: Ein gescheiterter Hintergrund-Abruf darf die laufende Lage nicht aushängen.
+  if (isLoadingError) {
     return (
       <div className="sl-center">
         <section className="sl-card" role="alert">
-          <p>Server nicht erreichbar. Ohne Server lässt sich die Anmeldung nicht prüfen.</p>
+          <p>Server nicht erreichbar. Neuer Versuch in {ME_RETRY_MS / 1000} s.</p>
           <Button loading={isFetching} onClick={() => void refetch()}>
             Erneut versuchen
           </Button>

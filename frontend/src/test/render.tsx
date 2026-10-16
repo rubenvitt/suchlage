@@ -6,7 +6,8 @@ import { ThemeModeProvider } from '../theme/ThemeModeProvider';
 
 /**
  * Rendert wie die App: Abfragen, Darstellung, Router. Die Hülle geht über `wrapper`, damit sie auch
- * `rerender` übersteht. Eine andere Rolle setzt der Test per `server.use(…/api/me…)`.
+ * `rerender` übersteht. Eine andere Rolle setzt der Test per `server.use(…/api/me…)`. `client` gibt
+ * Tests den Zugriff auf die Abfragen, etwa für einen Hintergrund-Abruf.
  */
 export function renderWithApp(ui: ReactElement, { route = '/' }: { route?: string } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -19,5 +20,5 @@ export function renderWithApp(ui: ReactElement, { route = '/' }: { route?: strin
       </QueryClientProvider>
     );
   }
-  return render(ui, { wrapper: Wrapper });
+  return { ...render(ui, { wrapper: Wrapper }), client };
 }
