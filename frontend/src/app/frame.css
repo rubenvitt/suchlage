@@ -1,0 +1,262 @@
+/* Rahmen und gemeinsame Hilfsklassen. Alle Farben kommen aus `--lfh-*`, alle Lifeline-Schriftgrößen
+   aus `--lfh-typo-*` (`theme/rollen.css` bleibt die eine Quelle). Bausteine bringen ihr eigenes CSS mit. */
+:root {
+  /* Die eine Handschrift (UI-Richtung): diagonale Schraffur für unsichere Werte. */
+  --sl-schraffur-verzoegert: repeating-linear-gradient(
+    135deg,
+    var(--lfh-achtung-fuellung) 0 6px,
+    transparent 6px 12px
+  );
+  --sl-schraffur-verloren: repeating-linear-gradient(
+    135deg,
+    var(--lfh-alarm-fuellung-stark) 0 6px,
+    transparent 6px 12px
+  );
+  /* Mobil 18 px: kein Lifeline-Token. Zwei Spalten auf 360 px brauchen Platz für „Rückkehr zum Startpunkt“. */
+  --sl-datenwert-mobil-groesse: 18px;
+}
+
+/* Grundschrift für alles außerhalb von antd-Bausteinen (Lifeline setzt sie über antds `App`, Suchlage hat keinen). */
+body {
+  margin: 0;
+  font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-groesse) var(--lfh-schrift-text);
+}
+
+.sl-frame {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  grid-template-rows: 52px 1fr;
+  height: 100dvh;
+  background: var(--lfh-grund);
+  color: var(--lfh-text);
+}
+.sl-frame[data-mode='kiosk'] {
+  grid-template-columns: 1fr;
+  cursor: none;
+}
+.sl-frame[data-mode='mobile'] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 48px 1fr 56px;
+}
+
+.sl-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--lfh-rahmen-grund);
+  border-bottom: 1px solid var(--lfh-rahmen-linie);
+  color: var(--lfh-rahmen-text);
+}
+.sl-head > * {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-right: 1px solid var(--lfh-rahmen-linie);
+}
+.sl-head > :last-child {
+  border-right: 0;
+}
+.sl-head .sl-mark {
+  width: 60px;
+  padding: 0;
+  justify-content: center;
+}
+.sl-head .sl-mark::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  background: var(--lfh-rahmen-marke);
+}
+.sl-head .sl-word {
+  font: var(--lfh-typo-seitentitel-gewicht) var(--lfh-typo-seitentitel-groesse) var(--lfh-schrift-display);
+  letter-spacing: 0.04em;
+}
+.sl-head .sl-status {
+  flex: 1;
+  gap: 12px;
+  min-width: 0;
+}
+.sl-head .sl-clock {
+  font: 500 var(--lfh-typo-text-groesse) var(--lfh-schrift-zahl);
+  font-variant-numeric: tabular-nums;
+}
+.sl-frame[data-mode='mobile'] .sl-head > * {
+  padding: 0 12px;
+}
+.sl-frame[data-mode='mobile'] .sl-head .sl-mark {
+  width: 48px;
+  padding: 0;
+}
+
+.sl-rail {
+  background: var(--lfh-rahmen-grund);
+  border-right: 1px solid var(--lfh-rahmen-linie);
+  display: flex;
+  flex-direction: column;
+}
+.sl-rail a {
+  height: 62px;
+  display: flex;
+  /* Spaltenrichtung: das Etikett bekommt die volle Breite und darf umbrechen. */
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 4px;
+  text-align: center;
+  color: var(--lfh-rahmen-gedaempft);
+  text-decoration: none;
+  font: var(--lfh-typo-rail-etikett-gewicht) var(--lfh-typo-rail-etikett-groesse) var(--lfh-schrift-text);
+  letter-spacing: var(--lfh-typo-rail-etikett-sperrung);
+  text-transform: uppercase;
+  /* „Einstellungen“ passt in Versalien nicht in 60 px: deutsche Silbentrennung statt Überlauf. */
+  hyphens: auto;
+  overflow-wrap: anywhere;
+  border-left: 2px solid transparent;
+}
+.sl-rail a:hover {
+  color: var(--lfh-rahmen-text);
+}
+.sl-rail a[aria-current='page'] {
+  background: var(--lfh-rahmen-aktiv);
+  color: var(--lfh-rahmen-text);
+  border-left-color: var(--lfh-rahmen-marke);
+}
+.sl-rail a:focus-visible,
+.sl-tabs a:focus-visible,
+.sl-user:focus-visible {
+  outline: 2px solid var(--lfh-bedien);
+  outline-offset: -2px;
+}
+
+.sl-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.sl-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--lfh-linie);
+  border-top: 1px solid var(--lfh-linie);
+}
+.sl-tabs a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--lfh-kopf);
+  color: var(--lfh-gedaempft);
+  text-decoration: none;
+  font: 600 13px var(--lfh-schrift-text);
+}
+.sl-tabs a[aria-current='page'] {
+  color: var(--lfh-text);
+  box-shadow: inset 0 2px 0 var(--lfh-rahmen-marke);
+}
+
+.sl-user {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  height: 100%;
+  min-width: 44px;
+}
+
+/* Einstiegsflächen ohne Rahmen: Anmeldung, Großbild-Kopplung, Hinweise der Rollen-Schranke. */
+.sl-center {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: var(--lfh-grund);
+  color: var(--lfh-text);
+  padding: 16px;
+  box-sizing: border-box;
+}
+.sl-card {
+  width: min(440px, 100%);
+  box-sizing: border-box;
+  background: var(--lfh-paneel);
+  border: 1px solid var(--lfh-linie);
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+.sl-card h1 {
+  margin: 0;
+  font: var(--lfh-typo-ueberschrift-gewicht) var(--lfh-typo-ueberschrift-groesse) var(--lfh-schrift-display);
+  letter-spacing: var(--lfh-typo-ueberschrift-sperrung);
+}
+.sl-card p {
+  margin: 0;
+  color: var(--lfh-text-2);
+  line-height: 1.5;
+}
+
+/* Gemeinsame Hilfsklassen für alle Seiten */
+.sl-page {
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+.sl-stack {
+  display: grid;
+  gap: 16px;
+}
+.sl-muted {
+  color: var(--lfh-gedaempft);
+  margin: 0;
+}
+.sl-ok {
+  margin: 0 0 8px;
+  color: var(--lfh-normal-text);
+}
+.sl-num {
+  font-family: var(--lfh-schrift-zahl);
+  font-variant-numeric: tabular-nums;
+}
+.sl-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.sl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-klein-groesse) var(--lfh-schrift-text);
+}
+.sl-table th {
+  text-align: left;
+  font: var(--lfh-typo-augenbraue-gewicht) var(--lfh-typo-augenbraue-groesse) var(--lfh-schrift-text);
+  letter-spacing: var(--lfh-typo-augenbraue-sperrung);
+  text-transform: uppercase;
+  color: var(--lfh-schwach);
+  padding: 8px;
+  border-bottom: 1px solid var(--lfh-linie-stark);
+  background: var(--lfh-kopf);
+}
+.sl-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--lfh-linie);
+  color: var(--lfh-text-2);
+}
+.sl-table tr:hover td {
+  background: var(--lfh-flaeche-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
