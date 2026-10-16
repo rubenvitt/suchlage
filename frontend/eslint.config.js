@@ -1,0 +1,23 @@
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
+
+export default tseslint.config(
+  { ignores: ['dist', 'node_modules', 'src/contract/generated', 'playwright-report', 'test-results'] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/^#[0-9a-fA-F]{3,8}$/]',
+          message: 'Farben nur aus src/theme (Farbrollen), keine Hex-Literale.',
+        },
+      ],
+    },
+  },
+  { files: ['src/theme/**', 'src/components/instrument/**'], rules: { 'no-restricted-syntax': 'off' } },
+);

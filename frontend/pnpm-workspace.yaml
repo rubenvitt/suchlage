@@ -1,0 +1,10 @@
+allowBuilds:
+  esbuild: true
+  msw: true
+
+# Eigene Bibliothek (github.com/rubenvitt/einsatzzeichen): exakte Ausnahme von der Karenzzeit,
+# wie in Lifeline. Nur exakte Versionen, keine Scope-Freigabe.
+minimumReleaseAgeExclude:
+  - '@einsatzzeichen/core@6.4.0'
+  - '@einsatzzeichen/maplibre@6.4.0'
+  - '@einsatzzeichen/schema@6.4.0'
