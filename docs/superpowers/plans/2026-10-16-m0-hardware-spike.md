@@ -693,6 +693,12 @@ Manuelle Schritte mit Ruben; kein neuer Code. Ergebnis wird im Protokoll (Task 6
 - Consumes: `deploy/` komplett, `render.sh`.
 - Produces: laufender Stack unter `<vserver-tailscale-ip>`; RC Plus im Tailnet mit Tag `tag:suchlage-rc`.
 
+- [ ] **Step 0: Aktuelle Tailnet-Policy prüfen – Blocker**
+
+Tailscale-ACLs kennen nur Erlauben, kein Verbieten. Steht in der Policy noch die Default-Regel `{"action": "accept", "src": ["*"], "dst": ["*:*"]}`, erreichen RC Plus und vServer (beide von anderen mitbenutzt) alle privaten Geräte im Tailnet und umgekehrt. Außerdem liefert Port 8080 `config.js` mit App Key, License und Passwörtern an jeden, der ihn erreicht.
+
+Erst weiter, wenn die Allow-all-Regel durch gezielte Regeln für die bestehenden Geräte (inkl. Exit-Node-Nutzung) ersetzt ist. Wie sie ersetzt wird, entscheidet Ruben.
+
 - [ ] **Step 1: Tailnet-ACL ergänzen** (Tailscale-Admin → Access Controls)
 
 ```jsonc
@@ -708,7 +714,7 @@ Manuelle Schritte mit Ruben; kein neuer Code. Ergebnis wird im Protokoll (Task 6
 ]
 ```
 
-Bestehende ACL-Regeln nicht entfernen; nur ergänzen. Falls die Policy noch die Default-„allow all"-Regel hat, bleibt sie – dann greift die Isolation der RC Plus erst, wenn diese Regel enger wird. Das im Protokoll notieren.
+Bestehende Regeln nicht entfernen, nur ergänzen. Mit der Prüfung aus Step 0 greift die Isolation der RC Plus tatsächlich.
 
 - [ ] **Step 2: vServer ins Tailnet**
 
@@ -733,6 +739,14 @@ SUCHLAGE_BIND_IP=127.0.0.1 deploy/render.sh   # lokale Dateien wieder auf Testwe
 ssh <vserver> "ss -tulnp | grep -E ':(1883|1935|8080|8888|8889|8189)\b'"
 ```
 Expected: jede Zeile bindet an `<ip>` (100.x), keine an `0.0.0.0`, `[::]` oder die öffentliche IP.
+
+Neustart-Probe: `ssh <vserver> 'sudo reboot'`, danach `docker compose ps` und die `ss`-Zeile erneut. Startet Docker vor `tailscaled`, scheitern die Port-Bindungen mit „cannot assign requested address" und `restart: unless-stopped` hilft nicht. Dann einen Systemd-Override setzen:
+
+```bash
+ssh <vserver> 'sudo mkdir -p /etc/systemd/system/docker.service.d && printf "[Unit]\nAfter=tailscaled.service\nWants=tailscaled.service\n" | sudo tee /etc/systemd/system/docker.service.d/after-tailscale.conf && sudo systemctl daemon-reload'
+```
+
+und die Probe wiederholen.
 
 - [ ] **Step 5: Gegenprobe aus dem Tailnet (Mac)**
 
@@ -767,8 +781,11 @@ Tailscale-APK auf der RC Plus installieren (Play Store, falls vorhanden; sonst A
 - Netz: LTE über … / WLAN …
 
 ## F1 Lizenzprüfung
-- [ ] Mit Internet: „Verbinden" → `platformVerifyLicense: ok`?
-- [ ] Ohne Internet (LTE am Router aus, RC Plus nur im lokalen WLAN – Tailscale braucht dann einen lokalen Weg, sonst als „nicht testbar in M0" vermerken)
+Die Lizenzprüfung läuft in Pilot 2 und braucht unseren Server nicht. Für den Offline-Test reicht ein Laptop, der `deploy/pilot/` ausliefert (`cd deploy/pilot && python3 -m http.server 8080`), in einem WLAN ohne Uplink (Hotspot mit abgeschaltetem Mobilfunk). Reihenfolge einhalten, um „braucht Internet" von „merkt sich die erste Online-Prüfung" zu trennen:
+
+- [ ] 1. Mit Internet: „Verbinden" → `platformVerifyLicense: ok`?
+- [ ] 2. RC Plus neu starten, ins WLAN ohne Uplink, Seite unter `http://<laptop-ip>:8080/` öffnen, „Verbinden" → Ergebnis?
+- [ ] 3. Falls 2 klappt: Pilot-2-Daten löschen bzw. App neu installieren ist **nicht** nötig – Ergebnis „funktioniert nach einmaliger Online-Prüfung" reicht für die Entscheidung.
 - Ergebnis:
 
 ## F2 Tailscale auf der RC Plus
