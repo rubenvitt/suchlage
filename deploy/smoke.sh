@@ -115,7 +115,11 @@ wait
 sleep 2
 ls ../records/video/live/smoke/*.mp4 >/dev/null 2>&1; check $? "Aufzeichnung liegt vor"
 
-# --- weitere Prüfungen folgen in Task 2–4 ---
+dc up -d pilot; sleep 1
+curl -sf http://127.0.0.1:8080/ | grep -q "Suchlage"; check $? "Pilot-Seite erreichbar"
+curl -sf http://127.0.0.1:8080/config.js | grep -q "tcp://127.0.0.1:1883"; check $? "config.js gerendert"
+[ -f pilot/config.js ] && ! grep -q "op://" pilot/config.js; check $? "keine offenen op://-Referenzen"
+node --test pilot/ >/dev/null 2>&1; check $? "pilot.js-Unit-Tests"
 
 dc down
 exit $FAIL

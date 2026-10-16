@@ -532,7 +532,7 @@ git commit -m "M0: Video-Ingest mit MediaMTX, Auth und Aufzeichnung"
 
 DJI-JSBridge-Referenz (aus `dji-sdk/Cloud-API-Doc`, `60.api-reference/10.pilot-to-cloud/30.jsbridge.md`): Jede Funktion liefert einen JSON-String `{code, message, data}`, `code === 0` heißt Erfolg. `platformLoadComponent('thing', {host: 'tcp://…', username, password, connectCallback})`, `platformLoadComponent('liveshare', {videoPublishType, statusCallback})`; Callbacks werden als Name einer globalen Funktion übergeben. `liveshareSetConfig(2, '{"url": "rtmp://…"}')` (Typ 2 = RTMP), danach `liveshareStartLive()`.
 
-- [ ] **Step 1: Failing Test schreiben**
+- [x] **Step 1: Failing Test schreiben**
 
 `deploy/pilot/pilot.test.mjs`:
 
@@ -590,12 +590,12 @@ test("startManualLive sets RTMP config and starts", () => {
 });
 ```
 
-- [ ] **Step 2: Test laufen lassen, Fehlschlag sehen**
+- [x] **Step 2: Test laufen lassen, Fehlschlag sehen**
 
 Run: `node --test deploy/pilot/`
 Expected: FAIL mit `Cannot find module …/pilot.js`.
 
-- [ ] **Step 3: `pilot.js` schreiben**
+- [x] **Step 3: `pilot.js` schreiben**
 
 ```js
 // Spike-Anmeldeseite für DJI Pilot 2 (M0). Wird in M1 durch die Seite des Rust-Servers ersetzt.
@@ -630,12 +630,12 @@ export function startManualLive(cfg, bridge, log) {
 }
 ```
 
-- [ ] **Step 4: Test laufen lassen**
+- [x] **Step 4: Test laufen lassen**
 
 Run: `node --test deploy/pilot/`
 Expected: 3 Tests PASS.
 
-- [ ] **Step 5: Seite und Konfigurationsvorlage**
+- [x] **Step 5: Seite und Konfigurationsvorlage**
 
 `deploy/pilot/index.html`:
 
@@ -689,7 +689,7 @@ export default {
 };
 ```
 
-- [ ] **Step 6: Render, Compose, Smoke ergänzen**
+- [x] **Step 6: Render, Compose, Smoke ergänzen**
 
 Ans Ende von `deploy/render.sh`:
 
@@ -714,16 +714,20 @@ In `deploy/smoke.sh` (vor `# --- weitere Prüfungen folgen`):
 dc up -d pilot; sleep 1
 curl -sf http://127.0.0.1:8080/ | grep -q "Suchlage"; check $? "Pilot-Seite erreichbar"
 curl -sf http://127.0.0.1:8080/config.js | grep -q "tcp://127.0.0.1:1883"; check $? "config.js gerendert"
-! grep -q "op://" pilot/config.js; check $? "keine offenen op://-Referenzen"
+[ -f pilot/config.js ] && ! grep -q "op://" pilot/config.js; check $? "keine offenen op://-Referenzen"
 node --test pilot/ >/dev/null 2>&1; check $? "pilot.js-Unit-Tests"
 ```
 
-- [ ] **Step 7: Alles laufen lassen**
+> **Abweichung (Ausführung 16.10.2026):** Die Prüfung „keine offenen op://-Referenzen" verlangt zusätzlich, dass `pilot/config.js` existiert. Im Fehlschlag-Lauf bestand sie sonst, obwohl die Datei fehlte (`grep` auf eine fehlende Datei endet mit 2, `!` macht daraus Erfolg). Die Smoke-Prüfungen wurden vor Seite, Vorlage, Render-Schritt und Compose-Service eingefügt und schlugen zuerst fehl („no such service: pilot").
+>
+> **Befund:** `node --test deploy/pilot/` findet die Testdatei in Node 26 auch mit Verzeichnisargument. nginx liefert das ganze Verzeichnis aus, also auch `config.tpl.js` (nur `op://`-Referenzen) und `pilot.test.mjs`; für den Spike unkritisch, in M1 entfällt nginx.
+
+- [x] **Step 7: Alles laufen lassen**
 
 Run: `deploy/smoke.sh`
 Expected: alle Zeilen `ok`, Exit 0.
 
-- [ ] **Step 8: Datenschutz-Check und Commit**
+- [x] **Step 8: Datenschutz-Check und Commit**
 
 ```bash
 "$DATENSCHUTZ_CHECK" .   # Datenschutz-Check des dev-projekt-Skills (Exit 1 blockt)

@@ -34,3 +34,9 @@ services:
       - ./mediamtx.yml:/mediamtx.yml:ro
       - ../records/video:/recordings
     restart: unless-stopped
+
+  pilot:
+    image: nginx:1.30.6-alpine
+    ports: ["${SUCHLAGE_BIND_IP:?}:8080:80"]
+    volumes: ["./pilot:/usr/share/nginx/html:ro"]
+    restart: unless-stopped
