@@ -1,5 +1,9 @@
 node_modules
-dist
+frontend/dist/*
+!frontend/dist/.gitkeep
+target/
+frontend/test-results/
+frontend/playwright-report/
 *.local
 .env*
 .DS_Store

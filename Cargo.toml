@@ -1,0 +1,54 @@
+[package]
+name = "suchlage"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+default-run = "suchlage"
+
+[features]
+default = []
+# Anmeldung ohne OIDC und Seed für die lokale Entwicklung. Niemals im Release-Build oder Image.
+dev = []
+
+[dependencies]
+axum = "0.8"
+axum-extra = { version = "0.12", features = ["cookie"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures = "0.3"
+sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "migrate"] }
+# SQLite ist eingebacken: ein SQLite-CVE schließt nur ein Crate-Bump.
+libsqlite3-sys = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Kein TLS: MQTT läuft im VPN (Spec §6); ein zweiter rustls-Stack bräche den CryptoProvider.
+rumqttc = { version = "0.25", default-features = false }
+# Ohne Default-Features: sonst zöge oauth2 einen eigenen reqwest-Stack herein (Lifeline B.6).
+openidconnect = { version = "4", default-features = false }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
+rust-embed = "8"
+mime_guess = "2"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["trace", "catch-panic", "request-id", "set-header", "limit"] }
+ts-rs = "12"
+sha2 = "0.11"
+hex = "0.4"
+getrandom = "0.3"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+time = "0.3"
+bytes = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+http-body-util = "0.1"
+tempfile = "3"
+
+[profile.dev]
+debug = "line-tables-only"
+[profile.dev.package."*"]
+debug = false
