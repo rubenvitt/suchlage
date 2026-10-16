@@ -33,7 +33,7 @@ Personensuche bleibt das Zielbild (Sektoren, Abdeckung, Hinweise, Export für di
 
 ```
 RC Plus / Pilot 2 ──MQTT──▶ Mosquitto ─▶ ┌────────────── Suchlage-Server (Rust) ──────────────┐
-        │                               │ DJI-Adapter ─▶ Lage-Kern ─▶ WebSocket ─▶ Browser    │
+        │                               │ DJI-Adapter ─▶ Lage-Kern ─▶ SSE ─▶ Browser          │
         │                               │                    │                                │
         │                               │                 SQLite                              │
         └───────RTMP────▶ MediaMTX ─────┼──── WebRTC (WHEP) ───────────────────────▶ Browser │
@@ -43,7 +43,7 @@ RC Plus / Pilot 2 ──MQTT──▶ Mosquitto ─▶ ┌───────�
 | Baustein | Verantwortung | kennt DJI? |
 |---|---|---|
 | **DJI-Adapter** | H5-Anmeldeseite für Pilot 2 (Lizenzprüfung per JSBridge, MQTT-Zugangsdaten je Gerät); DJI-Topics abonnieren und in eigene Ereignisse übersetzen; Livestream starten/stoppen, Linse wechseln; rohe MQTT-Sitzungen mitschneiden | **ja, als einziger** |
-| **Lage-Kern** | Flugerkennung (Start/Landung), Spur, Live-Zustand, Verbindungsfrische; verteilt Zustand per WebSocket | nein |
+| **Lage-Kern** | Flugerkennung (Start/Landung), Spur, Live-Zustand, Verbindungsfrische; verteilt Zustand per SSE (ADR 0001) | nein |
 | **Speicher** | SQLite: Geräte, Flüge, Spurpunkte, Mitschnitt-Index | nein |
 | **MediaMTX** | RTMP-Ingest, WebRTC/WHEP an Browser, HLS als Rückfall, Aufzeichnung je Flug | nein |
 | **Web-UI** | React-SPA, eingebettet in die Server-Binärdatei | nein |
@@ -73,7 +73,7 @@ Betrieb: Docker Compose (Suchlage-Server, Mosquitto, MediaMTX) hinter dem vorhan
 
 - Kein Port des Servers ist direkt aus dem Internet erreichbar. Mosquitto (MQTT, `tcp://`) und MediaMTX-Ingest (RTMP) lauschen nur im VPN; die Transportverschlüsselung leistet WireGuard.
 - MQTT-Broker: Zugangsdaten je Fernsteuerung, ACL nur auf die eigenen Topics.
-- Pilot-Anmeldeseite, API und WebSocket laufen über Traefik/Cloudflare mit öffentlichem Zertifikat.
+- Pilot-Anmeldeseite, API und SSE laufen über Traefik/Cloudflare mit öffentlichem Zertifikat.
 - Zuschauer im VPN bekommen WebRTC (1–2 s); Zuschauer ohne VPN (z. B. mobil) HLS über Cloudflare (etwa 5–10 s).
 - Web-UI nur nach Pocket-ID-Anmeldung; Großbild über widerrufbaren Zugangstoken.
 - DJI App-ID, App-Key und License liegen im Passwortmanager und als Secret im Betrieb, nie im Repo.
@@ -83,7 +83,7 @@ Betrieb: Docker Compose (Suchlage-Server, Mosquitto, MediaMTX) hinter dem vorhan
 | # | Inhalt | Abnahme |
 |---|---|---|
 | **M0 Hardware-Spike** | DJI-Entwickler-App (Typ Cloud API) anlegen; auf dem vServer Mosquitto, MediaMTX und eine minimale Pilot-Anmeldeseite (fast nur Konfiguration); ein Testflug mit Mitschnitt | Fragen F1–F5 beantwortet, Mitschnitte und kurzes Protokoll liegen vor |
-| **M1 Live-Lage** | Rust-Server (Adapter, Lage-Kern, WebSocket, SQLite, Pocket ID), UI im Lifeline-Design (Arbeitsplatz, Großbild, mobil), Video, Aufzeichnung, Flugliste, Simulator aus M0-Mitschnitten; Betrieb auf dem vServer | echter Flug: Position und Bild im FüKw und mobil sichtbar, Flug danach vollständig in der Liste; Verzögerung gemessen, Ziel ≤ 3 s über LTE |
+| **M1 Live-Lage** | Rust-Server (Adapter, Lage-Kern, SSE, SQLite, Pocket ID), UI im Lifeline-Design (Arbeitsplatz, Großbild, mobil), Video, Aufzeichnung, Flugliste, Simulator aus M0-Mitschnitten; Betrieb auf dem vServer | echter Flug: Position und Bild im FüKw und mobil sichtbar, Flug danach vollständig in der Liste; Verzögerung gemessen, Ziel ≤ 3 s über LTE |
 | **M2 Kartenelemente** | Punkte und Flächen zwischen Browser und Pilot 2 in beide Richtungen abgleichen | Fläche im FüKw gezeichnet erscheint auf der RC Plus, Punkt des Piloten erscheint im FüKw |
 | **M3 Fotos** | Medien-Upload aus Pilot 2 in S3-kompatiblen Speicher (MinIO), Fotos mit Koordinate auf der Karte | Wärmebildfoto liegt nach dem Flug an der richtigen Stelle |
 | **M4 Betrieb im FüKw** | gleicher Stack auf dem FüKw-Server, Zertifikatslösung ohne Internet, Aufbaukarte | Flug bei gezogenem LTE; zweite Person baut nach Aufbaukarte selbst auf |
