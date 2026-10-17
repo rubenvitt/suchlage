@@ -10,7 +10,9 @@ use sqlx::SqlitePool;
 use tokio::sync::{mpsc, watch};
 
 use crate::config::BootConfig;
+use crate::error::AppError;
 use crate::runtime::service::{self, SituationHandle};
+use crate::settings::SettingsHandle;
 use crate::situation::state::Config;
 
 #[derive(Clone)]
@@ -18,6 +20,7 @@ pub struct AppState {
     pub boot: Arc<BootConfig>,
     pub pool: SqlitePool,
     pub situation: SituationHandle,
+    pub settings: SettingsHandle,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -61,6 +64,22 @@ pub async fn run(
     crate::db::migrate(&pool)
         .await
         .map_err(std::io::Error::other)?;
+    let settings = SettingsHandle::load(pool.clone())
+        .await
+        .map_err(std::io::Error::other)?;
+    #[cfg(feature = "dev")]
+    crate::auth::dev::seed(&settings)
+        .await
+        .map_err(startup_error)?;
+    if let Some(link) =
+        crate::auth::setup::ensure_token(&pool, &settings, &boot, crate::time::now_ms())
+            .await
+            .map_err(startup_error)?
+    {
+        tracing::warn!("Ersteinrichtung: {link}  (24 h gültig, einmal verwendbar)");
+    }
+    // Vor dem Lesen abonnieren: Keine Änderung fällt zwischen Startwert und Nachführen heraus.
+    let settings_rx = settings.subscribe();
     let (stop_tx, stop_rx) = watch::channel(false);
     // B12 hängt hier den Livebild-Auftragnehmer an; bis dahin werden Anfragen nur geloggt.
     let (live_tx, mut live_rx) = mpsc::unbounded_channel::<String>();
@@ -70,7 +89,7 @@ pub async fn run(
         }
     });
     let config = Config {
-        auto_live_on_takeoff: true,
+        auto_live_on_takeoff: settings_rx.borrow().general.auto_live_on_takeoff,
     };
     let (situation, situation_task) = service::start(
         pool.clone(),
@@ -81,12 +100,14 @@ pub async fn run(
     )
     .await
     .map_err(std::io::Error::other)?;
+    follow_settings(settings_rx, situation.clone());
     let listener = tokio::net::TcpListener::bind(boot.bind).await?;
     tracing::info!(bind = %boot.bind, public_url = %boot.public_url, "Suchlage läuft");
     let state = AppState {
         boot: Arc::new(boot),
         pool: pool.clone(),
         situation,
+        settings,
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
     // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503.
@@ -100,6 +121,28 @@ pub async fn run(
     let _ = situation_task.await;
     pool.close().await;
     result
+}
+
+/// `Display` verschweigt bei `AppError::Internal` das Detail; beim Start gehört es ins Log.
+fn startup_error(e: AppError) -> std::io::Error {
+    std::io::Error::other(format!("{e:?}"))
+}
+
+/// Die Lage übernimmt „Livebild beim Start“ ohne Neustart. Endet, wenn die Einstellungen wegfallen.
+fn follow_settings(
+    mut settings: watch::Receiver<crate::settings::Settings>,
+    situation: SituationHandle,
+) {
+    tokio::spawn(async move {
+        while settings.changed().await.is_ok() {
+            let auto_live_on_takeoff = settings.borrow_and_update().general.auto_live_on_takeoff;
+            situation
+                .set_config(Config {
+                    auto_live_on_takeoff,
+                })
+                .await;
+        }
+    });
 }
 
 #[cfg(test)]

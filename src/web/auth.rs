@@ -1,4 +1,5 @@
-//! Anmeldung über HTTP: Optionen, eigene Sitzung, Abmelden, Großbild-Zugang, Dev-Login (Feature `dev`).
+//! Anmeldung über HTTP: Optionen, Ersteinrichtung, eigene Sitzung, Abmelden, Großbild-Zugang,
+//! Dev-Login (Feature `dev`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -9,7 +10,9 @@ use axum_extra::extract::cookie::Cookie;
 
 use crate::app::AppState;
 use crate::auth::session::{COOKIE, Viewer, secure_cookies, session_cookie};
-use crate::contract::{AuthOptions, KioskEnroll, Me, Role};
+use crate::contract::{
+    AuthOptions, KioskEnroll, Me, OidcSettingsInput, Role, SetupRequest, SetupResult,
+};
 use crate::error::AppError;
 use crate::extract::JsonBody;
 use crate::store::{self, sessions::Principal};
@@ -20,24 +23,43 @@ pub fn routes() -> Router<AppState> {
         .route("/auth/options", get(options))
         .route("/auth/logout", post(logout))
         .route("/auth/kiosk", post(kiosk_enroll))
+        .route("/setup", post(setup))
         .route("/me", get(me));
     #[cfg(feature = "dev")]
     let r = r.route("/auth/dev-login", post(crate::auth::dev::login));
     r
 }
 
-async fn options(State(state): State<AppState>) -> Json<AuthOptions> {
-    // B10 ersetzt diesen Körper durch die Auswertung der Einstellungen.
-    let redirect_url = format!(
-        "{}/api/auth/oidc/callback",
-        state.boot.public_url.as_str().trim_end_matches('/')
-    );
-    Json(AuthOptions {
-        oidc: false,
+async fn options(State(state): State<AppState>) -> Result<Json<AuthOptions>, AppError> {
+    Ok(Json(AuthOptions {
+        oidc: state.settings.current().oidc.is_some(),
         dev_login: cfg!(feature = "dev"),
-        setup_required: false,
-        redirect_url,
-    })
+        setup_required: crate::auth::setup::required(&state.pool, &state.settings).await?,
+        redirect_url: crate::settings::redirect_url(&state.boot),
+    }))
+}
+
+async fn setup(
+    State(state): State<AppState>,
+    JsonBody(body): JsonBody<SetupRequest>,
+) -> Result<Json<SetupResult>, AppError> {
+    if !crate::auth::setup::required(&state.pool, &state.settings).await? {
+        return Err(AppError::Conflict(
+            "Suchlage ist bereits eingerichtet".into(),
+        ));
+    }
+    let input = OidcSettingsInput {
+        issuer: body.issuer,
+        client_id: body.client_id,
+        client_secret: Some(body.client_secret),
+    };
+    // Erst prüfen, dann den Token verbrauchen: Ein Tippfehler im Issuer kostet keinen neuen Link.
+    crate::settings::validate_oidc(&input)?;
+    crate::auth::setup::consume(&state.pool, &body.token, now_ms()).await?;
+    state.settings.update_oidc(input).await?;
+    Ok(Json(SetupResult {
+        login_url: "/api/auth/oidc/start?next=/".into(),
+    }))
 }
 
 async fn me(Viewer(principal): Viewer) -> Json<Me> {
@@ -196,6 +218,68 @@ mod tests {
         assert_eq!(
             send(&app.router, with_cookie(get("/api/me"), &c)).await.0,
             StatusCode::UNAUTHORIZED
+        );
+    }
+
+    /// Ersteinrichtung über den Einmal-Link: Ein Tippfehler kostet den Link nicht, danach ist
+    /// Suchlage eingerichtet und der Weg zu.
+    #[cfg(not(feature = "dev"))]
+    #[tokio::test]
+    async fn setup_link_configures_oidc_exactly_once() {
+        let app = test_app().await;
+        let (_, options) = send(&app.router, get("/api/auth/options")).await;
+        assert_eq!(options["setup_required"], true);
+        assert_eq!(options["oidc"], false);
+        assert_eq!(
+            options["redirect_url"],
+            "https://suchlage.test/api/auth/oidc/callback"
+        );
+        let link = crate::auth::setup::ensure_token(
+            &app.state.pool,
+            &app.state.settings,
+            &app.state.boot,
+            crate::time::now_ms(),
+        )
+        .await
+        .unwrap()
+        .expect("ohne OIDC und Konto gibt es einen Link");
+        let token = link.split_once("/einrichtung#").unwrap().1;
+        let request = |token: &str, issuer: &str| {
+            post_json(
+                "/api/setup",
+                serde_json::json!({"token": token, "issuer": issuer, "client_id": "suchlage", "client_secret": "geheim"}),
+            )
+        };
+
+        let (status, body) = send(&app.router, request("falsch", "https://id.example.org")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(
+            body["error"].as_str().unwrap().contains("Einrichtungslink"),
+            "{body}"
+        );
+        let (status, body) = send(&app.router, request(token, "id.example.org")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "Tippfehler im Issuer");
+        assert!(body["error"].as_str().unwrap().contains("Issuer"), "{body}");
+
+        let (status, body) = send(&app.router, request(token, "https://id.example.org/")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["login_url"], "/api/auth/oidc/start?next=/");
+        let oidc = app.state.settings.current().oidc.unwrap();
+        assert_eq!(oidc.issuer, "https://id.example.org");
+        assert_eq!(oidc.client_secret, "geheim");
+        let (_, options) = send(&app.router, get("/api/auth/options")).await;
+        assert_eq!(options["setup_required"], false);
+        assert_eq!(options["oidc"], true);
+
+        let (status, _) = send(&app.router, request(token, "https://boese.example.org")).await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "eingerichtet ist eingerichtet"
+        );
+        assert_eq!(
+            app.state.settings.current().oidc.unwrap().issuer,
+            "https://id.example.org"
         );
     }
 

@@ -48,10 +48,14 @@ pub async fn test_app() -> TestApp {
         (k == "SUCHLAGE_PUBLIC_URL").then(|| "https://suchlage.test".to_string())
     })
     .unwrap();
+    let settings = crate::settings::SettingsHandle::load(pool.clone())
+        .await
+        .unwrap();
     let state = AppState {
         boot: Arc::new(boot),
         pool,
         situation,
+        settings,
     };
     TestApp {
         router: router(state.clone()),
@@ -128,6 +132,13 @@ pub fn get(uri: &str) -> Request<Body> {
 
 pub fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
     Request::post(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+pub fn put_json(uri: &str, body: serde_json::Value) -> Request<Body> {
+    Request::put(uri)
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap()
