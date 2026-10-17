@@ -14,19 +14,31 @@ const props = {
 
 test('frische Werte ohne Schraffur', () => {
   const { container } = renderWithApp(<TelemetryStrip {...props} serverNow={a.last_seen_ms + 1_000} />);
-  expect(container.querySelector('[data-freshness="fresh"]')).toBeInTheDocument();
+  const strip = container.querySelector('.sl-strip');
+  expect(strip).toHaveAttribute('data-freshness', 'fresh');
+  expect(strip).not.toHaveClass('sl-hatch-delayed');
+  expect(strip).not.toHaveClass('sl-hatch-lost');
   expect(screen.getByText('1 s')).toBeInTheDocument();
+  expect(container.querySelector('.sl-strip-age')).toHaveAttribute('data-tone', 'neutral');
 });
 
 test('verzögerte Werte tragen ihr Alter', () => {
   const { container } = renderWithApp(<TelemetryStrip {...props} serverNow={a.last_seen_ms + 9_400} />);
-  expect(container.querySelector('[data-freshness="delayed"]')).toBeInTheDocument();
+  const strip = container.querySelector('.sl-strip');
+  expect(strip).toHaveAttribute('data-freshness', 'delayed');
+  expect(strip).toHaveClass('sl-hatch-delayed');
+  expect(strip).not.toHaveClass('sl-hatch-lost');
   expect(screen.getByText('vor 9 s')).toBeInTheDocument();
+  expect(container.querySelector('.sl-strip-age')).toHaveAttribute('data-tone', 'achtung');
 });
 
 test('verlorene Verbindung nennt die Uhrzeit der letzten Position', () => {
-  renderWithApp(<TelemetryStrip {...props} serverNow={a.last_seen_ms + 45_000} />);
+  const { container } = renderWithApp(<TelemetryStrip {...props} serverNow={a.last_seen_ms + 45_000} />);
+  const strip = container.querySelector('.sl-strip');
+  expect(strip).toHaveClass('sl-hatch-lost');
+  expect(strip).not.toHaveClass('sl-hatch-delayed');
   expect(screen.getByText(/^Verbindung verloren \d{2}:\d{2}:\d{2}$/)).toBeInTheDocument();
+  expect(container.querySelector('.sl-strip-age')).toHaveAttribute('data-tone', 'alarm');
 });
 
 test('ein neuer Wert ist ein neues Element und blitzt damit einmal auf', () => {
@@ -76,5 +88,6 @@ test('ohne Fluggerät keine Schraffur und keine Einheiten hinter Strichen', () =
   );
   const strip = container.querySelector('.sl-strip')!;
   expect(strip).not.toHaveClass('sl-hatch-lost');
+  expect(strip).not.toHaveClass('sl-hatch-delayed');
   expect(within(strip as HTMLElement).queryByText('m/s')).not.toBeInTheDocument();
 });
