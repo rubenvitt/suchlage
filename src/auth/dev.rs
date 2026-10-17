@@ -1,5 +1,6 @@
-//! Nur mit Feature `dev`: Anmeldung ohne OIDC als „Entwicklung“ (Admin, weil erstes Konto) und
-//! Seed der Einstellungen für den lokalen Stack aus `deploy/compose.dev.yaml`.
+//! Nur mit Feature `dev`: Anmeldung ohne OIDC als „Entwicklung“ (Admin, weil erstes Konto), Seed
+//! der Einstellungen für den lokalen Stack aus `deploy/compose.dev.yaml` und die Fernsteuerung
+//! des Simulators.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -63,9 +64,37 @@ pub async fn seed(settings: &SettingsHandle) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Fester Kopplungscode der Simulator-Fernsteuerung. Existiert nur mit Feature `dev`; ohne das
+/// Feature kennt der Server keinen Code, den er nicht selbst zufällig erzeugt hat.
+pub const SIMULATOR_CODE: &str = "dev-simulator";
+
+/// Legt die Fernsteuerung „Simulator“ an, wenn sie fehlt. So braucht `scripts/dev.sh` keine
+/// Kopplungslogik, und ein Start vor der Broker-Verbindung legt nichts doppelt an.
+pub async fn seed_simulator(pool: &sqlx::SqlitePool) -> Result<(), AppError> {
+    use crate::store::remote_controllers as rcs;
+    if rcs::find_by_code(pool, SIMULATOR_CODE).await?.is_none() {
+        rcs::create_with_code(pool, "Simulator", SIMULATOR_CODE, now_ms()).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn simulator_rc_is_seeded_once() {
+        let pool = crate::db::test_pool().await;
+        seed_simulator(&pool).await.unwrap();
+        seed_simulator(&pool).await.unwrap();
+        let all = crate::store::remote_controllers::list(&pool).await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].label, "Simulator");
+        let found = crate::store::remote_controllers::find_by_code(&pool, SIMULATOR_CODE)
+            .await
+            .unwrap();
+        assert_eq!(found.map(|rc| rc.id), Some(all[0].id));
+    }
 
     #[tokio::test]
     async fn seed_fills_only_what_is_missing() {

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Suchlage – Pilot</title>
+  <style>
+    body { font: 17px system-ui, sans-serif; margin: 0; background: #08090b; color: #e8ebee; }
+    header { background: #0c0e11; padding: 14px 16px; border-bottom: 1px solid #22262b; font-weight: 600; }
+    main { padding: 16px; max-width: 720px; }
+    button { font: inherit; font-weight: 600; padding: 14px 22px; margin: 0 8px 12px 0; border: 1px solid #626a73; background: #14171b; color: #e8ebee; border-radius: 0; }
+    button.primary { background: #4d94d6; border-color: #4d94d6; color: #08090b; }
+    #state { font-size: 20px; margin: 8px 0 16px; }
+    #log { white-space: pre-wrap; font: 13px ui-monospace, monospace; background: #0f1215; border: 1px solid #22262b; padding: 8px; color: #9aa2ab; }
+  </style>
+</head>
+<body>
+  <header>Suchlage – Pilot 2 verbinden</header>
+  <main>
+    <div id="state" role="status">Wird vorbereitet …</div>
+    <button id="connect" class="primary">Verbinden</button>
+    <button id="live">Livebild manuell starten</button>
+    <div id="log"></div>
+  </main>
+  <script type="module">
+    import { PairingError, connect, pair, startManualLive } from "./pilot/pilot.js";
+    const out = document.getElementById("log");
+    const stateEl = document.getElementById("state");
+    const log = (m) => { out.textContent += `${new Date().toLocaleTimeString("de-DE")} ${m}\n`; };
+    const show = (m) => { stateEl.textContent = m; };
+    const bridge = window.djiBridge;
+    const code = new URLSearchParams(location.search).get("code");
+    const post = async (path, body) => {
+      const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      return { ok: res.ok, body: await res.json().catch(() => ({})) };
+    };
+    let cfg = null;
+    window.onThingConnect = (s) => { log(`MQTT: ${s}`); show(String(s) === "true" ? "Mit Suchlage verbunden." : "Verbindung zu Suchlage getrennt."); };
+    window.onLiveStatus = (s) => log(`Livebild: ${s}`);
+
+    async function run(action) {
+      if (!bridge) return show("Diese Seite in DJI Pilot 2 unter Cloud-Dienst öffnen.");
+      if (!code) return show("Kopplungscode fehlt. Den Link aus Suchlage (Einstellungen → Fernsteuerungen) verwenden.");
+      try {
+        const fresh = !cfg;
+        cfg = cfg ?? (await pair(code, bridge, log, post)); // pair verbindet beim ersten Mal selbst
+        if (action === "connect" && !fresh) connect(cfg, bridge, log);
+        if (action === "live") startManualLive(cfg, bridge, log);
+        show(`Angemeldet als ${cfg.rcLabel}.`);
+      } catch (e) {
+        if (e instanceof PairingError) return show(e.message);
+        log(`Abbruch bei ${e.message}`);
+        show("Anmeldung fehlgeschlagen – Protokoll unten.");
+      }
+    }
+    document.getElementById("connect").onclick = () => run("connect");
+    document.getElementById("live").onclick = () => run("live");
+    run("connect");
+  </script>
+</body>
+</html>

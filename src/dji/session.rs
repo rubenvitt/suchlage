@@ -13,8 +13,9 @@ use super::link::Inbox;
 use super::record::RecordLine;
 use super::recorder::Recorder;
 use super::topic::SUBSCRIPTIONS;
+use crate::broker::dynsec;
 use crate::contract::BrokerStatus;
-use crate::mqtt::{DYNSEC_RESPONSE_TOPIC, LinkError, LinkRequest};
+use crate::mqtt::{DYNSEC_RESPONSE_TOPIC, DYNSEC_TOPIC, LinkError, LinkRequest};
 use crate::settings::{BrokerSettings, Settings};
 use crate::situation::observation::{Observation, Observed};
 use crate::store;
@@ -153,6 +154,11 @@ pub async fn run(
                             if let Err(e) = client.try_subscribe(t, QoS::AtLeastOnce) {
                                 tracing::error!(error = %e, topic = t, "Abonnieren fehlgeschlagen");
                             }
+                        }
+                        // Ohne diese Rolle darf der Admin-Client weder `status_reply` noch `services` senden.
+                        let (_, payload) = dynsec::payload(dynsec::server_role_commands(&broker.admin_username));
+                        if let Err(e) = client.try_publish(DYNSEC_TOPIC, QoS::AtLeastOnce, false, payload) {
+                            tracing::error!(error = %e, "Serverrolle nicht gesetzt");
                         }
                         report(&observer, Observation::Broker(BrokerStatus::Connected)).await;
                     }

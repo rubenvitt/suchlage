@@ -48,6 +48,8 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api", api)
+        // Pilot 2 öffnet `/pilot` direkt, nicht unter `/api`.
+        .merge(crate::web::pilot::routes())
         .fallback(crate::static_files::serve)
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
         .layer(CatchPanicLayer::new())
@@ -77,6 +79,10 @@ pub async fn run(
         .map_err(std::io::Error::other)?;
     #[cfg(feature = "dev")]
     crate::auth::dev::seed(&settings)
+        .await
+        .map_err(startup_error)?;
+    #[cfg(feature = "dev")]
+    crate::auth::dev::seed_simulator(&pool)
         .await
         .map_err(startup_error)?;
     if let Some(link) =

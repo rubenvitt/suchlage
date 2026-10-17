@@ -130,6 +130,8 @@ pub async fn find_by_sn(
     Ok(r.as_ref().map(row))
 }
 
+/// Bindet die SN, wenn die Fernsteuerung noch keine hat. `false`: Eine andere Kopplung war
+/// schneller; der gespeicherte Zugang bleibt unverändert.
 pub async fn bind(
     pool: &SqlitePool,
     id: i64,
@@ -137,9 +139,9 @@ pub async fn bind(
     mqtt_password: &str,
     stream_key: &str,
     now_ms: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE remote_controllers SET sn = ?, mqtt_password = ?, stream_key = ?, paired_at_ms = ? WHERE id = ?",
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE remote_controllers SET sn = ?, mqtt_password = ?, stream_key = ?, paired_at_ms = ? WHERE id = ? AND sn IS NULL",
     )
     .bind(sn)
     .bind(mqtt_password)
@@ -148,7 +150,7 @@ pub async fn bind(
     .bind(id)
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(done.rows_affected() == 1)
 }
 
 /// (SN, Bezeichnung) aller gekoppelten Fernsteuerungen.
@@ -171,7 +173,12 @@ mod tests {
         let (rc, code) = create(&pool, "RC Plus 1", 0).await.unwrap();
         assert_eq!(find_by_code(&pool, &code).await.unwrap().unwrap().id, rc.id);
         assert_eq!(find_by_code(&pool, "falsch").await.unwrap(), None);
-        bind(&pool, rc.id, "RC1", "pw", "key", 5).await.unwrap();
+        assert!(bind(&pool, rc.id, "RC1", "pw", "key", 5).await.unwrap());
+        assert!(
+            !bind(&pool, rc.id, "RC9", "pw2", "key2", 6).await.unwrap(),
+            "zweite Kopplung überschreibt nicht"
+        );
+        assert_eq!(find_by_sn(&pool, "RC9").await.unwrap(), None);
         assert_eq!(
             find_by_sn(&pool, "RC1")
                 .await
