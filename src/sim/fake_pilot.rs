@@ -224,6 +224,60 @@ pub fn pilot_pin(rc_sn: &str, home: GeoPoint) -> Value {
     })
 }
 
+/// Aufnahmeort aus einer osd-Nachricht des Fluggeräts (`data.latitude`, `data.longitude`).
+pub fn osd_position(topic_name: &str, payload: &str) -> Option<GeoPoint> {
+    if !topic_name.ends_with("/osd") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(payload).ok()?;
+    let (lat, lon) = (
+        v["data"]["latitude"].as_f64()?,
+        v["data"]["longitude"].as_f64()?,
+    );
+    crate::photos::rules::position(Some(lat), Some(lon))
+}
+
+/// Dateiname wie die H20N: `DJI_<JJJJMMTThhmmss>_0001_<Linse>.JPG`, Zeit in UTC.
+pub fn photo_name(at_ms: i64, lens: char) -> String {
+    let at = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(at_ms).unwrap_or_default();
+    format!("DJI_{}_0001_{lens}.JPG", at.format("%Y%m%d%H%M%S"))
+}
+
+/// Body des `upload-callback`, wie Pilot 2 ihn nach dem Upload eines Fotos schickt.
+pub fn upload_callback(
+    name: &str,
+    object_key: &str,
+    at_ms: i64,
+    at: GeoPoint,
+    aircraft_sn: &str,
+) -> Value {
+    let created = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(at_ms)
+        .unwrap_or_default()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    json!({
+        "result": 0,
+        "name": name,
+        "object_key": object_key,
+        "path": "",
+        "fingerprint": format!("sim-{object_key}"),
+        "sub_file_type": 0,
+        "ext": {
+            "drone_model_key": "0-89-0",
+            "payload_model_key": "1-61-0",
+            "is_original": true,
+            "tinny_fingerprint": format!("sim-tiny-{object_key}"),
+            "sn": aircraft_sn,
+        },
+        "metadata": {
+            "absolute_altitude": 132.0,
+            "relative_altitude": 60.0,
+            "gimbal_yaw_degree": 0.0,
+            "created_time": created,
+            "shoot_position": { "lat": at.lat, "lng": at.lon },
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +286,50 @@ mod tests {
         json!({"tid": "t1", "bid": "b1", "timestamp": 1, "method": method, "data": data})
             .to_string()
             .into_bytes()
+    }
+
+    #[test]
+    fn photos_look_like_the_h20n_and_are_readable_as_callback() {
+        let at_ms = 1_792_240_212_000;
+        assert_eq!(photo_name(at_ms, 'T'), "DJI_20261017123012_0001_T.JPG");
+        let here = GeoPoint {
+            lat: 52.43,
+            lon: 10.01,
+        };
+        let body = upload_callback("DJI_1_T.JPG", "fotos/RC1/DJI_1_T.JPG", at_ms, here, "AC1");
+        let input: crate::dji::media::UploadCallbackInput = serde_json::from_value(body).unwrap();
+        assert_eq!(input.object_key, "fotos/RC1/DJI_1_T.JPG");
+        assert_eq!(
+            input
+                .metadata
+                .created_time
+                .as_deref()
+                .and_then(crate::photos::rules::taken_at_ms),
+            Some(at_ms)
+        );
+        let pos = input.metadata.shoot_position.unwrap();
+        assert_eq!((pos.lat, pos.lng), (Some(52.43), Some(10.01)));
+        assert_eq!(
+            osd_position(
+                "thing/product/AC1/osd",
+                r#"{"data":{"latitude":52.43,"longitude":10.01}}"#
+            ),
+            Some(here)
+        );
+        assert_eq!(
+            osd_position(
+                "thing/product/AC1/state",
+                r#"{"data":{"latitude":52.43,"longitude":10.01}}"#
+            ),
+            None
+        );
+        assert_eq!(
+            osd_position(
+                "thing/product/AC1/osd",
+                r#"{"data":{"latitude":0.0,"longitude":0.0}}"#
+            ),
+            None
+        );
     }
 
     #[test]

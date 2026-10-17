@@ -1,17 +1,19 @@
 //! Simulator: verhält sich wie Pilot 2 auf einer gekoppelten Fernsteuerung. Holt den Zugang über
-//! `/pilot/api/connect`, setzt einen Kartenpunkt, spielt einen Flug ab und beantwortet
-//! Livebild-Befehle mit einem Testbild.
+//! `/pilot/api/connect`, setzt einen Kartenpunkt, spielt einen Flug ab, beantwortet
+//! Livebild-Befehle mit einem Testbild und lädt nach jedem Flug ein Foto hoch (M3).
 
 use std::process::{ExitCode, Stdio};
 use std::time::Duration;
 
 use rumqttc::{AsyncClient, ConnectionError, Event, EventLoop, MqttOptions, Outgoing, Packet, QoS};
 use serde_json::{Value, json};
+use suchlage::contract::GeoPoint;
 use suchlage::dji::pilot::PilotConnection;
 use suchlage::dji::record::{RecordLine, read_lines};
 use suchlage::sim::fake_pilot::{
     Action, Args, ConnectOutcome, LiveVideo, broker_address, classify_connect, handle_service,
-    live_status, parse_args, pilot_pin, replay_script, retry_delays,
+    live_status, osd_position, parse_args, photo_name, pilot_pin, replay_script, retry_delays,
+    upload_callback,
 };
 use suchlage::sim::synth::{Scenario, generate};
 use tokio::process::{Child, Command};
@@ -45,12 +47,13 @@ async fn main() -> ExitCode {
 
 async fn run(args: Args) -> Result<(), String> {
     let connection = connect(&args).await?;
+    let workspace = workspace_id(&args).await?;
     // Wie ein Pilot, der einen Punkt setzt: prüft den Weg über `/map/api/v1/…`. Kein Abbruch, wenn es scheitert.
-    match share_pin(&args, &connection.api_token).await {
+    match share_pin(&args, &connection.api_token, &workspace).await {
         Ok(()) => tracing::info!("Kartenpunkt gesetzt"),
         Err(e) => tracing::warn!(error = %e, "Kartenpunkt nicht gesetzt"),
     }
-    let mut pilot = Pilot::new(args, &connection)?;
+    let mut pilot = Pilot::new(args, &connection, workspace)?;
     let result = pilot.fly().await;
     pilot.finish().await;
     result
@@ -88,14 +91,17 @@ async fn connect(args: &Args) -> Result<PilotConnection, String> {
     }
 }
 
-/// Legt den Punkt aus `pilot_pin` an. Die Workspace-ID kommt wie auf der Pilot-Seite aus der Lizenz.
-async fn share_pin(args: &Args, token: &str) -> Result<(), String> {
-    let client = reqwest::Client::builder()
+fn http() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+}
+
+/// Die Workspace-ID kommt wie auf der Pilot-Seite aus der Lizenz.
+async fn workspace_id(args: &Args) -> Result<String, String> {
     let server = args.server.trim_end_matches('/');
-    let license: Value = client
+    let license: Value = http()?
         .post(format!("{server}/pilot/api/license"))
         .json(&json!({ "code": args.code }))
         .send()
@@ -104,9 +110,16 @@ async fn share_pin(args: &Args, token: &str) -> Result<(), String> {
         .json()
         .await
         .map_err(|e| e.to_string())?;
-    let workspace = license["workspaceId"]
+    license["workspaceId"]
         .as_str()
-        .ok_or("Lizenz ohne Workspace-ID")?;
+        .map(String::from)
+        .ok_or_else(|| "Lizenz ohne Workspace-ID".into())
+}
+
+/// Legt den Punkt aus `pilot_pin` an.
+async fn share_pin(args: &Args, token: &str, workspace: &str) -> Result<(), String> {
+    let client = http()?;
+    let server = args.server.trim_end_matches('/');
     let url = format!(
         "{server}/map/api/v1/workspaces/{workspace}/element-groups/{}/elements",
         suchlage::dji::map::SHARED_GROUP_ID
@@ -124,6 +137,72 @@ async fn share_pin(args: &Args, token: &str) -> Result<(), String> {
         return Err(format!("{status}: {}", body["message"]));
     }
     Ok(())
+}
+
+/// Lädt eine Auslösung (Wärme 640 × 512, Weit 1600 × 1200) wie Pilot 2 hoch: Zugang über `sts`,
+/// direkt in den Fotospeicher, dann `upload-callback`. `Ok(false)`: Der Server hat keinen Fotospeicher.
+async fn upload_photo(
+    args: &Args,
+    token: &str,
+    workspace: &str,
+    at_ms: i64,
+    at: GeoPoint,
+) -> Result<bool, String> {
+    let client = http()?;
+    let server = args.server.trim_end_matches('/');
+    let sts = client
+        .post(format!(
+            "{server}/storage/api/v1/workspaces/{workspace}/sts"
+        ))
+        .header("x-auth-token", token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if sts.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+        return Ok(false);
+    }
+    let sts: Value = sts.json().await.map_err(|e| e.to_string())?;
+    let data = &sts["data"];
+    let text = |v: &Value| v.as_str().map(String::from).ok_or("sts unvollständig");
+    let bucket = suchlage::storage::s3::Bucket {
+        endpoint: text(&data["endpoint"])?,
+        name: text(&data["bucket"])?,
+        region: text(&data["region"])?,
+    };
+    let creds = suchlage::storage::s3::Credentials {
+        access_key_id: text(&data["credentials"]["access_key_id"])?,
+        secret_access_key: text(&data["credentials"]["access_key_secret"])?,
+    };
+    let prefix = text(&data["object_key_prefix"])?;
+    for (lens, (w, h)) in [('T', (640, 512)), ('W', (1600, 1200))] {
+        let name = photo_name(at_ms, lens);
+        let object_key = format!("{prefix}/{name}");
+        let jpeg = suchlage::photos::thumb::sample_jpeg(w, h);
+        suchlage::storage::s3::put(&client, &bucket, &creds, &object_key, jpeg, "image/jpeg")
+            .await
+            .map_err(|e| format!("Upload {name}: {e}"))?;
+        let res = client
+            .post(format!(
+                "{server}/media/api/v1/workspaces/{workspace}/upload-callback"
+            ))
+            .header("x-auth-token", token)
+            .json(&upload_callback(
+                &name,
+                &object_key,
+                at_ms,
+                at,
+                &args.aircraft_sn,
+            ))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !res.status().is_success() {
+            let status = res.status();
+            let body: Value = res.json().await.unwrap_or_default();
+            return Err(format!("upload-callback {status}: {}", body["message"]));
+        }
+    }
+    Ok(true)
 }
 
 /// Der deutsche Satz aus `{"error": …}`, sonst der Statuscode.
@@ -210,10 +289,12 @@ struct Pilot {
     /// Zuletzt gewählte Linse; die Kamera behält sie auch über einen neuen Stream hinweg.
     /// shortcut: gilt für jede Quelle, auch die FPV-Kamera (`normal`); bei Bedarf je `video_id` führen.
     lens: String,
+    api_token: String,
+    workspace: String,
 }
 
 impl Pilot {
-    fn new(args: Args, connection: &PilotConnection) -> Result<Self, String> {
+    fn new(args: Args, connection: &PilotConnection, workspace: String) -> Result<Self, String> {
         let (host, port) = broker_address(&connection.mqtt_host)?;
         let mut options = MqttOptions::new(format!("sim-{}", args.rc_sn), host, port);
         options.set_credentials(&connection.mqtt_user, &connection.mqtt_pass);
@@ -227,6 +308,8 @@ impl Pilot {
             ffmpeg: None,
             live: None,
             lens: "wide".into(),
+            api_token: connection.api_token.clone(),
+            workspace,
         })
     }
 
@@ -236,7 +319,10 @@ impl Pilot {
             let script = script(&self.args)?;
             let t0 = script.iter().find_map(|l| l.at_ms().ok()).unwrap_or(0);
             let started = Instant::now();
-            for line in &script {
+            // Ausgelöst wird zur Mitte des Flugs, an der Position der nächsten osd-Nachricht.
+            let half = script.len() / 2;
+            let mut shot: Option<(i64, GeoPoint)> = None;
+            for (i, line) in script.iter().enumerate() {
                 let Ok(at_ms) = line.at_ms() else {
                     tracing::warn!(tst = %line.tst, "Zeitstempel unlesbar – Zeile übersprungen");
                     continue;
@@ -251,9 +337,21 @@ impl Pilot {
                     QoS::AtMostOnce,
                     line.payload.clone().into_bytes(),
                 );
+                if i >= half && shot.is_none() {
+                    shot = osd_position(&line.topic, &line.payload)
+                        .map(|p| (suchlage::time::now_ms(), p));
+                }
             }
             // Der Flug ist vorbei; ein weiterbestehender Stream hielte den Server auf „Livebild läuft“.
             self.stop_video();
+            // Wie Pilot 2 nach der Landung: das Foto hochladen. Scheitert es, fliegt der Simulator weiter.
+            if let Some((at_ms, at)) = shot {
+                match upload_photo(&self.args, &self.api_token, &self.workspace, at_ms, at).await {
+                    Ok(true) => tracing::info!("Foto hochgeladen"),
+                    Ok(false) => tracing::info!("Server ohne Fotospeicher – kein Foto"),
+                    Err(e) => tracing::warn!(error = %e, "Foto nicht hochgeladen"),
+                }
+            }
             if !self.args.repeat {
                 return Ok(());
             }

@@ -11,16 +11,18 @@ direkt aus dem Internet erreichbar.
 |---|---|---|
 | TCP 1883 | MQTT (`mqtt`) | Die RC Plus spricht MQTT ohne TLS. Zugangsdaten und Telemetrie gingen im Klartext. |
 | TCP 1935 | RTMP (`media`) | Das Livebild kommt unverschlüsselt von der RC, mit Stream-Schlüssel in der URL. |
+| TCP 3900 | S3 des Fotospeichers (`fotos`, Garage) | Pilot 2 lädt Fotos direkt hoch, ohne TLS, mit einem Schlüssel, der nach einer Stunde abläuft. |
 | UDP 8189 | WebRTC-Medien (`media`) | WebRTC mit 1–2 s Verzögerung nur für Geräte im Tailnet. Wer von außen kommt, bekommt HLS (5–10 s) über die Oberfläche. |
 | HTTP `/internal/` | Medien-Freigabe des Servers | Über `/internal/media/auth` entscheidet der Server, wer an MediaMTX darf (ADR 0003). Der Pfad ist nur für MediaMTX im Compose-Netz gedacht. |
 
 ```
 Browser (Internet) ──HTTPS 443──▶ Traefik / cloudflared ──▶ 127.0.0.1:8080  server
 Browser (Tailnet)  ──UDP 8189──────────────────────────────▶ <TS-IP>:8189     media (WebRTC-Bild)
-RC Plus (Internet) ──HTTPS 443 (/pilot, /map/api/v1, WebSocket /pilot/ws)──▶ Traefik / cloudflared
+RC Plus (Internet) ──HTTPS 443 (/pilot, /map/api/v1, /media/api/v1, /storage/api/v1, WebSocket /pilot/ws)──▶ Traefik / cloudflared
 RC Plus (Tailnet)  ──TCP 1883──────────────────────────────▶ <TS-IP>:1883     mqtt
 RC Plus (Tailnet)  ──TCP 1935──────────────────────────────▶ <TS-IP>:1935     media (RTMP)
-server ──Compose-Netz──▶ mqtt, media (WHEP 8889, HLS 8888, Playback 9996, nie am Host)
+RC Plus (Tailnet)  ──TCP 3900──────────────────────────────▶ <TS-IP>:3900     fotos (S3, Garage)
+server ──Compose-Netz──▶ mqtt, media (WHEP 8889, HLS 8888, Playback 9996, nie am Host), fotos (S3 3900, Admin 3903)
 ```
 
 ## Vorher bereitlegen
@@ -60,8 +62,8 @@ das Internet.
      "tag:suchlage-rc":     ["autogroup:admin"]
    },
    "acls": [
-     // Fernsteuerung: MQTT und RTMP, sonst nichts
-     {"action": "accept", "src": ["tag:suchlage-rc"], "dst": ["tag:suchlage-server:1883,1935"]},
+     // Fernsteuerung: MQTT, RTMP und Foto-Upload (M3), sonst nichts
+     {"action": "accept", "src": ["tag:suchlage-rc"], "dst": ["tag:suchlage-server:1883,1935,3900"]},
      // WebRTC-Bild im Browser (8189 ist UDP)
      {"action": "accept", "src": ["group:iuk"], "dst": ["tag:suchlage-server:8189"]},
      // Betrieb per SSH
@@ -147,12 +149,24 @@ ssh <host> /srv/suchlage/deploy/broker-init.sh
 Das Skript gibt das Passwort für `suchlage-admin` **genau einmal** aus. Notieren und in Schritt 8
 eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts.
 
+Danach den Fotospeicher (M3):
+
 ```sh
-ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d && docker compose -f compose.m1.yaml ps'
-ssh <host> "ss -tulnp | grep -E ':(1883|1935|8080|8189)\b'"
+ssh <host> /srv/suchlage/deploy/fotos-init.sh
 ```
 
-In der Ausgabe von `ss` müssen `127.0.0.1:8080` und `<TS-IP>` für 1883, 1935 und 8189 stehen.
+Das Skript legt das RPC-Geheimnis von Garage unter `/srv/suchlage/garage-secrets` an (neben
+`deploy/`, damit `rsync --delete` es nicht löscht), startet `fotos` und legt Bucket
+`suchlage-fotos`, den Server-Schlüssel und einen Admin-Token an, der nur Schlüssel verwalten darf.
+Schlüssel-ID, geheimen Schlüssel und Admin-Token gibt es **genau einmal** aus. Notieren und in
+Schritt 8 eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts.
+
+```sh
+ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d && docker compose -f compose.m1.yaml ps'
+ssh <host> "ss -tulnp | grep -E ':(1883|1935|3900|8080|8189)\b'"
+```
+
+In der Ausgabe von `ss` müssen `127.0.0.1:8080` und `<TS-IP>` für 1883, 1935, 3900 und 8189 stehen.
 `0.0.0.0` und die öffentliche IP dürfen nicht vorkommen.
 
 ## 6. Oberfläche öffentlich ausliefern
@@ -256,10 +270,14 @@ Unter *Einstellungen*:
 | | RTMP für die Fernsteuerung (im VPN) | `rtmp://<TS-IP>:1935` |
 | DJI | App-ID, App-Key, Lizenz | aus 1Password |
 | | Workspace-ID | die UUID aus der Vorbereitung |
+| Fotospeicher | S3-Adresse (vom Server aus) / Admin-Adresse | `http://fotos:3900` / `http://fotos:3903` |
+| | S3-Adresse für die Fernsteuerung (im VPN) | `http://<TS-IP>:3900` |
+| | Bucket / Region | `suchlage-fotos` / `garage` |
+| | Schlüssel-ID, geheimer Schlüssel, Admin-Token | aus Schritt 5 (`fotos-init.sh`) |
 
 Für die Fernsteuerung immer die Tailscale-IP eintragen, nie `suchlage.iuk-ue.de` und nicht den
-MagicDNS-Namen. MQTT und RTMP gibt es nur im Tailnet und hängen so nicht an der DNS-Auflösung auf
-der RC Plus.
+MagicDNS-Namen. MQTT, RTMP und S3 gibt es nur im Tailnet und hängen so nicht an der DNS-Auflösung
+auf der RC Plus.
 
 Danach unter *System* prüfen: Der Broker steht auf „verbunden“.
 
@@ -285,12 +303,18 @@ unter `group:iuk` oder einer eigenen Regel auf UDP 8189 zugreifen dürfen.
 ## Abnahme
 
 `docs/betrieb/m1-realflug-checkliste.md`. Erst danach gilt die Auslieferung als fertig. Für die
-Kartenelemente (M2) zusätzlich `docs/betrieb/m2-realflug-checkliste.md`.
+Kartenelemente (M2) zusätzlich `docs/betrieb/m2-realflug-checkliste.md`, für die Fotos (M3)
+`docs/betrieb/m3-realflug-checkliste.md`.
 
 Pilot 2 erreicht die Kartenelemente über `/map/api/v1/…` (HTTPS) und `/pilot/ws` (WebSocket), beides
 unter `https://suchlage.iuk-ue.de` wie `/pilot`. Die Regeln aus Schritt 6 decken das ab; Traefik und
 Cloudflare-Tunnel reichen WebSockets ohne weitere Einstellung durch. Zugang nur mit dem API-Token,
 den die Pilot-Seite beim Koppeln bekommt.
+
+Die Fotos (M3) laufen über denselben Token: `/media/api/v1/…` und `/storage/api/v1/…` unter
+`https://suchlage.iuk-ue.de`, ebenfalls von den Regeln aus Schritt 6 erfasst. Die Bilder selbst lädt
+Pilot 2 direkt nach `http://<TS-IP>:3900`. Der Browser bekommt Vorschaubild und Original nur über
+den Server, auch mobil ohne Tailnet.
 
 ## Betrieb
 
@@ -344,5 +368,10 @@ nächsten Koppeln wieder an.
 | Kein Bild, RC meldet Push-Fehler | Die RC erreicht `<TS-IP>:1935` nicht. Tailscale auf der RC, ACL und RTMP-Adresse unter *Einstellungen → Video* prüfen |
 | Pilot-Seite lädt nicht auf der RC | Die RC hat kein Internet. `/pilot` läuft über `suchlage.iuk-ue.de`, nicht über das Tailnet |
 | Kartenelemente fehlen in Pilot 2, Protokoll der Pilot-Seite ohne „Kartenabgleich: verbunden“ | Cloud-Seite in Pilot 2 neu öffnen (lädt `api`, `ws`, `map`). Meldet Pilot 2 „Anmeldung abgelaufen“, wurde dieselbe Fernsteuerung woanders neu gekoppelt: jedes Koppeln erzeugt einen neuen Token |
+| Fotos kommen nicht an, Pilot-Seite zeigt bei „Fotos“ „Server ohne Fotospeicher“ | *Einstellungen → Fotospeicher* fehlt. Danach die Cloud-Seite in Pilot 2 neu öffnen (lädt `media`) |
+| Pilot 2 lädt Fotos nicht hoch, Funkprotokoll „Foto-Upload gescheitert“ | Die RC erreicht `<TS-IP>:3900` nicht: ACL (Schritt 1) und *S3-Adresse für die Fernsteuerung* prüfen. `docker compose … logs fotos` |
+| `sts` antwortet 503 „Fotospeicher lehnt ab“ | Admin-Token oder Admin-Adresse falsch, oder der Bucket heißt anders. `docker compose … logs server` nennt den HTTP-Status von Garage |
+| Foto ohne Vorschaubild | Der Server-Schlüssel darf nicht lesen (`garage bucket info suchlage-fotos` zeigt `RW` für `suchlage-server`) oder das Foto ist kein JPEG |
+| `fotos` startet nicht | `/srv/suchlage/garage-secrets/rpc_secret` fehlt oder ist für andere lesbar: `fotos-init.sh` ausführen bzw. `chmod 600` |
 | Pilot 2 meldet „Ressource existiert nicht“ beim Zeichnen | Die Workspace-ID unter *Einstellungen → DJI* wurde geändert. Zurückändern oder in Pilot 2 neu koppeln |
 | Anmeldung scheitert | Callback-URL in Pocket ID muss genau `https://suchlage.iuk-ue.de/api/auth/oidc/callback` sein |
