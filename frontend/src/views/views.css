@@ -97,18 +97,6 @@
   color: var(--lfh-text-2);
 }
 
-.sl-panel-link {
-  color: var(--lfh-bedien-text);
-  text-decoration: none;
-}
-.sl-panel-link:hover {
-  text-decoration: underline;
-}
-.sl-panel-link:focus-visible {
-  outline: 2px solid var(--lfh-bedien);
-  outline-offset: 2px;
-}
-
 .sl-context {
   min-width: 0;
   overflow: hidden;

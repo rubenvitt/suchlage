@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { skipToken, useQuery } from '@tanstack/react-query';
 import type { AuthOptions } from '../contract/generated/AuthOptions';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
@@ -12,7 +12,7 @@ export const queryKeys = {
   me: ['me'] as const,
   authOptions: ['auth-options'] as const,
   flights: ['flights'] as const,
-  flight: (id: number) => ['flights', id] as const,
+  flight: (id: number | null) => ['flights', id] as const,
   settings: ['settings'] as const,
   remoteControllers: ['remote-controllers'] as const,
   kioskTokens: ['kiosk-tokens'] as const,
@@ -46,8 +46,12 @@ export const useAuthOptions = () =>
 // Kein Polling: der LiveProvider (F2) erneuert die Liste bei `flight_started` und `flight_ended`.
 export const useFlights = () =>
   useQuery({ queryKey: queryKeys.flights, queryFn: () => apiGet<FlightSummary[]>('/api/flights') });
-export const useFlight = (id: number) =>
-  useQuery({ queryKey: queryKeys.flight(id), queryFn: () => apiGet<FlightDetail>(`/api/flights/${id}`) });
+/** `null` steht für eine Adresse ohne gültige Flugnummer: Dann fragt die Abfrage gar nicht erst. */
+export const useFlight = (id: number | null) =>
+  useQuery({
+    queryKey: queryKeys.flight(id),
+    queryFn: id == null ? skipToken : () => apiGet<FlightDetail>(`/api/flights/${id}`),
+  });
 export const useSettings = () =>
   useQuery({ queryKey: queryKeys.settings, queryFn: () => apiGet<SettingsView>('/api/settings') });
 export const useRemoteControllers = () =>

@@ -254,6 +254,19 @@ body {
   background: var(--lfh-flaeche-3);
 }
 
+/* Link in Bedienfarbe, ungestylt zeigte der Browser ihn nach dem ersten Besuch violett. */
+.sl-panel-link {
+  color: var(--lfh-bedien-text);
+  text-decoration: none;
+}
+.sl-panel-link:hover {
+  text-decoration: underline;
+}
+.sl-panel-link:focus-visible {
+  outline: 2px solid var(--lfh-bedien);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
