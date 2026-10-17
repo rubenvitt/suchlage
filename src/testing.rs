@@ -21,10 +21,10 @@ pub struct TestApp {
     /// Livebild-Aufträge des Aktors (Gateway-SN). Der Empfänger bleibt offen, solange die App lebt.
     #[expect(
         dead_code,
-        reason = "hält wie `_stop` den Kanal offen; noch liest kein Handler-Test die Aufträge"
+        reason = "hält den Kanal offen; noch liest kein Handler-Test die Aufträge"
     )]
     pub live_requests: mpsc::UnboundedReceiver<String>,
-    _stop: watch::Sender<bool>,
+    stop: watch::Sender<bool>,
 }
 
 /// App wie in `app::run`, aber mit In-Memory-DB, öffentlicher HTTPS-Adresse und ohne Auto-Livebild.
@@ -57,11 +57,16 @@ pub async fn test_app() -> TestApp {
         router: router(state.clone()),
         state,
         live_requests,
-        _stop: stop,
+        stop,
     }
 }
 
 impl TestApp {
+    /// Stoppt den Lage-Aktor wie `app::run` beim Herunterfahren.
+    pub fn stop_situation(&self) {
+        self.stop.send(true).unwrap();
+    }
+
     /// Legt ein Konto mit der Rolle an (beim Großbild einen Token) und liefert `suchlage_sid=<token>`.
     pub async fn cookie(&self, role: Role) -> String {
         let pool = &self.state.pool;

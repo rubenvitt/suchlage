@@ -88,10 +88,15 @@ pub async fn run(
         pool: pool.clone(),
         situation,
     };
+    // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
+    // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503.
+    let shutdown = async move {
+        shutdown.await;
+        let _ = stop_tx.send(true);
+    };
     let result = axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown)
         .await;
-    let _ = stop_tx.send(true);
     let _ = situation_task.await;
     pool.close().await;
     result

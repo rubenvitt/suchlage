@@ -169,6 +169,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_ends_when_the_situation_stops() {
+        let app = test_app().await;
+        let mut body = open_live(&app, Role::Operator).await;
+        assert_eq!(next_data(&mut body).await["type"], "snapshot");
+
+        app.stop_situation();
+        // Endet der Strom nicht, wartet `serve` beim Herunterfahren bis zum SIGKILL.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(frame) = body.frame().await {
+                frame.unwrap();
+            }
+        })
+        .await
+        .expect("Strom endet innerhalb von 5 s");
+    }
+
+    #[tokio::test]
     async fn live_and_situation_require_a_session() {
         let app = test_app().await;
         for uri in ["/api/live", "/api/situation"] {
