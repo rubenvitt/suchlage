@@ -3,6 +3,7 @@ import type { AuthOptions } from './generated/AuthOptions';
 import type { DeviceLogEvent } from './generated/DeviceLogEvent';
 import type { FlightDetail } from './generated/FlightDetail';
 import type { FlightSummary } from './generated/FlightSummary';
+import type { Health } from './generated/Health';
 import type { KioskTokenView } from './generated/KioskTokenView';
 import type { LiveEvent } from './generated/LiveEvent';
 import type { MapElement } from './generated/MapElement';
@@ -891,4 +892,10 @@ export const authOptionsOidc: AuthOptions = {
   "oidc": true,
   "redirect_url": "https://suchlage.example.org/api/auth/oidc/callback",
   "setup_required": false
+};
+
+export const health: Health = {
+  "commit": "a5a73ed",
+  "status": "ok",
+  "version": "0.2.3"
 };

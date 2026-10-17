@@ -4,6 +4,8 @@ Lokaler, internetunabhängiger Lagehub für Personensuchen im Katastrophenschutz
 
 Nachfolger von `uav-lagebild` (archiviert). Stand: M1 abgenommen, M2 (Kartenelemente) umgesetzt, Feldabnahme offen.
 
+Jeder Push auf `main` wird ein Release `v<Version>` mit Image in GHCR; welcher Stand läuft, zeigt die Systemseite (Runbook: `docs/betrieb/runbook-deployment.md`, Schritt 3).
+
 ## Entwickeln
 
     mise install          # Node 26.7.0, pnpm 11.10.0 (Rust 1.99.0 über rust-toolchain.toml)

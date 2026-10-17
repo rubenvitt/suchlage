@@ -26,8 +26,8 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
    ssh <vserver> 'cd /srv/suchlage/deploy && docker compose -f compose.yaml down'
    ```
 
-2. **Image holen.** GitHub Actions baut bei jedem Push auf `main` das Image und legt es als
-   `ghcr.io/rubenvitt/suchlage:m1-<kurzer Commit>` ab. Die Befehle stehen im Runbook
+2. **Image holen.** Jeder Push auf `main` ist ein Release: GitHub Actions legt das Image als
+   `ghcr.io/rubenvitt/suchlage:<Version>` ab und erstellt das GitHub-Release `v<Version>`. Die Befehle stehen im Runbook
    (`docs/betrieb/runbook-deployment.md`, Schritt 3). Lokal bauen geht weiterhin mit `mise run image`,
    das baut aber für die eigene Maschine, auf Apple Silicon also `arm64`.
 

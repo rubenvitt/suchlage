@@ -89,23 +89,29 @@ sudo sysctl --system
 
 ## 3. Image auf den Host bringen
 
-Jeder Push auf `main` baut das Image in GitHub Actions (Workflow *Image*,
-`.github/workflows/image.yml`) und legt es in GHCR ab:
+Jeder Push auf `main` ist ein Release (Workflow *Release*, `.github/workflows/release.yml`): Er
+vergibt eine Version, baut das Image, legt es in GHCR ab und erstellt dazu Git-Tag und GitHub-Release
+`v<Version>` mit den gemergten PRs als Notizen.
 
-- `ghcr.io/rubenvitt/suchlage:m1-<kurzer Commit>` bleibt für einen Rückweg liegen.
+- `ghcr.io/rubenvitt/suchlage:<Version>`, etwa `0.2.3`: der Name zum Ausliefern.
+- `ghcr.io/rubenvitt/suchlage:m1-<kurzer Commit>` bleibt wie bisher für einen Rückweg liegen.
 - `ghcr.io/rubenvitt/suchlage:m1` zeigt auf den neuesten Stand von `main`.
 
-Jeder Tag enthält `linux/amd64` und `linux/arm64`. `docker pull` holt am Host von selbst die
-passende Architektur. Von Hand neu bauen: *Actions → Image → Run workflow*.
+Die Version ist `MAJOR.MINOR` aus `Cargo.toml`, `PATCH` zählt pro Release hoch. Für einen neuen
+Meilenstein in `Cargo.toml` die Minor-Version anheben (`0.2.0` → `0.3.0`). Jeder Tag enthält
+`linux/amd64` und `linux/arm64`. `docker pull` holt am Host von selbst die passende Architektur.
+Von Hand neu bauen: *Actions → Release → Run workflow*. Auf `main` erzeugt das kein zweites Release,
+der Commit behält seine Version.
 
-Den Commit zeigt der Lauf unter *Actions*, lokal auch `git rev-parse --short origin/main`:
+Die neueste Version steht unter *Releases*, lokal auch `git ls-remote --tags --refs --sort=-v:refname origin 'v*' | head -n1`:
 
 ```sh
-TAG=m1-<kurzer Commit>
+TAG=<Version>
 ssh <host> "docker pull ghcr.io/rubenvitt/suchlage:$TAG && docker tag ghcr.io/rubenvitt/suchlage:$TAG suchlage:$TAG && docker tag suchlage:$TAG suchlage:m1"
 ```
 
-`suchlage:m1` ist der Name, den Compose startet. Der Tag mit Commit bleibt für einen Rückweg liegen.
+`suchlage:m1` ist der Name, den Compose startet. Der Tag mit Version bleibt für einen Rückweg liegen.
+Was läuft, zeigt die Systemseite unter *Server* oder `curl -s https://suchlage.iuk-ue.de/api/health`.
 
 Ist das Paket in GHCR privat (*Package settings → Danger Zone → Change visibility*), meldet sich der
 Host vorher einmal an. Dafür reicht ein Token, das nur `read:packages` darf:
@@ -210,7 +216,7 @@ Alle `docker compose`-Aufrufe brauchen dann `-f compose.m1.yaml -f compose.traef
 Gegenprobe von außen, ohne Tailscale:
 
 ```sh
-curl -s https://suchlage.iuk-ue.de/api/health                     # {"status":"ok","version":"…"}
+curl -s https://suchlage.iuk-ue.de/api/health                     # {"status":"ok","version":"…","commit":"…"}
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://suchlage.iuk-ue.de/internal/media/auth -d '{}'   # 404
 nc -vz -w 3 <öffentliche IP> 1883                                 # muss scheitern
 ```
@@ -301,7 +307,7 @@ Haben sich Dateien in `deploy/` geändert, zuerst das `rsync` aus Schritt 4 lauf
 
 ```sh
 ssh <host> 'docker image ls suchlage'                     # vorhandene Tags
-ssh <host> 'docker tag suchlage:m1-<alter-commit> suchlage:m1 && cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d server'
+ssh <host> 'docker tag suchlage:<alte Version> suchlage:m1 && cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d server'
 ```
 
 Fehlt der alte Tag am Host, holt ihn Schritt 3 aus GHCR. Hat ein neuerer Stand die Datenbank

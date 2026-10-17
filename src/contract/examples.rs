@@ -454,6 +454,14 @@ pub fn auth_options(oidc: bool, dev_login: bool, setup_required: bool) -> AuthOp
     }
 }
 
+pub fn health() -> Health {
+    Health {
+        status: "ok".into(),
+        version: "0.2.3".into(),
+        commit: Some("a5a73ed".into()),
+    }
+}
+
 pub struct Fixture {
     pub name: &'static str,
     pub ts_type: &'static str,
@@ -529,6 +537,7 @@ pub fn all() -> Vec<Fixture> {
             "AuthOptions",
             &auth_options(true, false, false),
         ),
+        fx("health", "Health", &health()),
     ]
 }
 
@@ -545,4 +554,5 @@ pub fn assert_roundtrips() {
     roundtrip(settings_view());
     roundtrip(remote_controllers());
     roundtrip(map_elements());
+    roundtrip(health());
 }

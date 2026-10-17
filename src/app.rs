@@ -85,8 +85,12 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+async fn health() -> Json<crate::contract::Health> {
+    Json(crate::contract::Health {
+        status: "ok".into(),
+        version: crate::version::VERSION.into(),
+        commit: crate::version::COMMIT.map(Into::into),
+    })
 }
 
 pub async fn run(
@@ -167,7 +171,13 @@ pub async fn run(
     );
     tokio::spawn(run_auto(live_rx, streams.clone()));
     let listener = tokio::net::TcpListener::bind(boot.bind).await?;
-    tracing::info!(bind = %boot.bind, public_url = %boot.public_url, "Suchlage läuft");
+    tracing::info!(
+        version = crate::version::VERSION,
+        commit = crate::version::COMMIT.unwrap_or("–"),
+        bind = %boot.bind,
+        public_url = %boot.public_url,
+        "Suchlage läuft"
+    );
     let state = AppState {
         boot: Arc::new(boot),
         pool: pool.clone(),
@@ -228,7 +238,7 @@ mod tests {
         let (status, body) = send(&test_app().await.router, get_req("/api/health")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
-        assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(body["version"], crate::version::VERSION);
     }
 
     #[tokio::test]

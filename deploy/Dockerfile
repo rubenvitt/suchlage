@@ -18,6 +18,9 @@ COPY .cargo .cargo
 COPY migrations migrations
 COPY src src
 COPY --from=web /src/frontend/dist frontend/dist
+# Setzt der Release-Workflow; leer (lokal) meldet der Server `<Cargo-Version>-dev` (src/version.rs).
+ARG SUCHLAGE_VERSION=""
+ARG SUCHLAGE_COMMIT=""
 RUN cargo build --release --bin suchlage
 
 # /data mit den Rechten des nonroot-Nutzers (distroless kann weder mkdir noch chown); Docker
