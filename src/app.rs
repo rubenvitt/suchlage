@@ -14,6 +14,7 @@ use crate::config::BootConfig;
 use crate::error::AppError;
 use crate::runtime::service::{self, SituationHandle};
 use crate::settings::SettingsHandle;
+use crate::situation::observation::{Observation, Observed};
 use crate::situation::state::Config;
 
 #[derive(Clone)]
@@ -23,6 +24,7 @@ pub struct AppState {
     pub situation: SituationHandle,
     pub settings: SettingsHandle,
     pub oidc: Arc<OidcState>,
+    pub mqtt: crate::mqtt::MqttLink,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -83,7 +85,7 @@ pub async fn run(
     // Vor dem Lesen abonnieren: Keine Änderung fällt zwischen Startwert und Nachführen heraus.
     let settings_rx = settings.subscribe();
     let (stop_tx, stop_rx) = watch::channel(false);
-    // B12 hängt hier den Livebild-Auftragnehmer an; bis dahin werden Anfragen nur geloggt.
+    // B13 hängt hier den Livebild-Auftragnehmer an; bis dahin werden Anfragen nur geloggt.
     let (live_tx, mut live_rx) = mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
         while let Some(gw) = live_rx.recv().await {
@@ -98,11 +100,29 @@ pub async fn run(
         config,
         crate::runtime::system_clock(),
         live_tx,
-        stop_rx,
+        stop_rx.clone(),
     )
     .await
     .map_err(std::io::Error::other)?;
     follow_settings(settings_rx, situation.clone());
+    let labels = crate::store::remote_controllers::labels(&pool)
+        .await
+        .map_err(std::io::Error::other)?;
+    situation
+        .observe(Observed {
+            at_ms: crate::time::now_ms(),
+            observation: Observation::Labels(labels),
+        })
+        .await;
+    let (mqtt, link_requests) = crate::mqtt::MqttLink::channel();
+    let session_task = tokio::spawn(crate::dji::session::run(
+        settings.subscribe(),
+        situation.observer(),
+        pool.clone(),
+        boot.records_dir(),
+        link_requests,
+        stop_rx,
+    ));
     let listener = tokio::net::TcpListener::bind(boot.bind).await?;
     tracing::info!(bind = %boot.bind, public_url = %boot.public_url, "Suchlage läuft");
     let state = AppState {
@@ -111,9 +131,11 @@ pub async fn run(
         situation,
         settings,
         oidc: Arc::new(OidcState::new()),
+        mqtt,
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
-    // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503.
+    // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503. Die MQTT-Sitzung
+    // trennt mit demselben Signal vom Broker.
     let shutdown = async move {
         shutdown.await;
         let _ = stop_tx.send(true);
@@ -122,6 +144,7 @@ pub async fn run(
         .with_graceful_shutdown(shutdown)
         .await;
     let _ = situation_task.await;
+    let _ = session_task.await;
     pool.close().await;
     result
 }

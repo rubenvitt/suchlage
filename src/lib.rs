@@ -6,6 +6,7 @@ pub mod db;
 pub mod dji;
 pub mod error;
 pub mod extract;
+pub mod mqtt;
 pub mod runtime;
 pub mod settings;
 pub mod sim;
