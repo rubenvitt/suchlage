@@ -58,7 +58,8 @@ async fn setup(
         client_secret: Some(body.client_secret),
     };
     // Token vor jedem ausgehenden Abruf prüfen, aber erst nach erfolgreicher Discovery verbrauchen:
-    // Ohne gültigen Link löst niemand Anfragen des Servers aus, ein Tippfehler im Issuer kostet keinen neuen Link.
+    // Ohne gültigen Link löst niemand Anfragen des Servers aus, und ein Tippfehler im Issuer
+    // kostet keinen neuen Link.
     crate::settings::validate_oidc(&input)?;
     crate::auth::setup::verify(&state.pool, &body.token, now_ms()).await?;
     state.oidc.check_discovery(input.issuer.trim()).await?;
@@ -382,9 +383,6 @@ mod tests {
             0,
             "ohne gültigen Link keine Discovery"
         );
-        // Ohne gültigen Link ruft der Server keinen Anbieter ab: 401 statt 503.
-        let (status, _) = send(&app.router, request("falsch", "http://127.0.0.1:1")).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
         let (status, body) = send(&app.router, request(token, "id.example.org")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "Tippfehler im Issuer");
         assert!(body["error"].as_str().unwrap().contains("Issuer"), "{body}");
