@@ -34,6 +34,11 @@ body {
   grid-template-columns: 1fr;
   cursor: none;
 }
+/* maplibre-gl.css setzt über der Karte `grab`/`grabbing` und an ihren Knöpfen `pointer`, mit bis zu
+   drei Klassen. Mit vier gewinnt diese Regel unabhängig von der Ladereihenfolge. */
+.sl-frame[data-mode='kiosk'] .maplibregl-map :is(.maplibregl-canvas-container, .maplibregl-control-container *) {
+  cursor: none;
+}
 .sl-frame[data-mode='mobile'] {
   grid-template-columns: 1fr;
   grid-template-rows: 48px 1fr 56px;
