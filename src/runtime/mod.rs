@@ -1,6 +1,7 @@
 //! Laufzeit-Hülle um den reinen Lage-Kern: Aktor, Speicher, Verteilung.
 
 pub mod service;
+pub mod streams;
 
 use std::sync::Arc;
 

@@ -25,10 +25,6 @@ pub struct TestApp {
     )]
     pub live_requests: mpsc::UnboundedReceiver<String>,
     /// Anfragen an die MQTT-Sitzung; Tests beantworten sie selbst, eine Sitzung läuft nicht.
-    #[expect(
-        dead_code,
-        reason = "hält den Kanal offen; noch beantwortet kein Handler-Test MQTT-Anfragen"
-    )]
     pub mqtt_requests: mpsc::Receiver<crate::mqtt::LinkRequest>,
     stop: watch::Sender<bool>,
 }
@@ -58,6 +54,13 @@ pub async fn test_app() -> TestApp {
         .await
         .unwrap();
     let (mqtt, mqtt_requests) = crate::mqtt::MqttLink::channel();
+    // Wie in `app::run`, aber ohne `run_auto`: Aufträge des Aktors landen in `live_requests`.
+    let streams = crate::runtime::streams::StreamOrchestrator::new(
+        situation.clone(),
+        crate::dji::control::LiveControl::new(mqtt.clone()),
+        pool.clone(),
+        settings.clone(),
+    );
     let state = AppState {
         boot: Arc::new(boot),
         pool,
@@ -65,6 +68,7 @@ pub async fn test_app() -> TestApp {
         settings,
         oidc: Arc::new(crate::auth::oidc::OidcState::new()),
         mqtt,
+        streams,
     };
     TestApp {
         router: router(state.clone()),

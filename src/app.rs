@@ -11,8 +11,10 @@ use tokio::sync::{mpsc, watch};
 
 use crate::auth::oidc::OidcState;
 use crate::config::BootConfig;
+use crate::dji::control::LiveControl;
 use crate::error::AppError;
 use crate::runtime::service::{self, SituationHandle};
+use crate::runtime::streams::{StreamOrchestrator, run_auto};
 use crate::settings::SettingsHandle;
 use crate::situation::observation::{Observation, Observed};
 use crate::situation::state::Config;
@@ -25,6 +27,7 @@ pub struct AppState {
     pub settings: SettingsHandle,
     pub oidc: Arc<OidcState>,
     pub mqtt: crate::mqtt::MqttLink,
+    pub streams: StreamOrchestrator,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -40,6 +43,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::admin::routes())
         .merge(crate::web::live::routes())
         .merge(crate::web::flights::routes())
+        .merge(crate::web::streams::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()
@@ -85,13 +89,8 @@ pub async fn run(
     // Vor dem Lesen abonnieren: Keine Änderung fällt zwischen Startwert und Nachführen heraus.
     let settings_rx = settings.subscribe();
     let (stop_tx, stop_rx) = watch::channel(false);
-    // B13 hängt hier den Livebild-Auftragnehmer an; bis dahin werden Anfragen nur geloggt.
-    let (live_tx, mut live_rx) = mpsc::unbounded_channel::<String>();
-    tokio::spawn(async move {
-        while let Some(gw) = live_rx.recv().await {
-            tracing::info!(gateway = %gw, "Livebild angefordert (noch ohne Befehlsweg)");
-        }
-    });
+    // Livebild-Aufträge des Kerns beim Abheben; `run_auto` arbeitet sie ab, sobald der Befehlsweg steht.
+    let (live_tx, live_rx) = mpsc::unbounded_channel::<String>();
     let config = Config {
         auto_live_on_takeoff: settings_rx.borrow().general.auto_live_on_takeoff,
     };
@@ -123,6 +122,13 @@ pub async fn run(
         link_requests,
         stop_rx,
     ));
+    let streams = StreamOrchestrator::new(
+        situation.clone(),
+        LiveControl::new(mqtt.clone()),
+        pool.clone(),
+        settings.clone(),
+    );
+    tokio::spawn(run_auto(live_rx, streams.clone()));
     let listener = tokio::net::TcpListener::bind(boot.bind).await?;
     tracing::info!(bind = %boot.bind, public_url = %boot.public_url, "Suchlage läuft");
     let state = AppState {
@@ -132,6 +138,7 @@ pub async fn run(
         settings,
         oidc: Arc::new(OidcState::new()),
         mqtt,
+        streams,
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
     // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503. Die MQTT-Sitzung
