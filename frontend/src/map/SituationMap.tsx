@@ -11,6 +11,7 @@ import type { GatewayState } from '../contract/generated/GatewayState';
 import type { GeoPoint } from '../contract/generated/GeoPoint';
 import type { TrackPoint } from '../contract/generated/TrackPoint';
 import { basemapStyle } from './basemapStyle';
+import { MapBoundary } from './MapBoundary';
 import { aircraftGlyph, homeGlyph } from './glyphs';
 import {
   aircraftCollection,
@@ -43,6 +44,7 @@ const EMPTY: Collection<never, never> = { type: 'FeatureCollection', features: [
 /** Deutschland im Überblick, bis die erste Position bekannt ist. */
 const OVERVIEW = { center: [10.45, 51.16] as [number, number], zoom: 5 };
 const FIT = { padding: 64, maxZoom: 16, duration: 0 };
+const DEFAULT_LABEL = 'Lagekarte';
 
 function setData<G, P>(map: maplibregl.Map, source: Source, data: Collection<G, P>) {
   map.getSource<maplibregl.GeoJSONSource>(source)?.setData(data);
@@ -53,7 +55,16 @@ const positions = (aircraft: AircraftState[], gateways: GatewayState[]): GeoPoin
     (p): p is GeoPoint => p !== null,
   );
 
-export function SituationMap({
+/** Fehlt der Grafikkontext, steht im Bereich der Karte ein Hinweis; der Rest der Seite bleibt. */
+export function SituationMap(props: Props) {
+  return (
+    <MapBoundary label={props.label ?? DEFAULT_LABEL}>
+      <MapCanvas {...props} />
+    </MapBoundary>
+  );
+}
+
+function MapCanvas({
   gateways,
   aircraft,
   tracks,
@@ -62,7 +73,7 @@ export function SituationMap({
   follow = false,
   onFollowChange,
   staticFit = false,
-  label = 'Lagekarte',
+  label = DEFAULT_LABEL,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);

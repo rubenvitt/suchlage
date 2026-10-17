@@ -5,11 +5,15 @@ import type { ReactElement } from 'react';
 import { snapshotFlying } from '../contract/fixtures.generated';
 import type { Freshness } from '../live/freshness';
 import { farbenHell } from '../theme/tokens';
+import { MAP_UNAVAILABLE_TEXT, MAP_UNAVAILABLE_TITLE } from './MapBoundary';
 import { SituationMap } from './SituationMap';
 
 // jsdom hat kein WebGL: Die Karte selbst ersetzt ein Double, das festhält, was die Komponente ihr sagt.
-const { FakeMap, maps } = vi.hoisted(() => {
+const { FakeMap, GPUInitializationError, maps, gpu } = vi.hoisted(() => {
   const maps: InstanceType<typeof FakeMap>[] = [];
+  /** Wie MapLibre ohne WebGL 2: Der Konstruktor wirft, solange `available` falsch ist. */
+  const gpu = { available: true, fault: null as Error | null };
+  class GPUInitializationError extends Error {}
   class FakeMap {
     handlers = new Map<string, (e: object) => void>();
     sources = new Map<string, { setData: ReturnType<typeof vi.fn> }>();
@@ -23,7 +27,11 @@ const { FakeMap, maps } = vi.hoisted(() => {
     easeTo = vi.fn();
     zoomIn = vi.fn();
     remove = vi.fn();
-    constructor(public options: { center: unknown; zoom: number }) {
+    constructor(public options: { container: unknown; center: unknown; zoom: number }) {
+      // Reihenfolge wie in MapLibre: erst der Behälter, dann der Grafikkontext.
+      if (!options.container) throw new Error('Container not found');
+      if (!gpu.available) throw new GPUInitializationError('webgl2');
+      if (gpu.fault) throw gpu.fault;
       this.center = options.center;
       this.zoom = options.zoom;
       maps.push(this);
@@ -45,9 +53,9 @@ const { FakeMap, maps } = vi.hoisted(() => {
       return this.sources.get(id)!.setData.mock.calls.at(-1)![0].features;
     }
   }
-  return { FakeMap, maps };
+  return { FakeMap, GPUInitializationError, maps, gpu };
 });
-vi.mock('maplibre-gl', () => ({ Map: FakeMap }));
+vi.mock('maplibre-gl', () => ({ Map: FakeMap, GPUInitializationError }));
 vi.mock('./maplibreWorker', () => ({}));
 vi.mock('./glyphs', () => ({
   aircraftGlyph: (color: string, outlineOnly: boolean) => ({ color, outlineOnly }),
@@ -80,6 +88,11 @@ const loaded = () => {
 
 beforeEach(() => {
   maps.length = 0;
+  gpu.available = true;
+  gpu.fault = null;
+});
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 test('zeigt Fluggerät, Trupp, Spur und Startpunkt der Lage', () => {
@@ -177,4 +190,24 @@ test('Zeichen bleiben stehen, auch wenn ihre Beschriftungen einander überdecken
   for (const id of ['gateways', 'aircraft']) {
     expect(layout(map, id)).toMatchObject({ 'icon-allow-overlap': true, 'text-allow-overlap': true });
   }
+});
+
+test('ohne WebGL 2 steht ein Hinweis statt der Karte, und die Seite bleibt stehen', () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  gpu.available = false;
+  const { rerender } = render(light(<SituationMap {...live} />));
+  const alert = screen.getByRole('alert');
+  expect(alert).toHaveTextContent(MAP_UNAVAILABLE_TITLE);
+  expect(alert).toHaveTextContent(MAP_UNAVAILABLE_TEXT);
+  expect(screen.getByRole('region', { name: 'Lagekarte' })).toContainElement(alert);
+  expect(screen.queryByRole('button', { name: 'Folgen' })).not.toBeInTheDocument();
+  // Auch der Wechsel Hell/Dunkel versucht es nicht erneut in einem Behälter, den es nicht mehr gibt.
+  rerender(dark(<SituationMap {...live} />));
+  expect(screen.getByRole('alert')).toHaveTextContent(MAP_UNAVAILABLE_TITLE);
+});
+
+test('ein Fehler im Code bleibt ein Fehler und geht an die Fehlergrenze der Seite', () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  gpu.fault = new TypeError('kaputt');
+  expect(() => render(light(<SituationMap {...live} />))).toThrow('kaputt');
 });
