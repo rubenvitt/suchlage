@@ -17,8 +17,9 @@ export function LiveProvider({ store, url = '/api/live', children }: { store?: L
     if (store) return;
     const onEvent = (e: LiveEvent) => {
       own.dispatch(e);
-      // Die Flugliste kennt neue und beendete Flüge, ohne zu pollen.
-      if (e.type === 'flight_started' || e.type === 'flight_ended') {
+      // Flugliste und Flugdetail (['flights', id]) kennen neue und beendete Flüge, ohne zu pollen. Ein
+      // Snapshot kommt nach jedem Neuverbinden: Ein Flugstart oder eine Landung in der Lücke fehlte sonst.
+      if (e.type === 'snapshot' || e.type === 'flight_started' || e.type === 'flight_ended') {
         void client.invalidateQueries({ queryKey: queryKeys.flights });
       }
     };
