@@ -2,6 +2,7 @@ import { skipToken, useQuery } from '@tanstack/react-query';
 import type { AuthOptions } from '../contract/generated/AuthOptions';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
+import type { Health } from '../contract/generated/Health';
 import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
@@ -16,6 +17,7 @@ export const queryKeys = {
   settings: ['settings'] as const,
   remoteControllers: ['remote-controllers'] as const,
   kioskTokens: ['kiosk-tokens'] as const,
+  health: ['health'] as const,
 };
 
 /** Abstand der Selbstheilung, solange `/api/me` noch nie geantwortet hat. */
@@ -61,3 +63,5 @@ export const useRemoteControllers = () =>
   });
 export const useKioskTokens = () =>
   useQuery({ queryKey: queryKeys.kioskTokens, queryFn: () => apiGet<KioskTokenView[]>('/api/kiosk-tokens') });
+/** Laufender Stand des Servers. Ohne `staleTime`: Nach einem Update zeigt die offene Seite beim nächsten Blick den neuen. */
+export const useHealth = () => useQuery({ queryKey: queryKeys.health, queryFn: () => apiGet<Health>('/api/health') });

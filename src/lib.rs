@@ -20,6 +20,7 @@ pub mod static_files;
 pub mod store;
 pub mod time;
 pub mod token;
+pub mod version;
 pub mod web;
 
 #[cfg(test)]

@@ -22,6 +22,7 @@ export const handlersFor = (me: Me) => {
   const drawn = new Map<string, MapElement>(fx.mapElements.map((e) => [e.id, e]));
   return [
     http.get('/api/me', () => HttpResponse.json(me)),
+    http.get('/api/health', () => HttpResponse.json(fx.health)),
     http.get('/api/auth/options', () => HttpResponse.json(fx.authOptionsOidc)),
     http.post('/api/auth/logout', noContent),
     http.get('/api/situation', () => HttpResponse.json(fx.snapshotFlying)),

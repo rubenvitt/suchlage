@@ -19,6 +19,17 @@ pub struct Me {
     pub role: Role,
 }
 
+/// Antwort von `/api/health`: zeigt, welcher Stand läuft.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Health {
+    pub status: String,
+    /// Release-Version wie im Git-Tag ohne `v`, lokal `<Cargo-Version>-dev`.
+    pub version: String,
+    /// Kurzer Commit des Builds, `null` außerhalb der Release-Pipeline.
+    pub commit: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AuthOptions {

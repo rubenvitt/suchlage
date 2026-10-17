@@ -1,0 +1,176 @@
+# Jeder Push auf `main` ist ein Release: Version vergeben, Image bauen und nach GHCR schieben,
+# dann Git-Tag und GitHub-Release anlegen (Runbook Schritt 3). Server und Systemseite zeigen
+# dieselbe Version, damit klar ist, was läuft.
+#
+# Version: MAJOR.MINOR aus Cargo.toml, PATCH zählt pro Release hoch. Für einen neuen Meilenstein
+# genügt es, in Cargo.toml die Minor-Version anzuheben (0.2.x → 0.3.0); der nächste Push auf
+# `main` beginnt dann bei PATCH 0.
+#
+# amd64 und arm64 bauen nativ nebeneinander, ohne Emulation. Der Job `merge` fasst beide unter
+# einem Tag zusammen, Docker holt am Host dann die passende Architektur.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Läufe stehen hintereinander an, damit zwei Pushes nie dieselbe Version ziehen.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      commit: ${{ steps.v.outputs.commit }}
+      new: ${{ steps.v.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        run: |
+          commit=$(git rev-parse --short=7 HEAD)
+          base=$(sed -n 's/^version = "\([0-9]*\.[0-9]*\)\.[0-9]*"$/\1/p' Cargo.toml | head -n1)
+          [ -n "$base" ] || { echo "::error::Keine Version MAJOR.MINOR.PATCH in Cargo.toml"; exit 1; }
+          tags=$(git ls-remote --tags --refs origin 'refs/tags/v*')
+          # Trägt der Commit schon ein Release (erneuter Lauf), bleibt es bei dessen Version.
+          existing=$(awk -v sha="$GITHUB_SHA" '$1 == sha { sub("refs/tags/v", "", $2); print $2 }' <<< "$tags" | head -n1)
+          if [ -n "$existing" ]; then
+            version=$existing new=false
+          elif [ "$GITHUB_REF" != refs/heads/main ]; then
+            # Handlauf auf einem anderen Branch: Image ja, Release nein.
+            version="$base.0-dev.$commit" new=false
+          else
+            last=$(sed -n 's|.*refs/tags/v||p' <<< "$tags" \
+              | awk -F. -v b="$base" '$1 "." $2 == b && $3 ~ /^[0-9]+$/ { print $3 }' | sort -n | tail -n1)
+            version="$base.$(( ${last:--1} + 1 ))" new=true
+          fi
+          echo "Version $version (neu: $new, Commit $commit)"
+          { echo "version=$version"; echo "commit=$commit"; echo "new=$new"; } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Nur für die Labels (org.opencontainers.image.version); die Tags setzt der Job `merge`.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: type=raw,value=${{ needs.version.outputs.version }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SUCHLAGE_VERSION=${{ needs.version.outputs.version }}
+            SUCHLAGE_COMMIT=${{ needs.version.outputs.commit }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.arch }},mode=max
+
+      - run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # <Version> ist der Name zum Ausliefern, m1-<kurzer Commit> bleibt wie bisher für den Rückweg,
+      # m1 zeigt auf den neuesten Stand von main.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=sha,prefix=m1-
+            type=raw,value=m1,enable={{is_default_branch}}
+
+      - working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$IMAGE@sha256:%s " *)
+
+      - run: docker buildx imagetools inspect "$IMAGE:$VERSION"
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+
+  # Erst wenn das Image in GHCR liegt: Ein Release ohne Image wäre nicht auslieferbar.
+  release:
+    needs: [version, merge]
+    if: needs.version.outputs.new == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - run: |
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v$VERSION" \
+            --generate-notes \
+            --notes "Image: \`$IMAGE:$VERSION\` (linux/amd64, linux/arm64)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}

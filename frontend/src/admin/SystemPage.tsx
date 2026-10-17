@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useHealth } from '../api/queries';
 import { Datenfeld, Datenraster, Paneel, StatusChip, type StatusTon } from '../components/instrument';
 import type { BrokerStatus } from '../contract/generated/BrokerStatus';
 import type { ConnectionStatus } from '../live/connection';
@@ -26,8 +27,19 @@ const LIVE: Record<ConnectionStatus, Chip> = {
 export function SystemView({ children }: { children?: ReactNode }) {
   const system = useLive((s) => s.system);
   const status = useConnectionStatus();
+  const health = useHealth().data;
   return (
     <div className="sl-page sl-system">
+      <Paneel titel="Server">
+        <Datenraster spalten={2} beschriftung="Server">
+          <Datenfeld label="Version" mono>
+            {health?.version ?? '–'}
+          </Datenfeld>
+          <Datenfeld label="Commit" mono>
+            {health ? (health.commit ?? 'lokaler Build') : '–'}
+          </Datenfeld>
+        </Datenraster>
+      </Paneel>
       <Paneel titel="Verbindungen">
         <Datenraster spalten={4} beschriftung="Verbindungen">
           <Datenfeld label="Broker">
