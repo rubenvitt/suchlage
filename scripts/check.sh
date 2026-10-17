@@ -10,14 +10,22 @@ case "$part" in all|--rust|--frontend) ;; *) echo "Aufruf: scripts/check.sh [--r
 
 if [ "$part" != --frontend ]; then
   echo "→ Modulgrenzen"
-  if [ -d src/situation ] && grep -rnE '^[[:space:]]*(pub )?use (axum|sqlx|tokio|rumqttc|reqwest)' src/situation; then
+  # Ohne \b, damit GNU- und BSD-grep gleich prüfen. `w` steht für „kein Bezeichnerzeichen“.
+  w='[^[:alnum:]_]'
+  runtime_crates='(axum|sqlx|tokio|rumqttc|reqwest)'
+  # Alle .rs-Dateien als eine Zeile: So fallen auch mehrzeilige Gruppenimporte `use crate::{…};` auf.
+  flat() { find "$@" -name '*.rs' -exec cat {} + | tr '\n' ' '; }
+  if [ -d src/situation ] && grep -rnE "(^|$w)$runtime_crates::|(^|$w)use (::)?$runtime_crates($w|$)" src/situation; then
     echo "FAIL src/situation importiert Laufzeit-Crates"; exit 1
   fi
-  if grep -rn 'dji::wire' src --include='*.rs' | grep -v '^src/dji/'; then
+  if flat src -not -path 'src/dji/*' | grep -oE "dji::(\{([^;]*$w)?)?wire($w|$)"; then
     echo "FAIL dji::wire wird außerhalb von src/dji benutzt"; exit 1
   fi
-  if [ -d src/dji ] && grep -rnE 'crate::(runtime|web)' src/dji; then
+  if [ -d src/dji ] && flat src/dji | grep -oE "crate::(\{([^;]*$w)?)?(runtime|web)($w|$)"; then
     echo "FAIL src/dji hängt an runtime oder web (Zyklus)"; exit 1
+  fi
+  if [ -d src/contract ] && grep -rnE "crate::" src/contract | grep -vE "crate::contract($w|$)"; then
+    echo "FAIL src/contract hängt an anderen Teilen des Crates"; exit 1
   fi
 
   echo "→ Rust"

@@ -9,9 +9,9 @@ use axum::{Json, Router};
 
 use crate::app::AppState;
 use crate::auth::session::Viewer;
-use crate::dji::topic::is_valid_sn;
 use crate::error::AppError;
 use crate::media::{hook, proxy};
+use crate::sn::is_valid_sn;
 use crate::store;
 
 /// Unter `/api`.

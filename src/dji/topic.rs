@@ -22,9 +22,7 @@ pub const SUBSCRIPTIONS: &[&str] = &[
     "thing/product/+/requests",
 ];
 
-pub fn is_valid_sn(sn: &str) -> bool {
-    (1..=64).contains(&sn.len()) && sn.bytes().all(|b| b.is_ascii_alphanumeric())
-}
+pub use crate::sn::is_valid_sn;
 
 pub fn parse(topic: &str) -> DjiTopic<'_> {
     let parts: Vec<&str> = topic.split('/').collect();
