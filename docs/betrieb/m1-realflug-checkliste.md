@@ -13,5 +13,5 @@ Abnahme laut Spec §7: echter Flug, Position und Bild im FüKw und mobil sichtba
 - [ ] Funkabriss simulieren (Fernsteuerung abschirmen): Schraffur „vor N s“, danach neues Spursegment.
 - [ ] Server-Neustart im Flug (`docker compose -f compose.m1.yaml restart server` in `/srv/suchlage/deploy`): derselbe Flug läuft weiter, Startpunkt und Livebild-Quellen sind sofort wieder da (`device_state`), „Livebild starten“ funktioniert ohne neues Einschalten.
 - [ ] Landung erkannt; Flug in der Liste mit Spur und Video, Download funktioniert.
-- [ ] Systemansicht: nicht ausgewertete Felder notieren; Rohmitschnitt `/data/records/*.jsonl` aus dem Volume `server-data` sichern, außerhalb des Repos (`docker compose -f compose.m1.yaml cp server:/data/records ./records-m1`).
+- [ ] Systemansicht: nicht ausgewertete Felder notieren; Rohmitschnitt `/data/records/*.jsonl` aus dem Volume `server-data` sichern, außerhalb von `deploy/`, das der nächste rsync mit `--delete` abgleicht: in `/srv/suchlage/deploy` `docker compose -f compose.m1.yaml cp server:/data/records ../records/m1`, danach auf den eigenen Rechner holen (`rsync -a <vserver>:/srv/suchlage/records/ ~/dev/personal/drk/suchlage-records/`, außerhalb des Repos).
 - [ ] Mitschnitt bereinigen (Koordinaten verschieben, Seriennummern ersetzen) und als zweite Replay-Fixture vorschlagen.
