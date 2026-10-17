@@ -9,6 +9,7 @@ use axum::routing::get;
 use sqlx::SqlitePool;
 use tokio::sync::{mpsc, watch};
 
+use crate::auth::oidc::OidcState;
 use crate::config::BootConfig;
 use crate::error::AppError;
 use crate::runtime::service::{self, SituationHandle};
@@ -21,6 +22,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub situation: SituationHandle,
     pub settings: SettingsHandle,
+    pub oidc: Arc<OidcState>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -108,6 +110,7 @@ pub async fn run(
         pool: pool.clone(),
         situation,
         settings,
+        oidc: Arc::new(OidcState::new()),
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
     // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503.

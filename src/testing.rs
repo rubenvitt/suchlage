@@ -56,6 +56,7 @@ pub async fn test_app() -> TestApp {
         pool,
         situation,
         settings,
+        oidc: Arc::new(crate::auth::oidc::OidcState::new()),
     };
     TestApp {
         router: router(state.clone()),

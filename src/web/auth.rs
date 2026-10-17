@@ -1,14 +1,16 @@
-//! Anmeldung über HTTP: Optionen, Ersteinrichtung, eigene Sitzung, Abmelden, Großbild-Zugang,
-//! Dev-Login (Feature `dev`).
+//! Anmeldung über HTTP: Optionen, Ersteinrichtung, OIDC, eigene Sitzung, Abmelden,
+//! Großbild-Zugang, Dev-Login (Feature `dev`).
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::Redirect;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::CookieJar;
-use axum_extra::extract::cookie::Cookie;
+use axum_extra::extract::cookie::{Cookie, SameSite};
 
 use crate::app::AppState;
+use crate::auth::oidc::{PENDING_TTL, STATE_COOKIE};
 use crate::auth::session::{COOKIE, Viewer, secure_cookies, session_cookie};
 use crate::contract::{
     AuthOptions, KioskEnroll, Me, OidcSettingsInput, Role, SetupRequest, SetupResult,
@@ -23,6 +25,8 @@ pub fn routes() -> Router<AppState> {
         .route("/auth/options", get(options))
         .route("/auth/logout", post(logout))
         .route("/auth/kiosk", post(kiosk_enroll))
+        .route("/auth/oidc/start", get(oidc_start))
+        .route("/auth/oidc/callback", get(oidc_callback))
         .route("/setup", post(setup))
         .route("/me", get(me));
     #[cfg(feature = "dev")]
@@ -55,11 +59,121 @@ async fn setup(
     };
     // Erst prüfen, dann den Token verbrauchen: Ein Tippfehler im Issuer kostet keinen neuen Link.
     crate::settings::validate_oidc(&input)?;
+    state.oidc.check_discovery(input.issuer.trim()).await?;
     crate::auth::setup::consume(&state.pool, &body.token, now_ms()).await?;
     state.settings.update_oidc(input).await?;
     Ok(Json(SetupResult {
         login_url: "/api/auth/oidc/start?next=/".into(),
     }))
+}
+
+/// Pfad des Bindungscookies: Es geht nur an Start und Rücksprung.
+const STATE_COOKIE_PATH: &str = "/api/auth/oidc";
+/// Jeder Fehler der Anmeldung landet hier; die Details stehen nur im Log.
+const LOGIN_FAILED: &str = "/anmelden?fehler=oidc";
+
+#[derive(serde::Deserialize)]
+struct StartQuery {
+    next: Option<String>,
+}
+
+/// Der Browser kommt per Navigation, nicht per `fetch`. Deshalb antwortet auch ein Fehler mit
+/// einem Rücksprung auf die Anmeldeseite statt mit JSON.
+async fn oidc_start(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<StartQuery>,
+) -> (CookieJar, Redirect) {
+    match begin_login(&state, q.next.unwrap_or_else(|| "/".into())).await {
+        Ok((url, csrf)) => {
+            let cookie = Cookie::build((STATE_COOKIE, csrf))
+                .path(STATE_COOKIE_PATH)
+                .http_only(true)
+                .same_site(SameSite::Lax)
+                .secure(secure_cookies(&state.boot))
+                .max_age(time::Duration::seconds(PENDING_TTL.as_secs() as i64))
+                .build();
+            (jar.add(cookie), Redirect::to(url.as_str()))
+        }
+        Err(e) => {
+            tracing::warn!(error = ?e, "OIDC-Anmeldung nicht gestartet");
+            (jar, Redirect::to(LOGIN_FAILED))
+        }
+    }
+}
+
+async fn begin_login(state: &AppState, next: String) -> Result<(url::Url, String), AppError> {
+    let cfg = state
+        .settings
+        .current()
+        .oidc
+        .ok_or_else(|| AppError::Unavailable("Anmeldung ist noch nicht eingerichtet".into()))?;
+    let redirect = crate::settings::redirect_url(&state.boot);
+    state.oidc.begin(&cfg, &redirect, next).await
+}
+
+#[derive(serde::Deserialize)]
+struct CallbackQuery {
+    state: Option<String>,
+    code: Option<String>,
+}
+
+async fn oidc_callback(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(q): Query<CallbackQuery>,
+) -> (CookieJar, Redirect) {
+    let jar_out = jar
+        .clone()
+        .remove(Cookie::build(STATE_COOKIE).path(STATE_COOKIE_PATH));
+    match complete_login(&state, &jar, q).await {
+        Ok((token, next)) => {
+            let session = session_cookie(
+                token,
+                store::sessions::USER_TTL_MS,
+                secure_cookies(&state.boot),
+            );
+            (jar_out.add(session), Redirect::to(&next))
+        }
+        Err(e) => {
+            tracing::warn!(error = ?e, "OIDC-Anmeldung abgebrochen");
+            (jar_out, Redirect::to(LOGIN_FAILED))
+        }
+    }
+}
+
+async fn complete_login(
+    state: &AppState,
+    jar: &CookieJar,
+    q: CallbackQuery,
+) -> Result<(String, String), AppError> {
+    let (Some(csrf), Some(code)) = (q.state, q.code) else {
+        return Err(AppError::Unauthorized);
+    };
+    // Bindet den Rücksprung an den Browser, der die Anmeldung begonnen hat (Login-CSRF).
+    if jar.get(STATE_COOKIE).map(|c| c.value()) != Some(csrf.as_str()) {
+        return Err(AppError::Unauthorized);
+    }
+    let cfg = state
+        .settings
+        .current()
+        .oidc
+        .ok_or(AppError::Unauthorized)?;
+    let redirect = crate::settings::redirect_url(&state.boot);
+    let (identity, next) = state.oidc.finish(&cfg, &redirect, &csrf, &code).await?;
+    let now = now_ms();
+    let user = store::users::upsert_oidc(
+        &state.pool,
+        &identity.issuer,
+        &identity.subject,
+        &identity.display_name,
+        now,
+    )
+    .await?;
+    Ok((
+        store::sessions::create_for_user(&state.pool, user.id, now).await?,
+        next,
+    ))
 }
 
 async fn me(Viewer(principal): Viewer) -> Json<Me> {
@@ -221,11 +335,12 @@ mod tests {
         );
     }
 
-    /// Ersteinrichtung über den Einmal-Link: Ein Tippfehler kostet den Link nicht, danach ist
-    /// Suchlage eingerichtet und der Weg zu.
+    /// Ersteinrichtung über den Einmal-Link: Ein Tippfehler oder ein nicht erreichbarer Anbieter
+    /// kostet den Link nicht, danach ist Suchlage eingerichtet und der Weg zu.
     #[cfg(not(feature = "dev"))]
     #[tokio::test]
     async fn setup_link_configures_oidc_exactly_once() {
+        let idp = crate::auth::oidc::test_idp::start("suchlage").await;
         let app = test_app().await;
         let (_, options) = send(&app.router, get("/api/auth/options")).await;
         assert_eq!(options["setup_required"], true);
@@ -251,7 +366,7 @@ mod tests {
             )
         };
 
-        let (status, body) = send(&app.router, request("falsch", "https://id.example.org")).await;
+        let (status, body) = send(&app.router, request("falsch", &idp.issuer)).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert!(
             body["error"].as_str().unwrap().contains("Einrichtungslink"),
@@ -260,12 +375,20 @@ mod tests {
         let (status, body) = send(&app.router, request(token, "id.example.org")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "Tippfehler im Issuer");
         assert!(body["error"].as_str().unwrap().contains("Issuer"), "{body}");
+        // Port 1 auf Loopback ist zu: kein Anbieter antwortet.
+        let (status, body) = send(&app.router, request(token, "http://127.0.0.1:1")).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert!(
+            body["error"].as_str().unwrap().contains("Anmeldedienst"),
+            "{body}"
+        );
 
-        let (status, body) = send(&app.router, request(token, "https://id.example.org/")).await;
+        let issuer_with_slash = format!(" {}/ ", idp.issuer);
+        let (status, body) = send(&app.router, request(token, &issuer_with_slash)).await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["login_url"], "/api/auth/oidc/start?next=/");
         let oidc = app.state.settings.current().oidc.unwrap();
-        assert_eq!(oidc.issuer, "https://id.example.org");
+        assert_eq!(oidc.issuer, idp.issuer);
         assert_eq!(oidc.client_secret, "geheim");
         let (_, options) = send(&app.router, get("/api/auth/options")).await;
         assert_eq!(options["setup_required"], false);
@@ -279,8 +402,145 @@ mod tests {
         );
         assert_eq!(
             app.state.settings.current().oidc.unwrap().issuer,
-            "https://id.example.org"
+            idp.issuer
         );
+    }
+
+    async fn app_with_idp() -> (
+        crate::testing::TestApp,
+        crate::auth::oidc::test_idp::TestIdp,
+    ) {
+        let idp = crate::auth::oidc::test_idp::start("suchlage").await;
+        let app = test_app().await;
+        app.state
+            .settings
+            .update_oidc(crate::contract::OidcSettingsInput {
+                issuer: idp.issuer.clone(),
+                client_id: "suchlage".into(),
+                client_secret: Some("s".into()),
+            })
+            .await
+            .unwrap();
+        (app, idp)
+    }
+
+    fn location(res: &axum::response::Response) -> &str {
+        res.headers()["location"].to_str().unwrap()
+    }
+
+    fn set_cookies(res: &axum::response::Response) -> Vec<String> {
+        res.headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn oidc_login_end_to_end_makes_first_user_admin() {
+        let (app, idp) = app_with_idp().await;
+
+        let res = tower::ServiceExt::oneshot(
+            app.router.clone(),
+            get("/api/auth/oidc/start?next=/flights"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        let authorize = url::Url::parse(location(&res)).unwrap();
+        assert_eq!(authorize.path(), "/authorize");
+        let q: std::collections::HashMap<_, _> = authorize.query_pairs().into_owned().collect();
+        assert_eq!(
+            q["redirect_uri"],
+            "https://suchlage.test/api/auth/oidc/callback"
+        );
+        *idp.nonce.lock().unwrap() = q["nonce"].clone();
+        let binding = set_cookies(&res).pop().unwrap();
+        for attr in [
+            "HttpOnly",
+            "SameSite=Lax",
+            "Secure",
+            "Path=/api/auth/oidc",
+            "Max-Age=600",
+        ] {
+            assert!(binding.contains(attr), "{attr} fehlt: {binding}");
+        }
+        let binding = binding.split(';').next().unwrap().to_string();
+        assert_eq!(binding, format!("suchlage_oidc={}", q["state"]));
+
+        let cb = format!("/api/auth/oidc/callback?state={}&code=c1", q["state"]);
+        let res = tower::ServiceExt::oneshot(app.router.clone(), with_cookie(get(&cb), &binding))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(location(&res), "/flights");
+        assert_eq!(idp.last_token_request()["code"], "c1");
+        let cookies = set_cookies(&res);
+        assert!(
+            cookies
+                .iter()
+                .any(|c| c.starts_with("suchlage_oidc=") && c.contains("Max-Age=0")),
+            "Bindungscookie wird gelöscht: {cookies:?}"
+        );
+        let session = cookies
+            .iter()
+            .find(|c| c.starts_with("suchlage_sid="))
+            .expect("Sitzungscookie");
+        let (_, me) = send(
+            &app.router,
+            with_cookie(get("/api/me"), session.split(';').next().unwrap()),
+        )
+        .await;
+        assert_eq!(me["role"], "admin");
+        assert_eq!(me["display_name"], crate::auth::oidc::test_idp::USERNAME);
+    }
+
+    #[tokio::test]
+    async fn callback_without_matching_binding_cookie_is_refused() {
+        let (app, idp) = app_with_idp().await;
+        let res = tower::ServiceExt::oneshot(app.router.clone(), get("/api/auth/oidc/start"))
+            .await
+            .unwrap();
+        let authorize = url::Url::parse(location(&res)).unwrap();
+        let st = authorize
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .to_string();
+        let cb = format!("/api/auth/oidc/callback?state={st}&code=c");
+        for req in [
+            get(&cb),
+            with_cookie(get(&cb), "suchlage_oidc=fremd"),
+            with_cookie(
+                get("/api/auth/oidc/callback?code=c"),
+                &format!("suchlage_oidc={st}"),
+            ),
+        ] {
+            let res = tower::ServiceExt::oneshot(app.router.clone(), req)
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::SEE_OTHER);
+            assert_eq!(location(&res), "/anmelden?fehler=oidc");
+            assert!(
+                !set_cookies(&res)
+                    .iter()
+                    .any(|c| c.starts_with("suchlage_sid=")),
+                "keine Sitzung"
+            );
+        }
+        assert_eq!(idp.token_request_count(), 0, "der Code wird nie eingelöst");
+    }
+
+    #[tokio::test]
+    async fn start_without_oidc_settings_sends_the_browser_back_to_login() {
+        let app = test_app().await;
+        let res = tower::ServiceExt::oneshot(app.router.clone(), get("/api/auth/oidc/start"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(location(&res), "/anmelden?fehler=oidc");
+        assert!(set_cookies(&res).is_empty());
     }
 
     /// Review Focus 4: ohne Feature `dev` gibt es keinen Login ohne OIDC.
