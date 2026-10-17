@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { useMe } from '../api/queries';
 import { useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
+import { usePhotoSelection } from '../photos/usePhotoSelection';
 import { TelemetryStrip } from '../telemetry/TelemetryStrip';
 import { useFocus } from './useFocus';
 import { useLiveMapData } from './useLiveMapData';
@@ -18,6 +20,8 @@ export function MobileView() {
   // Wer die Karte mit dem Finger verschiebt, beendet das Folgen; der Knopf holt es zurück.
   const [follow, setFollow] = useState(true);
   const notice = viewerNoticeOf(state, focus);
+  const { data: me } = useMe();
+  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
 
   return (
     <div className="sl-mobile">
@@ -39,7 +43,9 @@ export function MobileView() {
           thresholds={state.thresholds}
           follow={follow}
           onFollowChange={setFollow}
+          {...photo.mapProps}
         />
+        {photo.overlay}
       </div>
     </div>
   );

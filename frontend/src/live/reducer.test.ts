@@ -100,3 +100,14 @@ test('Kartenelemente: Liste ersetzt, Einzelnes ersetzt nach ID, Löschen entfern
   expect(applyEvent(deleted, ev('map_element_deleted'), 0)).toBe(deleted);
   expect(applyEvent(deleted, { type: 'map_elements', elements: [] }, 0).mapElements).toEqual({});
 });
+
+test('Auslösungen aus dem Strom: neue kommen dazu, dieselbe ID ersetzt die alte, ein Snapshot lässt sie stehen', () => {
+  const shot = ev('photo_shot');
+  const once = applyEvent(flying(), shot, 0);
+  expect(Object.keys(once.photoShots)).toEqual([shot.shot.id]);
+  const thumb = { ...shot.shot, photos: shot.shot.photos.map((p) => ({ ...p, thumb_url: `/x/${p.id}` })) };
+  const updated = applyEvent(once, { type: 'photo_shot', shot: thumb }, 0);
+  expect(updated.photoShots[shot.shot.id]!.photos[0]!.thumb_url).toBe(`/x/${thumb.photos[0]!.id}`);
+  const resnap = applyEvent(updated, { type: 'snapshot', snapshot: snapshotFlying }, 0);
+  expect(resnap.photoShots).toBe(updated.photoShots);
+});

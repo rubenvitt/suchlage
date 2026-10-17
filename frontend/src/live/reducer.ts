@@ -5,6 +5,7 @@ import type { FreshnessThresholds } from '../contract/generated/FreshnessThresho
 import type { GatewayState } from '../contract/generated/GatewayState';
 import type { LiveEvent } from '../contract/generated/LiveEvent';
 import type { MapElement } from '../contract/generated/MapElement';
+import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { StreamState } from '../contract/generated/StreamState';
 import type { SystemStatus } from '../contract/generated/SystemStatus';
 import type { TrackPoint } from '../contract/generated/TrackPoint';
@@ -26,6 +27,8 @@ export interface LiveState {
   system: SystemStatus | null;
   /** Kartenelemente nach ID; ein Snapshot lässt sie stehen, die Liste danach ersetzt sie. */
   mapElements: Record<string, MapElement>;
+  /** Auslösungen aus dem Live-Strom nach ID; die Liste davor lädt `useRecentPhotos`. */
+  photoShots: Record<string, PhotoShot>;
 }
 
 export const initialLiveState: LiveState = {
@@ -39,6 +42,7 @@ export const initialLiveState: LiveState = {
   streams: {},
   system: null,
   mapElements: {},
+  photoShots: {},
 };
 
 /** Wie `situation::track::haversine_m` im Kern. */
@@ -69,6 +73,7 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
         streams: byKey(snap.streams, (st) => st.gateway_sn),
         system: snap.system,
         mapElements: s.mapElements,
+        photoShots: s.photoShots,
       };
     }
     case 'gateway':
@@ -122,6 +127,9 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
       delete mapElements[e.id];
       return { ...s, mapElements };
     }
+    case 'photo_shot':
+      // Dieselbe Auslösung kommt zweimal: beim Upload und mit fertigem Vorschaubild.
+      return { ...s, photoShots: { ...s.photoShots, [e.shot.id]: e.shot } };
     default:
       // Ein lange offener Tab kann einen neueren Server erleben; dessen neue Ereignisse lassen den Stand stehen.
       console.warn('Unbekanntes Live-Ereignis – übersprungen');

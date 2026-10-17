@@ -22,6 +22,11 @@ export function LiveProvider({ store, url = '/api/live', children }: { store?: L
       if (e.type === 'snapshot' || e.type === 'flight_started' || e.type === 'flight_ended') {
         void client.invalidateQueries({ queryKey: queryKeys.flights });
       }
+      // Fotos aus einer Lücke im Strom holt die Liste nach; neue Fotos eines Flugs auch sein Detail.
+      if (e.type === 'snapshot') void client.invalidateQueries({ queryKey: queryKeys.photos });
+      if (e.type === 'photo_shot' && e.shot.flight_id != null) {
+        void client.invalidateQueries({ queryKey: queryKeys.flightPhotos(e.shot.flight_id) });
+      }
     };
     // Vorschau-Modus (`mise run ui`): abgespielter Flug statt SSE. Im Build ist MODE 'production', der Zweig fällt weg.
     const connect = import.meta.env.MODE === 'demo' ? demoFeed : connectLive;

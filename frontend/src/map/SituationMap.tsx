@@ -10,7 +10,9 @@ import type { FreshnessThresholds } from '../contract/generated/FreshnessThresho
 import type { GatewayState } from '../contract/generated/GatewayState';
 import type { GeoPoint } from '../contract/generated/GeoPoint';
 import type { MapElement } from '../contract/generated/MapElement';
+import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { TrackPoint } from '../contract/generated/TrackPoint';
+import { photoCollection } from '../photos/photos';
 import { basemapStyle } from './basemapStyle';
 import { draftCollection, elementCollection, elementLabelCollection, type Draft } from './elements';
 import { MapBoundary } from './MapBoundary';
@@ -46,9 +48,14 @@ interface Props {
   draft?: Draft | null;
   /** Klick in die Karte: die Koordinate und das getroffene Element, sonst `null`. Ohne: keine Bedienung. */
   onMapClick?: (point: GeoPoint, elementId: string | null) => void;
+  /** Auslösungen mit Aufnahmeort (M3); ohne Position fallen sie weg. */
+  photos?: PhotoShot[];
+  selectedPhotoId?: string | null;
+  /** Klick auf ein Foto; ohne sind Fotos nur zu sehen (Großbild). */
+  onPhotoClick?: (shotId: string) => void;
 }
 
-type Source = 'track' | 'aircraft' | 'gateways' | 'home' | 'elements' | 'element-labels' | 'draft';
+type Source = 'track' | 'aircraft' | 'gateways' | 'home' | 'elements' | 'element-labels' | 'draft' | 'photos';
 type View = { center: maplibregl.LngLat; zoom: number };
 
 const EMPTY: Collection<never, never> = { type: 'FeatureCollection', features: [] };
@@ -57,6 +64,9 @@ const OVERVIEW = { center: [10.45, 51.16] as [number, number], zoom: 5 };
 const FIT = { padding: 64, maxZoom: 16, duration: 0 };
 const DEFAULT_LABEL = 'Lagekarte';
 const NO_ELEMENTS: MapElement[] = [];
+const NO_PHOTOS: PhotoShot[] = [];
+/** Ebenen der Fotos, die ein- und ausgeblendet werden. */
+const PHOTO_LAYERS = ['photos', 'photos-label'];
 /** Ebenen, die ein Klick trifft; die oberste zuerst. */
 const ELEMENT_LAYERS = ['elements-point', 'elements-line', 'elements-fill'];
 /** Ein Klick daneben trifft noch: halbe Kantenlänge des Suchfelds in Pixeln. */
@@ -105,6 +115,9 @@ function MapCanvas({
   selectedElementId = null,
   draft = null,
   onMapClick,
+  photos = NO_PHOTOS,
+  selectedPhotoId = null,
+  onPhotoClick,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -113,21 +126,25 @@ function MapCanvas({
   // Die Lage wird einmal ins Bild geholt; danach bestimmt der Nutzer den Ausschnitt.
   const framed = useRef(false);
   const [loaded, setLoaded] = useState(false);
+  const [showPhotos, setShowPhotos] = useState(true);
   const { rollen, dunkel } = useRollen();
   const stopFollowing = useEffectEvent(() => onFollowChange?.(false));
   // Beim Zeichnen zählt jeder Klick als Eckpunkt, auch auf einem vorhandenen Element.
   const clicked = useEffectEvent((e: maplibregl.MapMouseEvent) => {
-    if (!onMapClick) return;
     const { x, y } = e.point;
+    const box: [maplibregl.PointLike, maplibregl.PointLike] = [
+      [x - HIT_PX, y - HIT_PX],
+      [x + HIT_PX, y + HIT_PX],
+    ];
+    // Ein Foto geht vor: Es liegt über den Elementen. Beim Zeichnen zählt der Klick als Eckpunkt.
+    if (!draft && onPhotoClick && showPhotos) {
+      const photo = e.target.queryRenderedFeatures(box, { layers: ['photos'] })[0]?.properties?.id;
+      if (typeof photo === 'string') return onPhotoClick(photo);
+    }
+    if (!onMapClick) return;
     const hits = draft
       ? []
-      : e.target.queryRenderedFeatures(
-          [
-            [x - HIT_PX, y - HIT_PX],
-            [x + HIT_PX, y + HIT_PX],
-          ],
-          { layers: ELEMENT_LAYERS },
-        );
+      : e.target.queryRenderedFeatures(box, { layers: ELEMENT_LAYERS });
     const id = hits[0]?.properties?.id;
     onMapClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }, typeof id === 'string' ? id : null);
   });
@@ -168,6 +185,7 @@ function MapCanvas({
         'gateways',
         'home',
         'draft',
+        'photos',
       ] satisfies Source[]) {
         map.addSource(id, { type: 'geojson', data: EMPTY });
       }
@@ -244,6 +262,32 @@ function MapCanvas({
           'text-field': ['get', 'name'],
           'text-font': ['noto_sans_regular'],
           'text-size': 12,
+        },
+        paint: labelPaint,
+      });
+      // Fotos über den Elementen, unter Spur und Fluggerät: ein Ring je Auslösung.
+      map.addLayer({
+        id: 'photos',
+        type: 'circle',
+        source: 'photos',
+        paint: {
+          'circle-color': rollen.grund,
+          'circle-radius': ['case', ['get', 'selected'], 8, 6],
+          'circle-stroke-color': ['case', ['get', 'selected'], rollen.text, rollen.bedien],
+          'circle-stroke-width': ['case', ['get', 'selected'], 3, 2],
+        },
+      });
+      map.addLayer({
+        id: 'photos-label',
+        type: 'symbol',
+        source: 'photos',
+        filter: ['get', 'selected'],
+        layout: {
+          'text-field': ['get', 'time'],
+          'text-font': ['noto_sans_regular'],
+          'text-size': 12,
+          'text-offset': [0, 1.1],
+          'text-anchor': 'top',
         },
         paint: labelPaint,
       });
@@ -367,6 +411,16 @@ function MapCanvas({
     if (loaded) setData(mapRef.current!, 'element-labels', elementLabelCollection(elements));
   }, [loaded, elements]);
 
+  useEffect(() => {
+    if (loaded) setData(mapRef.current!, 'photos', photoCollection(photos, selectedPhotoId));
+  }, [loaded, photos, selectedPhotoId]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const map = mapRef.current!;
+    for (const id of PHOTO_LAYERS) map.setLayoutProperty(id, 'visibility', showPhotos ? 'visible' : 'none');
+  }, [loaded, showPhotos]);
+
   const drafting = draft != null;
   useEffect(() => {
     if (!loaded) return;
@@ -432,6 +486,15 @@ function MapCanvas({
           >
             Folgen
           </Button>
+          {photos.length > 0 && (
+            <Button
+              aria-pressed={showPhotos}
+              type={showPhotos ? 'primary' : 'default'}
+              onClick={() => setShowPhotos((v) => !v)}
+            >
+              Fotos
+            </Button>
+          )}
           <Button aria-label="Vergrößern" onClick={() => map()?.zoomIn({ duration: 150 })}>
             +
           </Button>

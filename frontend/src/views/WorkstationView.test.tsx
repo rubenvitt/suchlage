@@ -255,3 +255,15 @@ test('ein Klick ins Leere schließt das gewählte Element', async () => {
   klick(52.4, 10.0);
   expect(screen.queryByRole('heading', { name: 'Pilot 1' })).not.toBeInTheDocument();
 });
+
+test('Fotos: Liste und Strom auf der Karte, ein Klick öffnet die Vorschau mit Original', async () => {
+  show(snapshotFlying, [eventOf('photo_shot')]);
+  await vi.waitFor(() => expect(karte.props!.photos).toHaveLength(2));
+  const id = karte.props!.photos![0]!.id;
+  act(() => karte.props!.onPhotoClick!(id));
+  expect(karte.props!.selectedPhotoId).toBe(id);
+  const panel = await screen.findByRole('region', { name: /^Foto / });
+  expect(within(panel).getByRole('link', { name: 'Herunterladen' })).toBeInTheDocument();
+  await userEvent.click(within(panel).getByRole('button', { name: 'Foto schließen' }));
+  expect(screen.queryByRole('region', { name: /^Foto / })).toBeNull();
+});

@@ -5,6 +5,7 @@ import type { FlightSummary } from '../contract/generated/FlightSummary';
 import type { Health } from '../contract/generated/Health';
 import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
+import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
 import type { SettingsView } from '../contract/generated/SettingsView';
 import { ApiError, apiGet } from './client';
@@ -18,6 +19,10 @@ export const queryKeys = {
   remoteControllers: ['remote-controllers'] as const,
   kioskTokens: ['kiosk-tokens'] as const,
   health: ['health'] as const,
+  /** Fotos der Lagekarte (letzte 24 h) und je Flug; der Live-Strom ergänzt beide. */
+  photos: ['photos'] as const,
+  recentPhotos: ['photos', 'recent'] as const,
+  flightPhotos: (id: number | null) => ['photos', 'flight', id] as const,
 };
 
 /** Abstand der Selbstheilung, solange `/api/me` noch nie geantwortet hat. */
@@ -65,3 +70,12 @@ export const useKioskTokens = () =>
   useQuery({ queryKey: queryKeys.kioskTokens, queryFn: () => apiGet<KioskTokenView[]>('/api/kiosk-tokens') });
 /** Laufender Stand des Servers. Ohne `staleTime`: Nach einem Update zeigt die offene Seite beim nächsten Blick den neuen. */
 export const useHealth = () => useQuery({ queryKey: queryKeys.health, queryFn: () => apiGet<Health>('/api/health') });
+/** Auslösungen der letzten 24 h für die Lagekarte; neue bringt der Live-Strom (`photo_shot`). */
+export const useRecentPhotos = () =>
+  useQuery({ queryKey: queryKeys.recentPhotos, queryFn: () => apiGet<PhotoShot[]>('/api/photos') });
+/** Alle Fotos eines Flugs; `null` fragt nicht. */
+export const useFlightPhotos = (id: number | null) =>
+  useQuery({
+    queryKey: queryKeys.flightPhotos(id),
+    queryFn: id == null ? skipToken : () => apiGet<PhotoShot[]>(`/api/flights/${id}/photos`),
+  });
