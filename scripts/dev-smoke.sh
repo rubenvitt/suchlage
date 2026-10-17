@@ -43,6 +43,20 @@ for ep in license connect; do
   [ $? -ne 0 ]; check $? "ohne gültigen Code nichts Geheimes ($ep)"
 done
 
+# M2: Kartenelemente über die Pilot-Schnittstelle, mit dem Token aus dem Koppeln.
+WS=$(curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$CODE_A\"}" http://127.0.0.1:8080/pilot/api/license | jq -r .workspaceId)
+TOKEN_A=$(printf '%s' "$A" | jq -r .apiToken)
+MAP="http://127.0.0.1:8080/map/api/v1/workspaces/$WS"
+GROUP=$(curl -sf -H "x-auth-token: $TOKEN_A" "$MAP/element-groups" | jq -r '.data[] | select(.type == 2) | .id')
+[ -n "$GROUP" ]; check $? "Pilot findet die App-Shared-Gruppe"
+PIN='{"id":"smoke-pin","name":"Smoke","resource":{"type":0,"user_name":"","content":{"type":"Feature","properties":{"color":"#E23C39","clampToGround":true},"geometry":{"type":"Point","coordinates":[10.01,52.43]}}}}'
+curl -sf -H "x-auth-token: $TOKEN_A" -H 'content-type: application/json' -d "$PIN" "$MAP/element-groups/$GROUP/elements" | jq -e '.code == 0' >/dev/null
+check $? "Pilot legt einen Punkt an"
+api http://127.0.0.1:8080/api/map/elements | jq -e 'map(select(.id == "smoke-pin" and .origin == "pilot" and .author == "RC A")) | length == 1' >/dev/null
+check $? "Punkt aus Pilot 2 erscheint im Browser"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-auth-token: falsch' "$MAP/element-groups")" = 401 ]
+check $? "Kartenelemente ohne gültigen Token: 401"
+
 mq() { $DC exec -T mqtt "$@"; }
 # update_topo wird beantwortet (Serverrolle darf senden, RC darf ihr status_reply abonnieren)
 # Nur auf die eigenen Abonnenten warten: ein bloßes `wait` wartete auch auf den Server.
