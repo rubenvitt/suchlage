@@ -7,6 +7,7 @@ pub mod examples;
 pub mod flights;
 pub mod live;
 pub mod map;
+pub mod photos;
 
 #[cfg(test)]
 mod fixtures;
@@ -16,6 +17,7 @@ pub use devicelog::*;
 pub use flights::*;
 pub use live::*;
 pub use map::*;
+pub use photos::*;
 
 /// Ab hier gilt ein Wert als verzögert (3 verpasste osd-Nachrichten bei 0,5 Hz).
 pub const FRESHNESS_DELAYED_MS: i64 = 6_000;

@@ -373,6 +373,61 @@ pub fn flight_detail() -> FlightDetail {
     }
 }
 
+/// Zwei Auslösungen im Flug 6: eine mit drei Linsen und Position, eine ohne Position, deren
+/// Vorschaubild noch entsteht.
+pub fn photo_shots() -> Vec<PhotoShot> {
+    let photo = |id: i64, name: &str, lens: PhotoLens, thumb: bool| Photo {
+        id,
+        name: name.into(),
+        lens,
+        thumb_url: thumb.then(|| format!("/api/photos/{id}/thumb")),
+        original_url: format!("/api/photos/{id}/original"),
+    };
+    vec![
+        PhotoShot {
+            id: format!("{GATEWAY_SN}/DJI_20261017143012_0001"),
+            flight_id: Some(6),
+            gateway_sn: GATEWAY_SN.into(),
+            aircraft_sn: Some(AIRCRAFT_SN.into()),
+            taken_at_ms: T0 - 7_100_000,
+            position: Some(GeoPoint {
+                lat: 52.431_9,
+                lon: 10.013_0,
+            }),
+            absolute_altitude_m: Some(142.3),
+            relative_altitude_m: Some(61.5),
+            gimbal_yaw_deg: Some(87.4),
+            photos: vec![
+                photo(
+                    11,
+                    "DJI_20261017143012_0001_T.JPG",
+                    PhotoLens::Thermal,
+                    true,
+                ),
+                photo(12, "DJI_20261017143012_0001_W.JPG", PhotoLens::Wide, true),
+                photo(13, "DJI_20261017143012_0001_Z.JPG", PhotoLens::Zoom, true),
+            ],
+        },
+        PhotoShot {
+            id: format!("{GATEWAY_SN}/DJI_20261017143140_0002"),
+            flight_id: Some(6),
+            gateway_sn: GATEWAY_SN.into(),
+            aircraft_sn: Some(AIRCRAFT_SN.into()),
+            taken_at_ms: T0 - 7_010_000,
+            position: None,
+            absolute_altitude_m: None,
+            relative_altitude_m: None,
+            gimbal_yaw_deg: None,
+            photos: vec![photo(
+                14,
+                "DJI_20261017143140_0002_T.JPG",
+                PhotoLens::Thermal,
+                false,
+            )],
+        },
+    ]
+}
+
 pub fn settings_view() -> SettingsView {
     SettingsView {
         oidc: Some(OidcSettingsView {
@@ -509,6 +564,7 @@ pub fn all() -> Vec<Fixture> {
         ),
         fx("kioskTokens", "KioskTokenView[]", &kiosk_tokens()),
         fx("mapElements", "MapElement[]", &map_elements()),
+        fx("photoShots", "PhotoShot[]", &photo_shots()),
         fx(
             "meAdmin",
             "Me",
@@ -565,5 +621,6 @@ pub fn assert_roundtrips() {
     roundtrip(settings_view());
     roundtrip(remote_controllers());
     roundtrip(map_elements());
+    roundtrip(photo_shots());
     roundtrip(health());
 }

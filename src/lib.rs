@@ -11,6 +11,7 @@ pub mod extract;
 pub mod map;
 pub mod media;
 pub mod mqtt;
+pub mod photos;
 pub mod runtime;
 pub mod settings;
 pub mod sim;
