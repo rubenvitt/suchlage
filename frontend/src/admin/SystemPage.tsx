@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react';
 import { Datenfeld, Datenraster, Paneel, StatusChip, type StatusTon } from '../components/instrument';
 import type { BrokerStatus } from '../contract/generated/BrokerStatus';
 import type { ConnectionStatus } from '../live/connection';
 import { useConnectionStatus, useLive } from '../live/LiveProvider';
 import { Frame } from '../shell/Frame';
+import { DeviceLogPanel } from './DeviceLogPanel';
 import './admin.css';
 
 type Chip = { ton: StatusTon; wort: string };
@@ -21,7 +23,7 @@ const LIVE: Record<ConnectionStatus, Chip> = {
 };
 
 /** Ohne `system` hat der Server noch keinen Stand geschickt: Dann steht nichts da, was nach Lage aussieht. */
-export function SystemView() {
+export function SystemView({ children }: { children?: ReactNode }) {
   const system = useLive((s) => s.system);
   const status = useConnectionStatus();
   return (
@@ -74,15 +76,18 @@ export function SystemView() {
           <p className="sl-muted">Alle empfangenen Felder sind bekannt.</p>
         )}
       </Paneel>
+      {children}
     </div>
   );
 }
 
-/** Der Live-Strom kommt aus `SessionLayout` (F2), wie auf der Lage-Seite. */
+/** Der Live-Strom kommt aus `SessionLayout` (F2), wie auf der Lage-Seite; das Funkprotokoll hat einen eigenen. */
 export function SystemPage() {
   return (
     <Frame>
-      <SystemView />
+      <SystemView>
+        <DeviceLogPanel />
+      </SystemView>
     </Frame>
   );
 }

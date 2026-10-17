@@ -6,9 +6,9 @@ const RETRY_MS = 3_000;
 /** `EventSource.CLOSED`; als Zahl, weil Tests (jsdom) keine `EventSource` kennen. */
 const CLOSED = 2;
 
-export interface LiveConnectionOptions {
+export interface LiveConnectionOptions<T = LiveEvent> {
   url: string;
-  onEvent: (e: LiveEvent) => void;
+  onEvent: (e: T) => void;
   onStatus: (s: ConnectionStatus) => void;
   create?: (url: string) => EventSource;
 }
@@ -17,12 +17,12 @@ export interface LiveConnectionOptions {
  * Hält genau eine EventSource offen. Der Browser verbindet selbst neu; gibt er auf (CLOSED), folgt
  * nach 3 s ein neuer Versuch. Nach jedem Verbinden schickt der Server zuerst einen Snapshot.
  */
-export function connectLive({
+export function connectLive<T = LiveEvent>({
   url,
   onEvent,
   onStatus,
   create = (u) => new EventSource(u),
-}: LiveConnectionOptions): () => void {
+}: LiveConnectionOptions<T>): () => void {
   let source: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
@@ -33,9 +33,9 @@ export function connectLive({
     source = src;
     src.onopen = () => onStatus('open');
     src.onmessage = (m) => {
-      let event: LiveEvent;
+      let event: T;
       try {
-        event = JSON.parse(m.data) as LiveEvent;
+        event = JSON.parse(m.data) as T;
       } catch {
         console.warn('Live-Nachricht nicht lesbar – übersprungen');
         return;

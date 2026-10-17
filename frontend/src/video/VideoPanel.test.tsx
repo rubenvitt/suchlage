@@ -62,6 +62,27 @@ test('Ablehnung durch Pilot 2 wird im Wortlaut gezeigt', () => {
   expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
 });
 
+test('steht der Grund schon im Bild, wiederholt ihn die Fußzeile nicht', async () => {
+  const reason = failed.error!;
+  server.use(http.post('/api/streams/start', () => HttpResponse.json({ error: reason }, { status: 422 })));
+  renderWithApp(<VideoPanel gatewaySn="RCSIM0001" stream={failed} sources={sources} canControl />);
+  await userEvent.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeEnabled());
+  expect(screen.getAllByText(reason)).toHaveLength(1);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('ein anderer Fehler des Befehls steht unter dem Knopf', async () => {
+  server.use(
+    http.post('/api/streams/start', () =>
+      HttpResponse.json({ error: 'RC A meldet sich seit 3 min nicht' }, { status: 503 }),
+    ),
+  );
+  renderWithApp(<VideoPanel gatewaySn="RCSIM0001" stream={failed} sources={sources} canControl />);
+  await userEvent.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('RC A meldet sich seit 3 min nicht');
+});
+
 test('während Pilot 2 startet oder beendet, gibt es keinen Startknopf', () => {
   const { rerender } = renderWithApp(
     <VideoPanel gatewaySn="RCSIM0001" stream={{ ...idle, phase: 'starting' }} sources={sources} canControl />,
