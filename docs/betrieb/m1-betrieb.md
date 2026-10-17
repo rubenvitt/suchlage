@@ -1,6 +1,7 @@
 # M1 Betrieb auf dem vServer
 
-> Auslieferung nur über Tailscale (ohne Traefik/Cloudflare): `docs/betrieb/runbook-deployment.md`.
+> Schritt für Schritt mit allen Befehlen: `docs/betrieb/runbook-deployment.md` (Oberfläche öffentlich
+> unter `suchlage.iuk-ue.de`, MQTT, RTMP und WebRTC nur im Tailnet).
 
 Suchlage M1 läuft als Compose-Projekt `suchlage-m1` mit drei Diensten: `server` (Image
 `suchlage:m1`, ohne Feature `dev`), `mqtt` (Mosquitto mit dynamic-security) und `media`
@@ -25,15 +26,10 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
    ssh <vserver> 'cd /srv/suchlage/deploy && docker compose -f compose.yaml down'
    ```
 
-2. **Image bauen und übertragen.** Das Image muss zur Architektur des vServers passen
-   (`ssh <vserver> uname -m`). `mise run image` baut für die eigene Maschine, auf Apple Silicon
-   also `arm64`. Für einen `x86_64`-vServer stattdessen
-   `docker build --platform linux/amd64 -f deploy/Dockerfile -t suchlage:m1 .` (unter Emulation
-   deutlich langsamer). Danach:
-
-   ```sh
-   docker save suchlage:m1 | ssh <vserver> docker load
-   ```
+2. **Image holen.** GitHub Actions baut bei jedem Push auf `main` das Image und legt es als
+   `ghcr.io/rubenvitt/suchlage:m1-<kurzer Commit>` ab. Die Befehle stehen im Runbook
+   (`docs/betrieb/runbook-deployment.md`, Schritt 3). Lokal bauen geht weiterhin mit `mise run image`,
+   das baut aber für die eigene Maschine, auf Apple Silicon also `arm64`.
 
 3. **`deploy/` übertragen,** ohne Mitschnitte, ohne `smoke.sh` (überschreibt Geheimnisse und
    löscht Mitschnitte) und ohne `.env` (die Datei auf dem vServer bleibt so erhalten):
@@ -47,7 +43,7 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
    `SUCHLAGE_BIND_IP` steht dort schon, wenn M0 auf dem vServer lief. Ergänzen:
 
    ```sh
-   ssh <vserver> 'echo "SUCHLAGE_PUBLIC_URL=https://<öffentliche Adresse>" >> /srv/suchlage/deploy/.env'
+   ssh <vserver> 'echo "SUCHLAGE_PUBLIC_URL=https://suchlage.iuk-ue.de" >> /srv/suchlage/deploy/.env'
    ```
 
    Fehlen Datei oder `SUCHLAGE_BIND_IP`, ebenso eintragen
@@ -100,7 +96,8 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
      RTMP für die Fernsteuerung `rtmp://<Tailscale-IP>:1935`.
    - DJI: die App-Daten aus dem 1Password-Item `zy32h44zpdllk7vttcyi33ldce` von Hand übertragen.
 
-9. **Traefik:** nur `/` nach `127.0.0.1:8080` routen und `/internal/` mit 404 beantworten. Über
+9. **Traefik bzw. Cloudflare-Tunnel:** `suchlage.iuk-ue.de` nach `127.0.0.1:8080` routen und
+   `/internal/` mit 404 beantworten (Konfiguration im Runbook, Schritt 6). Über
    `/internal/media/auth` entscheidet der Server, wer an MediaMTX darf (ADR 0003); dieser Pfad
    darf von außen nie erreichbar sein.
 

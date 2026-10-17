@@ -1,16 +1,25 @@
-# Runbook: Suchlage ausliefern über Tailscale
+# Runbook: Suchlage ausliefern unter suchlage.iuk-ue.de
 
-Von einem leeren Linux-Host bis zur laufenden Suchlage, ausgeliefert nur im Tailnet. Unabhängig davon,
-ob der Host ein vServer, ein Rechner im FüKw oder eine VM ist. Die Oberfläche läuft über
-`tailscale serve` mit gültigem HTTPS-Zertifikat. Ein Reverse-Proxy wie Traefik ist nicht nötig,
-Cloudflare auch nicht. Nichts lauscht an einer öffentlichen Schnittstelle.
+Von einem leeren Linux-Host bis zur laufenden Suchlage. Die Oberfläche ist öffentlich unter
+`https://suchlage.iuk-ue.de` erreichbar, hinter dem vorhandenen Traefik bzw. Cloudflare-Tunnel des
+Hosts. Die Anmeldung läuft über Pocket ID. Der Server selbst lauscht nur an `127.0.0.1` und ist nie
+direkt aus dem Internet erreichbar.
+
+**Diese Dienste bleiben im Tailnet und dürfen nie öffentlich werden:**
+
+| Port | Dienst | Warum nur im Tailnet |
+|---|---|---|
+| TCP 1883 | MQTT (`mqtt`) | Die RC Plus spricht MQTT ohne TLS. Zugangsdaten und Telemetrie gingen im Klartext. |
+| TCP 1935 | RTMP (`media`) | Das Livebild kommt unverschlüsselt von der RC, mit Stream-Schlüssel in der URL. |
+| UDP 8189 | WebRTC-Medien (`media`) | WebRTC mit 1–2 s Verzögerung nur für Geräte im Tailnet. Wer von außen kommt, bekommt HLS (5–10 s) über die Oberfläche. |
+| HTTP `/internal/` | Medien-Freigabe des Servers | Über `/internal/media/auth` entscheidet der Server, wer an MediaMTX darf (ADR 0003). Der Pfad ist nur für MediaMTX im Compose-Netz gedacht. |
 
 ```
-Browser (Tailnet) ──HTTPS 443──▶ tailscale serve ──▶ 127.0.0.1:8080  server
-Browser (Tailnet) ──UDP 8189──────────────────────▶ <TS-IP>:8189     media (WebRTC-Bild)
-RC Plus (Tailnet) ──HTTPS 443 (/pilot)────────────▶ tailscale serve
-RC Plus (Tailnet) ──TCP 1883──────────────────────▶ <TS-IP>:1883     mqtt
-RC Plus (Tailnet) ──TCP 1935──────────────────────▶ <TS-IP>:1935     media (RTMP)
+Browser (Internet) ──HTTPS 443──▶ Traefik / cloudflared ──▶ 127.0.0.1:8080  server
+Browser (Tailnet)  ──UDP 8189──────────────────────────────▶ <TS-IP>:8189     media (WebRTC-Bild)
+RC Plus (Internet) ──HTTPS 443 (/pilot)──▶ Traefik / cloudflared
+RC Plus (Tailnet)  ──TCP 1883──────────────────────────────▶ <TS-IP>:1883     mqtt
+RC Plus (Tailnet)  ──TCP 1935──────────────────────────────▶ <TS-IP>:1935     media (RTMP)
 server ──Compose-Netz──▶ mqtt, media (WHEP 8889, HLS 8888, Playback 9996, nie am Host)
 ```
 
@@ -18,26 +27,29 @@ server ──Compose-Netz──▶ mqtt, media (WHEP 8889, HLS 8888, Playback 99
 
 | Wert | Woher | Beispiel |
 |---|---|---|
+| `<URL>` | fest | `https://suchlage.iuk-ue.de` |
+| DNS-Eintrag | Cloudflare → DNS bzw. Tunnel | `suchlage.iuk-ue.de` |
 | Hostname im Tailnet | frei wählen | `suchlage` |
-| Tailnet-Name | Tailscale-Admin → DNS | `tail1234.ts.net` |
-| `<URL>` | ergibt sich | `https://suchlage.tail1234.ts.net` |
 | `<TS-IP>` | Schritt 2 | `100.x.y.z` |
 | Pocket ID: Issuer, Client-ID, Client-Secret | Schritt 7 | |
 | DJI: App-ID, App-Key, Lizenz | 1Password, Tresor DRK, Item „DJI Cloud API – Suchlage“ | |
 | Workspace-ID | beliebige UUID (`uuidgen`), bleibt danach fest | |
 
-Am Host werden gebraucht: Linux (amd64 oder arm64), Docker Engine mit Compose v2, `rsync`, `openssl`.
+Am Host werden gebraucht: Linux (amd64 oder arm64), Docker Engine mit Compose v2, `rsync`, `openssl`,
+dazu Traefik oder `cloudflared` mit gültigem Zertifikat für `suchlage.iuk-ue.de`.
 Rechne mit Platz für Flugvideos, grob 1–2 GB pro Flugstunde.
 
 ## 1. Tailnet vorbereiten (einmalig)
+
+Das Tailnet trägt nur noch MQTT, RTMP und WebRTC. Die Oberfläche und die Pilot-Seite laufen über
+das Internet.
 
 1. **Allow-all-Regel prüfen. Das ist ein Blocker.** Tailscale-ACLs kennen nur Erlauben. Steht noch
    `{"action": "accept", "src": ["*"], "dst": ["*:*"]}` in der Policy, erreichen die RC Plus und der
    Host jedes private Gerät im Tailnet. Diese Regel zuerst durch gezielte Regeln für die bestehenden
    Geräte ersetzen.
-2. **MagicDNS und HTTPS-Zertifikate einschalten:** Admin → DNS → *MagicDNS* und *HTTPS Certificates*.
-3. **Policy ergänzen** (Admin → Access Controls). `group:iuk` steht für die Personen, die die Lage
-   sehen sollen.
+2. **Policy ergänzen** (Admin → Access Controls). `group:iuk` steht für die Personen, die das Bild
+   mit geringer Verzögerung über WebRTC sehen sollen.
 
    ```jsonc
    "groups": {
@@ -48,17 +60,14 @@ Rechne mit Platz für Flugvideos, grob 1–2 GB pro Flugstunde.
      "tag:suchlage-rc":     ["autogroup:admin"]
    },
    "acls": [
-     // Fernsteuerung: Pilot-Seite, MQTT, RTMP – sonst nichts
-     {"action": "accept", "src": ["tag:suchlage-rc"], "dst": ["tag:suchlage-server:443,1883,1935"]},
-     // Lage im Browser: Oberfläche und WebRTC-Bild (8189 ist UDP)
-     {"action": "accept", "src": ["group:iuk"], "dst": ["tag:suchlage-server:443,8189"]},
+     // Fernsteuerung: MQTT und RTMP, sonst nichts
+     {"action": "accept", "src": ["tag:suchlage-rc"], "dst": ["tag:suchlage-server:1883,1935"]},
+     // WebRTC-Bild im Browser (8189 ist UDP)
+     {"action": "accept", "src": ["group:iuk"], "dst": ["tag:suchlage-server:8189"]},
      // Betrieb per SSH
      {"action": "accept", "src": ["autogroup:admin"], "dst": ["tag:suchlage-server:22"]}
    ]
    ```
-
-   Liegt Pocket ID selbst im Tailnet, braucht der Host zusätzlich eine Regel
-   `tag:suchlage-server → <Pocket-ID-Gerät>:443`.
 
 ## 2. Host ins Tailnet
 
@@ -78,22 +87,29 @@ echo 'net.ipv4.ip_nonlocal_bind = 1' | sudo tee /etc/sysctl.d/90-suchlage.conf
 sudo sysctl --system
 ```
 
-## 3. Image bauen und auf den Host bringen
+## 3. Image auf den Host bringen
 
-Auf dem eigenen Rechner im Repo, Stand `main`:
+Jeder Push auf `main` baut das Image in GitHub Actions (Workflow *Image*,
+`.github/workflows/image.yml`) und legt es in GHCR ab:
+
+- `ghcr.io/rubenvitt/suchlage:m1-<kurzer Commit>` bleibt für einen Rückweg liegen.
+- `ghcr.io/rubenvitt/suchlage:m1` zeigt auf den neuesten Stand von `main`.
+
+Gebaut wird `linux/amd64`. Für einen arm64-Host den Workflow unter *Actions → Image → Run workflow*
+mit `linux/amd64,linux/arm64` starten. Das läuft unter Emulation und dauert deutlich länger.
+
+Den Commit zeigt der Lauf unter *Actions*, lokal auch `git rev-parse --short origin/main`:
 
 ```sh
-git switch main && git pull
-ssh <host> uname -m                  # x86_64 → amd64, aarch64 → arm64
-TAG=m1-$(git rev-parse --short HEAD)
-docker build --platform linux/amd64 -f deploy/Dockerfile -t suchlage:$TAG .
-docker save suchlage:$TAG | ssh <host> docker load
-ssh <host> docker tag suchlage:$TAG suchlage:m1
+TAG=m1-<kurzer Commit>
+ssh <host> "docker pull ghcr.io/rubenvitt/suchlage:$TAG && docker tag ghcr.io/rubenvitt/suchlage:$TAG suchlage:$TAG && docker tag suchlage:$TAG suchlage:m1"
 ```
 
 `suchlage:m1` ist der Name, den Compose startet. Der Tag mit Commit bleibt für einen Rückweg liegen.
-Auf Apple Silicon dauert `linux/amd64` unter Emulation deutlich länger. Alternativ das Repo auf dem
-Host klonen und dort bauen. Das braucht dort Lesezugriff auf GitHub.
+
+Ist das Paket in GHCR privat (*Package settings → Danger Zone → Change visibility*), meldet sich der
+Host vorher einmal an. Dafür reicht ein Token, das nur `read:packages` darf:
+`ssh <host> docker login ghcr.io -u <github-user>`, das Token als Passwort eingeben.
 
 ## 4. Deploy-Dateien übertragen
 
@@ -102,18 +118,19 @@ ssh <host> sudo install -d -o "$USER" /srv/suchlage/deploy
 rsync -a --delete --exclude records/ --exclude smoke.sh --exclude .env deploy/ <host>:/srv/suchlage/deploy/
 ```
 
-Bootstrap-Werte in `/srv/suchlage/deploy/.env` eintragen. Compose liest die Datei bei jedem Aufruf
-selbst, auch bei `logs` und `broker-init.sh`. Die Datei enthält keine Geheimnisse:
+Die Bootstrap-Werte kommen nach `/srv/suchlage/deploy/.env`. Compose liest die Datei bei jedem Aufruf
+selbst, auch bei `logs` und `broker-init.sh`. Geheimnisse stehen darin nicht:
 
 ```sh
 ssh <host> 'cat > /srv/suchlage/deploy/.env' <<EOF
 SUCHLAGE_BIND_IP=<TS-IP>
-SUCHLAGE_PUBLIC_URL=<URL>
+SUCHLAGE_PUBLIC_URL=https://suchlage.iuk-ue.de
 EOF
 ```
 
 Läuft auf dem Host noch der M0-Spike, zuerst
-`docker compose -f compose.yaml down` in `/srv/suchlage/deploy`. Beide Stacks nutzen dieselben Ports.
+`docker compose -f compose.yaml down` in `/srv/suchlage/deploy` ausführen. Beide Stacks nutzen
+dieselben Ports.
 
 ## 5. Broker einrichten und Stack starten
 
@@ -132,37 +149,84 @@ ssh <host> "ss -tulnp | grep -E ':(1883|1935|8080|8189)\b'"
 In der Ausgabe von `ss` müssen `127.0.0.1:8080` und `<TS-IP>` für 1883, 1935 und 8189 stehen.
 `0.0.0.0` und die öffentliche IP dürfen nicht vorkommen.
 
-## 6. Oberfläche über Tailscale ausliefern
+## 6. Oberfläche öffentlich ausliefern
 
-```sh
-ssh <host> sudo tailscale serve --bg 8080
-ssh <host> sudo tailscale serve --bg --set-path /internal 'text:Nicht gefunden'
-ssh <host> tailscale serve status
+Nach außen geht nur `suchlage.iuk-ue.de` → `127.0.0.1:8080`. `/internal/` bleibt draußen. Die
+Antworten werden nicht komprimiert, sonst puffert Cloudflare das Live-Lagebild (SSE, ADR 0001).
+
+**Mit Cloudflare-Tunnel** (`cloudflared` am Host). Die Regeln in `config.yml` stehen vor dem
+abschließenden `http_status:404`:
+
+```yaml
+ingress:
+  - hostname: suchlage.iuk-ue.de
+    path: ^/internal(/|$)
+    service: http_status:404
+  - hostname: suchlage.iuk-ue.de
+    service: http://127.0.0.1:8080
+  # …
+  - service: http_status:404
 ```
 
-Die zweite Zeile ist Pflicht. Über `/internal/media/auth` entscheidet der Server, wer an MediaMTX
-darf (ADR 0003). Der Pfad ist nur für MediaMTX im Compose-Netz gedacht und darf aus dem Tailnet
-nicht erreichbar sein. Die Konfiguration von `serve` übersteht Neustarts.
+Danach `sudo systemctl restart cloudflared` und
+`cloudflared tunnel route dns <tunnel> suchlage.iuk-ue.de`, falls der DNS-Eintrag noch fehlt.
 
-Gegenprobe von einem Gerät im Tailnet:
+**Mit Traefik** (File-Provider). `/internal/` passt auf keinen Router, Traefik antwortet dort mit 404.
+Keine `compress`-Middleware:
 
-```sh
-curl -s <URL>/api/health                                # {"status":"ok","version":"…"}
-curl -s -X POST <URL>/internal/media/auth -d '{}'       # „Nicht gefunden“, keine Antwort des Servers
-nc -vz <TS-IP> 1883 && nc -vz <TS-IP> 1935
+```yaml
+http:
+  routers:
+    suchlage:
+      rule: Host(`suchlage.iuk-ue.de`) && !PathPrefix(`/internal`)
+      entryPoints: [websecure]
+      service: suchlage
+      tls:
+        certResolver: <resolver>
+  services:
+    suchlage:
+      loadBalancer:
+        servers:
+          - url: http://127.0.0.1:8080
 ```
 
-Das erste Laden des Zertifikats kann einige Sekunden dauern.
+Läuft Traefik selbst als Container, erreicht er `127.0.0.1` des Hosts nicht. Dann hängt eine
+Override-Datei am Host, die nicht ins Repo kommt, den Server zusätzlich ins Traefik-Netz, und die
+Service-URL wird `http://suchlage-m1-server-1:8080`:
+
+```yaml
+# /srv/suchlage/deploy/compose.traefik.yaml
+services:
+  server:
+    networks: [default, traefik]
+networks:
+  traefik:
+    external: true
+    name: <Netz von Traefik>
+```
+
+Alle `docker compose`-Aufrufe brauchen dann `-f compose.m1.yaml -f compose.traefik.yaml`.
+
+Gegenprobe von außen, ohne Tailscale:
+
+```sh
+curl -s https://suchlage.iuk-ue.de/api/health                     # {"status":"ok","version":"…"}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://suchlage.iuk-ue.de/internal/media/auth -d '{}'   # 404
+nc -vz -w 3 <öffentliche IP> 1883                                 # muss scheitern
+```
+
+Und aus dem Tailnet: `nc -vz <TS-IP> 1883 && nc -vz <TS-IP> 1935`.
 
 ## 7. Ersteinrichtung
 
 1. **Pocket ID. Dieser Schritt ist Pflicht.** Einen OIDC-Client „Suchlage“ anlegen.
-   - Callback-URL: `<URL>/api/auth/oidc/callback`
-   - **Allowed User Groups:** nur die I&K-Gruppe. Suchlage kennt keine eigene Freigabe. Jedes Konto,
-     das sich über den Client anmelden darf, wird Operator. Wer aus der Gruppe fliegt, behält eine
-     bestehende Sitzung bis zu 7 Tage.
+   - Callback-URL: `https://suchlage.iuk-ue.de/api/auth/oidc/callback`
+   - **Allowed User Groups:** nur die I&K-Gruppe. Die Oberfläche ist öffentlich, deshalb ist diese
+     Gruppe die einzige Schranke. Suchlage kennt keine eigene Freigabe. Jedes Konto, das sich über
+     den Client anmelden darf, wird Operator. Wer aus der Gruppe fliegt, behält eine bestehende
+     Sitzung bis zu 7 Tage.
 2. **Einrichtungslink** aus dem Log holen. Er ist 24 h gültig, ein Neustart des Servers erzeugt einen
-   neuen:
+   neuen. Wer den Link hat, richtet die Instanz ein. Ihn deshalb sofort benutzen:
 
    ```sh
    ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml logs server | grep Ersteinrichtung'
@@ -170,8 +234,7 @@ Das erste Laden des Zertifikats kann einige Sekunden dauern.
 
 3. Den Link **vollständig** öffnen, der Teil nach `#` gehört dazu. Issuer, Client-ID und
    Client-Secret eintragen. Meldet die Seite „Anmeldedienst nicht erreichbar“, kommt der Server
-   nicht an Pocket ID heran. Dann DNS und ACL des Hosts prüfen. Liegt Pocket ID im Tailnet, die Regel
-   aus Schritt 1 ergänzen.
+   nicht an Pocket ID heran. Dann DNS und ausgehende Verbindungen des Hosts prüfen.
 4. Anmelden. Das erste Konto wird Admin.
 
 ## 8. Einstellungen in der App
@@ -188,17 +251,19 @@ Unter *Einstellungen*:
 | DJI | App-ID, App-Key, Lizenz | aus 1Password |
 | | Workspace-ID | die UUID aus der Vorbereitung |
 
-Für die Fernsteuerung immer die IP eintragen, nicht den MagicDNS-Namen. MQTT und RTMP hängen dann
-nicht an der DNS-Auflösung auf der RC Plus.
+Für die Fernsteuerung immer die Tailscale-IP eintragen, nie `suchlage.iuk-ue.de` und nicht den
+MagicDNS-Namen. MQTT und RTMP gibt es nur im Tailnet und hängen so nicht an der DNS-Auflösung auf
+der RC Plus.
 
 Danach unter *System* prüfen: Der Broker steht auf „verbunden“.
 
 ## 9. Fernsteuerung koppeln
 
 1. RC Plus: Die Tailscale-App installieren und mit Tag `tag:suchlage-rc` anmelden, über einen
-   Auth-Key mit diesem Tag aus Admin → Keys. Anschließend in der App „Use Tailscale DNS“ einschalten.
-2. Suchlage: *Einstellungen → Fernsteuerungen* → anlegen und den Kopplungslink `<URL>/pilot#<code>`
-   kopieren. Über den QR-Code geht es schneller.
+   Auth-Key mit diesem Tag aus Admin → Keys. Die RC braucht zusätzlich Internet (LTE oder WLAN)
+   für die Pilot-Seite.
+2. Suchlage: *Einstellungen → Fernsteuerungen* → anlegen und den Kopplungslink
+   `https://suchlage.iuk-ue.de/pilot#<code>` kopieren. Über den QR-Code geht es schneller.
 3. Pilot 2: Den Link unter *Cloud-Dienst* eintragen. Die Seite meldet „Angemeldet als …“, und die
    Fernsteuerung erscheint in Suchlage.
 
@@ -207,13 +272,13 @@ Link mit `?code=<code>` statt `#<code>` eintragen. Siehe Realflug-Checkliste.
 
 ## 10. Großbild im FüKw (optional)
 
-*Einstellungen → Großbild-Zugänge* → anlegen und den Link auf dem Großbild-Rechner öffnen. Der
-Rechner muss im Tailnet sein und unter `group:iuk` oder einer eigenen Regel auf 443 und 8189
-zugreifen dürfen.
+*Einstellungen → Großbild-Zugänge* → anlegen und den Link auf dem Großbild-Rechner öffnen. Ohne
+Tailnet zeigt das Großbild das Livebild über HLS. Für WebRTC muss der Rechner im Tailnet sein und
+unter `group:iuk` oder einer eigenen Regel auf UDP 8189 zugreifen dürfen.
 
 ## Abnahme
 
-`docs/betrieb/m1-realflug-checkliste.md` – erst danach gilt die Auslieferung als fertig.
+`docs/betrieb/m1-realflug-checkliste.md`. Erst danach gilt die Auslieferung als fertig.
 
 ## Betrieb
 
@@ -233,7 +298,8 @@ ssh <host> 'docker image ls suchlage'                     # vorhandene Tags
 ssh <host> 'docker tag suchlage:m1-<alter-commit> suchlage:m1 && cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d server'
 ```
 
-Hat ein neuerer Stand die Datenbank migriert, hilft der Rückweg nur mit der Sicherung von davor.
+Fehlt der alte Tag am Host, holt ihn Schritt 3 aus GHCR. Hat ein neuerer Stand die Datenbank
+migriert, hilft der Rückweg nur mit der Sicherung von davor.
 
 **Sicherung.** Der Server wird kurz gestoppt, damit SQLite konsistent ist:
 
@@ -260,7 +326,9 @@ nächsten Koppeln wieder an.
 |---|---|
 | `mqtt` startet nicht, Log „Broker nicht eingerichtet“ | Schritt 5 fehlt |
 | Ports fehlen nach einem Reboot | `sysctl net.ipv4.ip_nonlocal_bind` muss `1` sein (Schritt 2) |
-| Oberfläche lädt, Lage bleibt leer bzw. schraffiert | *System*: Ist der Broker verbunden? Ist die RC gekoppelt? `docker compose … logs server` |
-| Livebild nur „verzögert (HLS)“ | Der Browser erreicht `<TS-IP>:8189/udp` nicht. ACL prüfen |
-| Kein Bild, RC meldet Push-Fehler | Die RC erreicht `<TS-IP>:1935` nicht. ACL und RTMP-Adresse unter *Einstellungen → Video* prüfen |
-| Anmeldung scheitert | Callback-URL in Pocket ID muss genau `<URL>/api/auth/oidc/callback` sein |
+| `suchlage.iuk-ue.de` meldet 502/504 | Traefik bzw. `cloudflared` erreicht `127.0.0.1:8080` nicht. Läuft Traefik als Container, siehe Schritt 6 |
+| Oberfläche lädt, Lage bleibt leer bzw. schraffiert | *System*: Ist der Broker verbunden? Ist die RC gekoppelt? `docker compose … logs server`. Hängt nur das Live-Lagebild, Kompression im Proxy abschalten |
+| Livebild nur „verzögert (HLS)“ | Außerhalb des Tailnets erwartet. Im Tailnet: Der Browser erreicht `<TS-IP>:8189/udp` nicht, ACL prüfen |
+| Kein Bild, RC meldet Push-Fehler | Die RC erreicht `<TS-IP>:1935` nicht. Tailscale auf der RC, ACL und RTMP-Adresse unter *Einstellungen → Video* prüfen |
+| Pilot-Seite lädt nicht auf der RC | Die RC hat kein Internet. `/pilot` läuft über `suchlage.iuk-ue.de`, nicht über das Tailnet |
+| Anmeldung scheitert | Callback-URL in Pocket ID muss genau `https://suchlage.iuk-ue.de/api/auth/oidc/callback` sein |
