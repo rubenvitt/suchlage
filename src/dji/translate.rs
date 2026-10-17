@@ -270,10 +270,11 @@ impl Translator {
                 }
             }
         } else {
+            // Die eigene SN ist nie das Gateway eines Fluggeräts; dann gilt die bekannte Zuordnung.
             let gateway = env
                 .gateway
                 .clone()
-                .filter(|g| topic::is_valid_sn(g))
+                .filter(|g| g != sn && topic::is_valid_sn(g))
                 .or_else(|| self.aircraft_gateway.get(sn).cloned());
             if let Some(g) = &gateway {
                 self.aircraft_gateway.insert(sn.to_string(), g.clone());
@@ -840,20 +841,34 @@ mod tests {
             "sys/product/RC1/status",
             json!({"tid": "t", "bid": "b", "method": "update_topo", "data": {"sub_devices": [{"sn": "AC1", "type": 89}]}}),
         );
-        run(
-            &mut t,
-            1,
-            "thing/product/AC1/osd",
-            json!({"gateway": "AC1", "data": {"latitude": 52.0, "longitude": 10.0}}),
-        );
         let tr = run(
             &mut t,
-            2,
-            "thing/product/AC1/osd",
-            json!({"gateway": "RC1", "data": {"latitude": 52.001}}),
+            1,
+            "thing/product/AC1/state",
+            json!({"gateway": "AC1", "data": {"latitude": 52.0, "longitude": 10.0}}),
         );
-        assert!(aircraft_telemetry(&tr).is_some());
-        assert_eq!(t.persisted("AC1").unwrap().0, "RC1");
+        let gateways: Vec<&str> = tr
+            .observations
+            .iter()
+            .filter_map(|o| match &o.observation {
+                Observation::AircraftTelemetry { gateway_sn, .. } => Some(gateway_sn.as_str()),
+                Observation::GatewayTelemetry { .. } => Some("Fernsteuerung"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(gateways, ["RC1"]);
+        let (gateway, data) = t.persisted("AC1").unwrap();
+        assert_eq!(gateway, "RC1");
+
+        // Nach einem Neustart bleibt es ein Fluggerät an RC1.
+        let restored = Translator::new().restore(2, "AC1", &gateway, data);
+        assert!(aircraft_telemetry(&restored).is_some());
+        assert!(
+            !restored
+                .observations
+                .iter()
+                .any(|o| matches!(o.observation, Observation::GatewayTelemetry { .. }))
+        );
     }
 
     #[test]
