@@ -77,3 +77,22 @@ test('Mobil: Zuschauen ohne Steuerung', async ({ page }, info) => {
   await page.screenshot({ path: info.outputPath('mobil.png'), fullPage: true });
   expect(errors).toEqual([]);
 });
+
+test('Mobil: Rückfall auf HLS über den Server-Proxy', async ({ page }, info) => {
+  test.skip(info.project.name !== 'mobil');
+  const errors = pageErrors(page);
+  // Über localhost kommt WebRTC immer durch; zwei gescheiterte WHEP-Versuche erzwingen den Rückfall.
+  await page.route('**/whep', (r) => r.fulfill({ status: 500, body: '' }));
+  const hls: number[] = [];
+  page.on('response', (r) => {
+    // Nur der Pfad unter /api belegt den Server-Proxy; direkt an MediaMTX (:8888) zählte nicht.
+    if (/^\/api\/video\/[^/]+\/hls\//.test(new URL(r.url()).pathname)) hls.push(r.status());
+  });
+  await devLogin(page);
+  // Die Transportangabe steht erst da, wenn das Bild läuft.
+  await expect(page.getByText('verzögert (HLS)')).toBeVisible({ timeout: 60_000 });
+  await expectMapAndVideo(page);
+  expect(hls.length).toBeGreaterThan(0);
+  expect(hls.every((s) => s === 200)).toBe(true);
+  expect(errors).toEqual([]);
+});
