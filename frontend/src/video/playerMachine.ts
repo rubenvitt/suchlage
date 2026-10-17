@@ -26,7 +26,9 @@ export const STALL_MS = 5_000;
 const WEBRTC_ATTEMPTS = 2;
 
 /**
- * Rückfall auf HLS nur nach `ice_timeout` oder zwei `failed` in Folge. `not_ready` (WHEP 404 direkt
+ * Rückfall auf HLS nur nach `ice_timeout` oder zwei `failed` in Folge, Letzteres nur, solange WebRTC in
+ * diesem Stream noch kein Bild hatte: Ein kurzer Ausfall von MediaMTX soll den Rest des Flugs nicht auf
+ * HLS mit 5–10 s Verzögerung festlegen. `not_ready` (WHEP 404 direkt
  * nach dem Streamstart, Pilot 2 sendet noch nicht) wartet mit demselben Transport und Versuch. Jeder
  * neue Stream beginnt wieder mit WebRTC; zurück aus laufendem HLS geht es bewusst nicht, außerhalb
  * des VPN unterbräche jeder Versuch das laufende Bild.
@@ -45,7 +47,7 @@ export function nextState(s: PlayerState, e: PlayerEvent): PlayerState {
       }
       if (e.type === 'not_ready') return { kind: 'retrying', transport: s.transport, attempt: s.attempt, ...pic };
       if (e.type === 'failed') {
-        if (s.transport === 'webrtc' && s.attempt >= WEBRTC_ATTEMPTS) {
+        if (s.transport === 'webrtc' && s.attempt >= WEBRTC_ATTEMPTS && !s.hadPicture) {
           return { kind: 'retrying', transport: 'hls', attempt: 1, ...pic };
         }
         return { kind: 'retrying', transport: s.transport, attempt: s.attempt + 1, ...pic };

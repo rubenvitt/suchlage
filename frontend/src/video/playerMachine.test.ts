@@ -23,6 +23,19 @@ test('zwei WebRTC-Fehler in Folge wechseln ebenfalls auf HLS', () => {
   expect(s).toEqual({ kind: 'retrying', transport: 'hls', attempt: 1 });
 });
 
+test('lief WebRTC schon, bleiben gescheiterte Neuversuche bei WebRTC', () => {
+  let s = nextState(nextState(live(), { type: 'connected' }), { type: 'failed' });
+  for (let i = 0; i < 3; i++) {
+    s = nextState(nextState(s, { type: 'retry_due' }), { type: 'failed' });
+    expect(s).toMatchObject({ kind: 'retrying', transport: 'webrtc', hadPicture: true });
+  }
+  // Ohne UDP (außerhalb des VPN) gilt weiter die ICE-Frist.
+  expect(nextState(nextState(s, { type: 'retry_due' }), { type: 'ice_timeout' })).toMatchObject({
+    kind: 'connecting',
+    transport: 'hls',
+  });
+});
+
 test('Hänger führt über Neuversuch zurück ins Verbinden, Stream-Ende in Ruhe', () => {
   const playing = nextState(live(), { type: 'connected' });
   expect(playing).toEqual({ kind: 'playing', transport: 'webrtc', attempt: 1 });
