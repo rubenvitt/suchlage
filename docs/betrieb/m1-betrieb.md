@@ -1,5 +1,7 @@
 # M1 Betrieb auf dem vServer
 
+> Auslieferung nur über Tailscale (ohne Traefik/Cloudflare): `docs/betrieb/runbook-deployment.md`.
+
 Suchlage M1 läuft als Compose-Projekt `suchlage-m1` mit drei Diensten: `server` (Image
 `suchlage:m1`, ohne Feature `dev`), `mqtt` (Mosquitto mit dynamic-security) und `media`
 (MediaMTX, Zugriff entscheidet der Server). Der M0-Spike (`deploy/compose.yaml`, Projekt
