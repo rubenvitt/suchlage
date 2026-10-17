@@ -1,6 +1,6 @@
 # Regeln für Suchlage
 
-- Spec: `docs/superpowers/specs/2026-10-16-suchlage-design.md`, Plan M1: `docs/superpowers/plans/2026-10-16-m1-live-lage.md`.
+- Spec: `docs/superpowers/specs/2026-10-16-suchlage-design.md`, Plan M1: `docs/superpowers/plans/2026-10-16-m1-live-lage.md`, Plan M2: `docs/superpowers/plans/2026-10-17-m2-kartenelemente.md`, Plan M3: `docs/superpowers/plans/2026-10-17-m3-fotos.md`.
 - Qualitäts-Gate: `scripts/check.sh` muss vor jedem Commit grün sein (im Strang-Worktree `--rust` bzw. `--frontend`). Es formatiert Rust selbst; mit `CI=1` prüft es nur.
 - Commits mit den Pfaden des Tasks, nie `git add frontend` oder `git add .`.
 - Bausteingrenzen: Nur `src/dji/` kennt DJI-Typen. `src/situation/` ist rein (kein tokio/sqlx/axum/rumqttc/reqwest). `src/dji/` importiert nie `runtime` oder `web`. `src/contract/` hängt von nichts im Crate ab.
