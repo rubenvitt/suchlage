@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::contract::{GatewayState, LiveEvent, SituationSnapshot, StreamState, TrackPoint};
 use crate::error::AppError;
-use crate::situation::observation::Observed;
+use crate::situation::observation::{Observed, StreamCommand};
 use crate::situation::state::{Config, Effect, ResumeFlight, Situation};
 use crate::store;
 
@@ -29,6 +29,8 @@ enum Command {
     Snapshot(oneshot::Sender<SituationSnapshot>),
     Gateway(String, oneshot::Sender<Option<GatewayState>>),
     Stream(String, oneshot::Sender<Option<StreamState>>),
+    /// Livebild-Befehl beginnen; `false`, wenn der Zustand ihn nicht zulässt.
+    Begin(String, StreamCommand, oneshot::Sender<bool>),
     SetConfig(Config),
 }
 
@@ -89,6 +91,12 @@ impl SituationHandle {
     pub async fn stream(&self, sn: &str) -> Result<Option<StreamState>, AppError> {
         let sn = sn.to_string();
         self.ask(|tx| Command::Stream(sn, tx)).await
+    }
+
+    /// Prüft und setzt den Beginn eines Livebild-Befehls in einem Schritt des Aktors.
+    pub async fn begin(&self, sn: &str, command: StreamCommand) -> Result<bool, AppError> {
+        let sn = sn.to_string();
+        self.ask(|tx| Command::Begin(sn, command, tx)).await
     }
 
     pub async fn set_config(&self, config: Config) {
@@ -190,6 +198,12 @@ impl Actor {
             }
             Command::Stream(sn, reply) => {
                 let _ = reply.send(self.situation.stream(&sn).cloned());
+            }
+            Command::Begin(sn, command, reply) => {
+                let fx = self.situation.begin_command(&sn, &command, (self.clock)());
+                let accepted = fx.is_some();
+                self.run(fx.unwrap_or_default()).await;
+                let _ = reply.send(accepted);
             }
             Command::SetConfig(c) => self.situation.set_config(c),
         }

@@ -15,8 +15,23 @@ pub fn idle(gateway_sn: &str, at_ms: i64) -> StreamState {
     }
 }
 
-/// Liefert `true`, wenn sich der Zustand geändert hat.
-pub fn on_issued(s: &mut StreamState, command: &StreamCommand, at_ms: i64) -> bool {
+/// Prüft und übernimmt einen Befehl in einem Schritt, damit zwei gleichzeitige Aufrufer nicht
+/// beide durchkommen. `None`: Der Befehl passt nicht zum Zustand (Start bei laufendem Bild, Stopp
+/// oder Linsenwechsel ohne Bild); nichts ändert sich. Sonst `Some(true)`, wenn sich der Zustand
+/// geändert hat.
+pub fn on_issued(s: &mut StreamState, command: &StreamCommand, at_ms: i64) -> Option<bool> {
+    let busy = matches!(
+        s.phase,
+        StreamPhase::Starting | StreamPhase::Live | StreamPhase::Stopping
+    );
+    let accepted = match command {
+        // Ein zweites `live_start_push` lehnt Pilot 2 ab (513003).
+        StreamCommand::Start { .. } => !busy,
+        StreamCommand::Stop | StreamCommand::ChangeLens { .. } => s.phase == StreamPhase::Live,
+    };
+    if !accepted {
+        return None;
+    }
     let before = s.clone();
     match command {
         StreamCommand::Start { video_id } => {
@@ -28,9 +43,11 @@ pub fn on_issued(s: &mut StreamState, command: &StreamCommand, at_ms: i64) -> bo
         // Die Linse gilt erst, wenn das Gerät den Wechsel bestätigt.
         StreamCommand::ChangeLens { .. } => {}
     }
-    changed(s, &before, at_ms)
+    Some(changed(s, &before, at_ms))
 }
 
+/// Ein Fehler ändert die Phase nur, solange sie noch die dieses Befehls ist: Ein später
+/// abgelehnter Doppelbefehl darf ein laufendes oder beendetes Bild nicht umwerfen.
 pub fn on_finished(
     s: &mut StreamState,
     command: &StreamCommand,
@@ -39,8 +56,11 @@ pub fn on_finished(
 ) -> bool {
     let before = s.clone();
     match (command, result) {
-        (StreamCommand::Start { .. }, Ok(())) => s.phase = StreamPhase::Live,
-        (StreamCommand::Start { .. }, Err(message)) => {
+        (StreamCommand::Start { .. }, Ok(())) => {
+            s.phase = StreamPhase::Live;
+            s.error = None;
+        }
+        (StreamCommand::Start { .. }, Err(message)) if s.phase == StreamPhase::Starting => {
             s.phase = StreamPhase::Failed;
             s.error = Some(message.clone());
         }
@@ -49,9 +69,11 @@ pub fn on_finished(
             s.video_id = None;
         }
         // Stopp abgelehnt: Der Stream läuft weiter.
-        (StreamCommand::Stop, Err(_)) => s.phase = StreamPhase::Live,
+        (StreamCommand::Stop, Err(_)) if s.phase == StreamPhase::Stopping => {
+            s.phase = StreamPhase::Live;
+        }
         (StreamCommand::ChangeLens { lens }, Ok(())) => s.lens = Some(*lens),
-        (StreamCommand::ChangeLens { .. }, Err(_)) => {}
+        (_, Err(_)) => {}
     }
     changed(s, &before, at_ms)
 }
@@ -113,7 +135,7 @@ mod tests {
     #[test]
     fn start_goes_starting_then_live() {
         let mut s = idle("RC1", 0);
-        assert!(on_issued(&mut s, &start(), 1));
+        assert_eq!(on_issued(&mut s, &start(), 1), Some(true));
         assert_eq!(s.phase, StreamPhase::Starting);
         assert_eq!(s.video_id.as_deref(), Some("AC1/61-0-0/normal-0"));
         assert!(on_finished(&mut s, &start(), &Ok(()), 2));
@@ -170,6 +192,59 @@ mod tests {
         assert!(s.error.as_deref().unwrap().contains("513016"));
     }
 
+    fn live() -> StreamState {
+        let mut s = idle("RC1", 0);
+        on_issued(&mut s, &start(), 1);
+        on_finished(&mut s, &start(), &Ok(()), 2);
+        s
+    }
+
+    #[test]
+    fn second_start_is_refused_and_its_error_cannot_fail_a_live_stream() {
+        let mut s = idle("RC1", 0);
+        assert!(on_issued(&mut s, &start(), 1).is_some());
+        assert_eq!(on_issued(&mut s, &start(), 1), None, "läuft bereits");
+        on_finished(&mut s, &start(), &Ok(()), 2);
+        assert!(!on_finished(&mut s, &start(), &Err("513003".into()), 3));
+        assert_eq!((s.phase, s.error.as_deref()), (StreamPhase::Live, None));
+
+        // Andere Reihenfolge: Der Fehler kommt zuerst, das Ok danach räumt ihn weg.
+        let mut s = idle("RC1", 0);
+        on_issued(&mut s, &start(), 1);
+        on_finished(&mut s, &start(), &Err("513003".into()), 2);
+        on_finished(&mut s, &start(), &Ok(()), 3);
+        assert_eq!((s.phase, s.error.as_deref()), (StreamPhase::Live, None));
+    }
+
+    #[test]
+    fn late_stop_error_keeps_a_stopped_stream_idle() {
+        let mut s = live();
+        assert!(on_issued(&mut s, &StreamCommand::Stop, 3).is_some());
+        assert_eq!(on_issued(&mut s, &StreamCommand::Stop, 3), None);
+        on_finished(&mut s, &StreamCommand::Stop, &Ok(()), 4);
+        assert!(!on_finished(
+            &mut s,
+            &StreamCommand::Stop,
+            &Err("x".into()),
+            5
+        ));
+        assert_eq!((s.phase, s.video_id.as_deref()), (StreamPhase::Idle, None));
+        assert_eq!(
+            on_issued(&mut s, &StreamCommand::Stop, 6),
+            None,
+            "kein Bild"
+        );
+        assert!(on_issued(&mut s, &start(), 6).is_some(), "neu startbar");
+    }
+
+    #[test]
+    fn rejected_stop_keeps_the_stream_live() {
+        let mut s = live();
+        on_issued(&mut s, &StreamCommand::Stop, 3);
+        on_finished(&mut s, &StreamCommand::Stop, &Err("x".into()), 4);
+        assert_eq!(s.phase, StreamPhase::Live);
+    }
+
     #[test]
     fn lens_change_only_changes_lens_on_success() {
         let mut s = idle("RC1", 0);
@@ -183,7 +258,7 @@ mod tests {
             1,
         );
         let cmd = StreamCommand::ChangeLens { lens: Lens::Zoom };
-        assert!(!on_issued(&mut s, &cmd, 2));
+        assert_eq!(on_issued(&mut s, &cmd, 2), Some(false));
         assert!(!on_finished(&mut s, &cmd, &Err("x".into()), 3));
         assert_eq!(s.lens, Some(Lens::Wide));
         assert!(on_finished(&mut s, &cmd, &Ok(()), 4));

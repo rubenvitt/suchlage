@@ -75,10 +75,12 @@ impl StreamOrchestrator {
             .unwrap_or_else(|| idle(gateway_sn, now_ms())))
     }
 
-    /// Meldet Beginn und Ergebnis eines Befehls an den Kern; jeder Ausgang endet mit
-    /// `CommandFinished`, damit kein Stream in `starting` hängen bleibt. Der Ablauf läuft in
-    /// einem eigenen Task: Trennt der Browser während der bis zu 10 s Wartezeit, verwirft der
-    /// Server nur das Warten auf das Ergebnis, nicht den Befehl.
+    /// Beginnt den Befehl im Kern, sendet ihn und meldet das Ergebnis. Der Beginn prüft und setzt
+    /// in einem Schritt des Aktors, damit zwei gleichzeitige Aufrufer (Auto-Start beim Abheben,
+    /// zweiter Arbeitsplatz) nicht beide senden; er kommt nach allen Prüfungen, die noch scheitern
+    /// können. Jeder begonnene Befehl endet mit `CommandFinished`, damit kein Stream in `starting`
+    /// hängen bleibt. Deshalb läuft alles ab dem Beginn in einem eigenen Task: Trennt der Browser
+    /// während der bis zu 10 s Wartezeit, verwirft der Server nur das Warten, nicht den Befehl.
     async fn run(
         &self,
         gateway_sn: &str,
@@ -87,12 +89,15 @@ impl StreamOrchestrator {
     ) -> Result<StreamState, AppError> {
         let this = self.clone();
         let sn = gateway_sn.to_owned();
-        let result = tokio::spawn(async move {
-            this.observe(Observation::CommandIssued {
-                gateway_sn: sn.clone(),
-                command: command.clone(),
-            })
-            .await;
+        tokio::spawn(async move {
+            if !this.situation.begin(&sn, command.clone()).await? {
+                return Err(match command {
+                    StreamCommand::Start { .. } => {
+                        AppError::Conflict("Livebild läuft bereits".into())
+                    }
+                    _ => AppError::Unprocessable("Es läuft kein Livebild".into()),
+                });
+            }
             let result = sent.await;
             this.observe(Observation::CommandFinished {
                 gateway_sn: sn,
@@ -100,14 +105,13 @@ impl StreamOrchestrator {
                 result: result.clone().map_err(|e| e.to_string()),
             })
             .await;
-            result
+            result.map_err(|e| match e {
+                ControlError::Refused(message) => AppError::Unprocessable(message),
+                ControlError::Unreachable(message) => AppError::Unavailable(message),
+            })
         })
         .await
-        .map_err(|e| AppError::Internal(format!("Livebild-Befehl abgebrochen: {e}")))?;
-        result.map_err(|e| match e {
-            ControlError::Refused(message) => AppError::Unprocessable(message),
-            ControlError::Unreachable(message) => AppError::Unavailable(message),
-        })?;
+        .map_err(|e| AppError::Internal(format!("Livebild-Befehl abgebrochen: {e}")))??;
         self.current(gateway_sn).await
     }
 
@@ -131,14 +135,6 @@ impl StreamOrchestrator {
             .await?
             .filter(|g| g.aircraft_sn.is_some())
             .ok_or_else(|| AppError::Conflict("Fernsteuerung nicht verbunden".into()))?;
-        // Ein zweites `live_start_push` lehnt Pilot 2 ab (513003); der Zustand würde `failed`,
-        // obwohl das Bild läuft.
-        if matches!(
-            self.current(gateway_sn).await?.phase,
-            StreamPhase::Starting | StreamPhase::Live | StreamPhase::Stopping
-        ) {
-            return Err(AppError::Conflict("Livebild läuft bereits".into()));
-        }
         let source = match video_id {
             Some(id) => gateway
                 .video_sources

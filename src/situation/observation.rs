@@ -62,10 +62,6 @@ pub enum Observation {
         live: Option<LiveStreamInfo>,
         error: Option<String>,
     },
-    CommandIssued {
-        gateway_sn: String,
-        command: StreamCommand,
-    },
     CommandFinished {
         gateway_sn: String,
         command: StreamCommand,

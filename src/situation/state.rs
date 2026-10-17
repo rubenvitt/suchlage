@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::contract::*;
 
-use super::observation::{ModeClass, Observation, Observed};
+use super::observation::{ModeClass, Observation, Observed, StreamCommand};
 use super::phase::{PhaseTracker, Sample, Transition};
 use super::stream;
 use super::track::TrackBuilder;
@@ -176,15 +176,6 @@ impl Situation {
             } => {
                 let s = self.stream_entry(&gateway_sn, at);
                 if stream::on_status(s, &live, error.as_deref(), at) {
-                    fx.push(Effect::Publish(LiveEvent::Stream { stream: s.clone() }));
-                }
-            }
-            Observation::CommandIssued {
-                gateway_sn,
-                command,
-            } => {
-                let s = self.stream_entry(&gateway_sn, at);
-                if stream::on_issued(s, &command, at) {
                     fx.push(Effect::Publish(LiveEvent::Stream { stream: s.clone() }));
                 }
             }
@@ -443,6 +434,23 @@ impl Situation {
         }
     }
 
+    /// Beginn eines Livebild-Befehls, geprüft und gesetzt in einem Schritt. `None`: abgelehnt,
+    /// weil er nicht zum Zustand passt (siehe `stream::on_issued`).
+    pub fn begin_command(
+        &mut self,
+        gateway_sn: &str,
+        command: &StreamCommand,
+        at: i64,
+    ) -> Option<Vec<Effect>> {
+        let s = self.stream_entry(gateway_sn, at);
+        let changed = stream::on_issued(s, command, at)?;
+        Some(if changed {
+            vec![Effect::Publish(LiveEvent::Stream { stream: s.clone() })]
+        } else {
+            vec![]
+        })
+    }
+
     pub fn stream(&self, gateway_sn: &str) -> Option<&StreamState> {
         self.streams.get(gateway_sn)
     }
@@ -488,7 +496,7 @@ fn close(f: OpenFlight, ended_at_ms: i64, reason: FlightEndReason) -> FlightSumm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::situation::observation::{LiveStreamInfo, StreamCommand};
+    use crate::situation::observation::LiveStreamInfo;
 
     const ON: Config = Config {
         auto_live_on_takeoff: true,
@@ -761,13 +769,11 @@ mod tests {
         let cmd = StreamCommand::Start {
             video_id: "v".into(),
         };
-        let e = s.apply(Observed {
-            at_ms: 1,
-            observation: Observation::CommandIssued {
-                gateway_sn: "RC1".into(),
-                command: cmd.clone(),
-            },
-        });
+        let e = s.begin_command("RC1", &cmd, 1).unwrap();
+        assert!(
+            s.begin_command("RC1", &cmd, 1).is_none(),
+            "zweiter Start abgelehnt"
+        );
         assert!(
             matches!(&e[..], [Effect::Publish(LiveEvent::Stream { stream })] if stream.phase == StreamPhase::Starting)
         );
