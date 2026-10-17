@@ -349,12 +349,33 @@ mod tests {
                 .unwrap();
             // Ein neuer Prozess hat auch einen neuen Übersetzer (kein Merge-Stand, keine Topologie).
             feed(&handle, &now, &mut Translator::new(), slice).await;
+            // Das Füttern dauert Millisekunden: Vor dem Stopp schreibt höchstens die Bündelgrenze.
+            let running = if part == 0 {
+                let snapshot = handle.snapshot().await.unwrap();
+                let [active] = snapshot.active_flights.as_slice() else {
+                    panic!("genau ein laufender Flug erwartet");
+                };
+                Some((active.flight.id, stored_points(&active.segments)))
+            } else {
+                None
+            };
             run_until_stopped(stop, task).await;
-            if part == 0 {
+            if let Some((id, fed)) = running {
+                assert_ne!(
+                    fed % FLUSH_POINTS_AT,
+                    0,
+                    "sonst bewiese schon die Bündelgrenze den Schreibvorgang"
+                );
                 assert_eq!(
                     store::flights::open(&pool).await.unwrap().len(),
                     1,
                     "Flug läuft beim Herunterfahren"
+                );
+                let segments = store::flights::segments(&pool, id).await.unwrap();
+                assert_eq!(
+                    stored_points(&segments),
+                    fed,
+                    "Herunterfahren schreibt die gepufferten Spurpunkte"
                 );
             }
             pool.close().await;
