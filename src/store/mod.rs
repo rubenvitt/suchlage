@@ -3,6 +3,7 @@
 pub mod device_state;
 pub mod flights;
 pub mod kiosk;
+pub mod map_elements;
 pub mod remote_controllers;
 pub mod sessions;
 pub mod settings;

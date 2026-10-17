@@ -4,6 +4,7 @@ import type { FlightDetail } from './generated/FlightDetail';
 import type { FlightSummary } from './generated/FlightSummary';
 import type { KioskTokenView } from './generated/KioskTokenView';
 import type { LiveEvent } from './generated/LiveEvent';
+import type { MapElement } from './generated/MapElement';
 import type { Me } from './generated/Me';
 import type { RemoteControllerView } from './generated/RemoteControllerView';
 import type { SettingsView } from './generated/SettingsView';
@@ -517,6 +518,87 @@ export const liveEvents: LiveEvent[] = [
       ]
     },
     "type": "system"
+  },
+  {
+    "elements": [
+      {
+        "author": "Gruppenführer I&K",
+        "clamp_to_ground": true,
+        "color": "#FFBB00",
+        "created_at_ms": 1792149700000,
+        "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
+        "kind": "polygon",
+        "name": "Suchgebiet Nord",
+        "origin": "web",
+        "points": [
+          {
+            "alt_m": null,
+            "lat": 52.433,
+            "lon": 10.008
+          },
+          {
+            "alt_m": null,
+            "lat": 52.433,
+            "lon": 10.016
+          },
+          {
+            "alt_m": null,
+            "lat": 52.4305,
+            "lon": 10.016
+          },
+          {
+            "alt_m": null,
+            "lat": 52.4305,
+            "lon": 10.008
+          }
+        ],
+        "updated_at_ms": 1792149700000
+      },
+      {
+        "author": "RC Plus 1",
+        "clamp_to_ground": false,
+        "color": "#E23C39",
+        "created_at_ms": 1792149940000,
+        "id": "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10",
+        "kind": "point",
+        "name": "Pilot 1",
+        "origin": "pilot",
+        "points": [
+          {
+            "alt_m": 84.2,
+            "lat": 52.4318,
+            "lon": 10.0124
+          }
+        ],
+        "updated_at_ms": 1792149940000
+      }
+    ],
+    "type": "map_elements"
+  },
+  {
+    "element": {
+      "author": "RC Plus 1",
+      "clamp_to_ground": false,
+      "color": "#E23C39",
+      "created_at_ms": 1792149940000,
+      "id": "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10",
+      "kind": "point",
+      "name": "Pilot 1",
+      "origin": "pilot",
+      "points": [
+        {
+          "alt_m": 84.2,
+          "lat": 52.4318,
+          "lon": 10.0124
+        }
+      ],
+      "updated_at_ms": 1792149940000
+    },
+    "type": "map_element"
+  },
+  {
+    "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
+    "type": "map_element_deleted"
   }
 ];
 
@@ -669,6 +751,60 @@ export const kioskTokens: KioskTokenView[] = [
     "created_at_ms": 1792146400000,
     "id": 1,
     "label": "FüKw Großbild"
+  }
+];
+
+export const mapElements: MapElement[] = [
+  {
+    "author": "Gruppenführer I&K",
+    "clamp_to_ground": true,
+    "color": "#FFBB00",
+    "created_at_ms": 1792149700000,
+    "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
+    "kind": "polygon",
+    "name": "Suchgebiet Nord",
+    "origin": "web",
+    "points": [
+      {
+        "alt_m": null,
+        "lat": 52.433,
+        "lon": 10.008
+      },
+      {
+        "alt_m": null,
+        "lat": 52.433,
+        "lon": 10.016
+      },
+      {
+        "alt_m": null,
+        "lat": 52.4305,
+        "lon": 10.016
+      },
+      {
+        "alt_m": null,
+        "lat": 52.4305,
+        "lon": 10.008
+      }
+    ],
+    "updated_at_ms": 1792149700000
+  },
+  {
+    "author": "RC Plus 1",
+    "clamp_to_ground": false,
+    "color": "#E23C39",
+    "created_at_ms": 1792149940000,
+    "id": "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10",
+    "kind": "point",
+    "name": "Pilot 1",
+    "origin": "pilot",
+    "points": [
+      {
+        "alt_m": 84.2,
+        "lat": 52.4318,
+        "lon": 10.0124
+      }
+    ],
+    "updated_at_ms": 1792149940000
   }
 ];
 

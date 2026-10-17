@@ -7,6 +7,7 @@ pub mod db;
 pub mod dji;
 pub mod error;
 pub mod extract;
+pub mod map;
 pub mod media;
 pub mod mqtt;
 pub mod runtime;

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::flights::{FlightSummary, TrackPoint};
+use super::map::MapElement;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -246,5 +247,16 @@ pub enum LiveEvent {
     },
     System {
         system: SystemStatus,
+    },
+    /// Alle Kartenelemente: direkt nach dem `snapshot` und nach einem überholten Strom.
+    MapElements {
+        elements: Vec<MapElement>,
+    },
+    /// Neu angelegt oder geändert.
+    MapElement {
+        element: MapElement,
+    },
+    MapElementDeleted {
+        id: String,
     },
 }

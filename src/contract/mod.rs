@@ -5,6 +5,7 @@ pub mod admin;
 pub mod examples;
 pub mod flights;
 pub mod live;
+pub mod map;
 
 #[cfg(test)]
 mod fixtures;
@@ -12,6 +13,7 @@ mod fixtures;
 pub use admin::*;
 pub use flights::*;
 pub use live::*;
+pub use map::*;
 
 /// Ab hier gilt ein Wert als verzögert (3 verpasste osd-Nachrichten bei 0,5 Hz).
 pub const FRESHNESS_DELAYED_MS: i64 = 6_000;

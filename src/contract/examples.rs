@@ -217,6 +217,50 @@ pub fn snapshot_flying() -> SituationSnapshot {
     }
 }
 
+/// Eine Fläche aus dem Browser und ein Punkt aus Pilot 2 (mit Höhe, wie Pilot 2 sie schickt).
+pub fn map_elements() -> Vec<MapElement> {
+    let corner = |lat: f64, lon: f64| MapPoint {
+        lat,
+        lon,
+        alt_m: None,
+    };
+    vec![
+        MapElement {
+            id: "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11".into(),
+            name: "Suchgebiet Nord".into(),
+            kind: MapElementKind::Polygon,
+            points: vec![
+                corner(52.433_0, 10.008_0),
+                corner(52.433_0, 10.016_0),
+                corner(52.430_5, 10.016_0),
+                corner(52.430_5, 10.008_0),
+            ],
+            color: "#FFBB00".into(),
+            clamp_to_ground: true,
+            author: "Gruppenführer I&K".into(),
+            origin: MapElementOrigin::Web,
+            created_at_ms: T0 - 300_000,
+            updated_at_ms: T0 - 300_000,
+        },
+        MapElement {
+            id: "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10".into(),
+            name: "Pilot 1".into(),
+            kind: MapElementKind::Point,
+            points: vec![MapPoint {
+                lat: 52.431_8,
+                lon: 10.012_4,
+                alt_m: Some(84.2),
+            }],
+            color: "#E23C39".into(),
+            clamp_to_ground: false,
+            author: "RC Plus 1".into(),
+            origin: MapElementOrigin::Pilot,
+            created_at_ms: T0 - 60_000,
+            updated_at_ms: T0 - 60_000,
+        },
+    ]
+}
+
 pub fn live_events() -> Vec<LiveEvent> {
     vec![
         LiveEvent::Snapshot {
@@ -249,6 +293,15 @@ pub fn live_events() -> Vec<LiveEvent> {
         },
         LiveEvent::System {
             system: system_ok(),
+        },
+        LiveEvent::MapElements {
+            elements: map_elements(),
+        },
+        LiveEvent::MapElement {
+            element: map_elements()[1].clone(),
+        },
+        LiveEvent::MapElementDeleted {
+            id: map_elements()[0].id.clone(),
         },
     ]
 }
@@ -387,6 +440,7 @@ pub fn all() -> Vec<Fixture> {
             &remote_controllers(),
         ),
         fx("kioskTokens", "KioskTokenView[]", &kiosk_tokens()),
+        fx("mapElements", "MapElement[]", &map_elements()),
         fx(
             "meAdmin",
             "Me",
@@ -440,4 +494,5 @@ pub fn assert_roundtrips() {
     roundtrip(flight_detail());
     roundtrip(settings_view());
     roundtrip(remote_controllers());
+    roundtrip(map_elements());
 }
