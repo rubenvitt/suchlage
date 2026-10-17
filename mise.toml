@@ -10,3 +10,11 @@ run = "scripts/check.sh"
 [tasks.ui]
 description = "Oberfläche ohne Backend ansehen: Beispieldaten und abgespielter Flug (Vorschau-Modus)"
 run = "pnpm -C frontend dev --mode demo --host 127.0.0.1"
+
+[tasks.dev]
+description = "Lokale Oberfläche mit Broker, MediaMTX, Server (Feature dev), Vite und Simulator"
+run = "scripts/dev.sh"
+
+[tasks."dev:smoke"]
+description = "Ende-zu-Ende-Prüfung gegen echte Container (ACL, update_topo, Flug, Aufnahme, RTMP-Auth)"
+run = "scripts/dev-smoke.sh"
