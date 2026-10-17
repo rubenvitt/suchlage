@@ -38,6 +38,7 @@
     let cfg = null;
     window.onThingConnect = (s) => { log(`MQTT: ${s}`); show(String(s) === "true" ? "Mit Suchlage verbunden." : "Verbindung zu Suchlage getrennt."); };
     window.onLiveStatus = (s) => log(`Livebild: ${s}`);
+    window.onWsConnect = (s) => log(`Kartenabgleich: ${String(s) === "true" ? "verbunden" : "getrennt"}`);
 
     async function run(action) {
       if (!bridge) return show("Diese Seite in DJI Pilot 2 unter Cloud-Dienst öffnen.");

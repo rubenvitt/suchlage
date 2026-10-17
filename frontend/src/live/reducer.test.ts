@@ -82,3 +82,21 @@ test('Unbekanntes Ereignis eines neueren Servers lässt den Stand unverändert',
   expect(warn).toHaveBeenCalledOnce();
   warn.mockRestore();
 });
+
+test('Kartenelemente: Liste ersetzt, Einzelnes ersetzt nach ID, Löschen entfernt, Snapshot lässt sie stehen', () => {
+  const list = ev('map_elements');
+  let s = applyEvent(flying(), list, 0);
+  expect(Object.keys(s.mapElements)).toHaveLength(2);
+  const renamed = { ...list.elements[1]!, name: 'Fundstelle' };
+  s = applyEvent(s, { type: 'map_element', element: renamed }, 0);
+  expect(s.mapElements[renamed.id]!.name).toBe('Fundstelle');
+  expect(Object.keys(s.mapElements)).toHaveLength(2);
+  const stale = { ...renamed, name: 'alt', updated_at_ms: renamed.updated_at_ms - 1 };
+  expect(applyEvent(s, { type: 'map_element', element: stale }, 0)).toBe(s);
+  s = applyEvent(s, { type: 'snapshot', snapshot: snapshotEmpty }, 0);
+  expect(Object.keys(s.mapElements)).toHaveLength(2);
+  const deleted = applyEvent(s, ev('map_element_deleted'), 0);
+  expect(Object.keys(deleted.mapElements)).toEqual([renamed.id]);
+  expect(applyEvent(deleted, ev('map_element_deleted'), 0)).toBe(deleted);
+  expect(applyEvent(deleted, { type: 'map_elements', elements: [] }, 0).mapElements).toEqual({});
+});

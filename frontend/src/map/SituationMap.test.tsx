@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConfigProvider, theme } from 'antd';
 import type { ReactElement } from 'react';
-import { snapshotFlying } from '../contract/fixtures.generated';
+import { mapElements, snapshotFlying } from '../contract/fixtures.generated';
 import type { Freshness } from '../live/freshness';
 import { farbenHell } from '../theme/tokens';
 import { MAP_UNAVAILABLE_TEXT, MAP_UNAVAILABLE_TITLE } from './MapBoundary';
@@ -21,6 +21,11 @@ const { FakeMap, GPUInitializationError, maps, gpu } = vi.hoisted(() => {
     zoom: number;
     touchZoomRotate = { disableRotation: vi.fn() };
     keyboard = { disableRotation: vi.fn() };
+    doubleClickZoom = { enable: vi.fn(), disable: vi.fn() };
+    /** Was ein Klick trifft; Tests setzen das Ergebnis. */
+    queryRenderedFeatures = vi.fn<
+      (box: unknown, options?: unknown) => { properties: Record<string, unknown> }[]
+    >(() => []);
     addImage = vi.fn();
     addLayer = vi.fn();
     fitBounds = vi.fn();
@@ -223,4 +228,49 @@ test('ein Fehler im Code bleibt ein Fehler und geht an die Fehlergrenze der Seit
   vi.spyOn(console, 'error').mockImplementation(() => {});
   gpu.fault = new TypeError('kaputt');
   expect(() => render(light(<SituationMap {...live} />))).toThrow('kaputt');
+});
+
+test('zeigt Kartenelemente in einer Quelle, die gewählte hervorgehoben, die Fläche als geschlossenen Ring', () => {
+  const { rerender } = render(light(<SituationMap {...live} elements={mapElements} />));
+  const map = loaded();
+  const [area, pin] = map.features('elements');
+  expect(area.geometry.type).toBe('Polygon');
+  expect(area.geometry.coordinates[0]).toHaveLength(5);
+  expect(area.geometry.coordinates[0][0]).toEqual(area.geometry.coordinates[0][4]);
+  expect(pin.properties).toMatchObject({ name: 'Pilot 1', color: mapElements[1]!.color, selected: false });
+  rerender(light(<SituationMap {...live} elements={mapElements} selectedElementId={pin.properties.id} />));
+  expect(map.features('elements')[1].properties.selected).toBe(true);
+});
+
+test('ohne Live-Lage holen die Kartenelemente den Einsatzort ins Bild', () => {
+  render(light(<SituationMap {...live} aircraft={[]} gateways={[]} tracks={[]} elements={mapElements} />));
+  const map = loaded();
+  expect(map.fitBounds).toHaveBeenCalledTimes(1);
+  expect(map.fitBounds.mock.calls[0]![0]).toEqual([
+    [10.008, 52.4305],
+    [10.016, 52.433],
+  ]);
+});
+
+test('ein Klick meldet Koordinate und getroffenes Element, beim Zeichnen nur die Koordinate', () => {
+  const onMapClick = vi.fn();
+  const click = { lngLat: { lng: 10.01, lat: 52.43 }, point: { x: 100, y: 50 } };
+  const { rerender } = render(
+    light(<SituationMap {...live} elements={mapElements} onMapClick={onMapClick} />),
+  );
+  const map = loaded();
+  map.queryRenderedFeatures.mockReturnValue([{ properties: { id: 'abc' } }]);
+  act(() => map.handlers.get('click')!({ ...click, target: map }));
+  expect(onMapClick).toHaveBeenLastCalledWith({ lat: 52.43, lon: 10.01 }, 'abc');
+  expect(map.queryRenderedFeatures.mock.calls[0]![0]).toEqual([
+    [94, 44],
+    [106, 56],
+  ]);
+
+  const draft = { kind: 'polygon' as const, points: [{ lat: 52.43, lon: 10.0 }] };
+  rerender(light(<SituationMap {...live} elements={mapElements} onMapClick={onMapClick} draft={draft} />));
+  act(() => map.handlers.get('click')!({ ...click, target: map }));
+  expect(onMapClick).toHaveBeenLastCalledWith({ lat: 52.43, lon: 10.01 }, null);
+  expect(map.doubleClickZoom.disable).toHaveBeenCalled();
+  expect(map.features('draft')).toHaveLength(1);
 });

@@ -11,6 +11,9 @@ const ARTEN: Record<LiveEvent['type'], true> = {
   flight_ended: true,
   stream: true,
   system: true,
+  map_elements: true,
+  map_element: true,
+  map_element_deleted: true,
 };
 
 test('jede Live-Ereignisart hat genau ein Beispiel', () => {

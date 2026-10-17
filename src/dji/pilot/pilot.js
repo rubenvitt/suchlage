@@ -47,6 +47,27 @@ export function connect(cfg, bridge, log) {
   call("platformLoadComponent", "liveshare", JSON.stringify({
     videoPublishType: "video-demand-aux-manual", statusCallback: "onLiveStatus",
   }));
+  connectMap(cfg, bridge, log);
+}
+
+/**
+ * Kartenelemente (M2): erst `api` und `ws`, dann `map` (`30.jsbridge.md`). Scheitert ein Modul,
+ * laufen Telemetrie und Livebild trotzdem; das Protokoll nennt den Grund. `true`, wenn alles geladen ist.
+ */
+export function connectMap(cfg, bridge, log) {
+  if (!cfg.apiToken) return false; // Server ohne Kartenelemente
+  const call = caller(bridge, log);
+  try {
+    call("platformLoadComponent", "api", JSON.stringify({ host: cfg.apiHost, token: cfg.apiToken }));
+    call("platformLoadComponent", "ws", JSON.stringify({
+      host: cfg.wsHost, token: cfg.apiToken, connectCallback: "onWsConnect",
+    }));
+    call("platformLoadComponent", "map", JSON.stringify({ userName: cfg.rcLabel, elementPreName: "Pilot" }));
+    return true;
+  } catch (e) {
+    log(`Kartenelemente nicht verfügbar (${e.message})`);
+    return false;
+  }
 }
 
 /** Ganzer Ablauf. `post(path, body)` liefert `{ ok, body }`. Gibt die zusammengeführte Konfiguration zurück. */

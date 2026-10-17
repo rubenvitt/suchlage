@@ -9,8 +9,10 @@ import type { AircraftState } from '../contract/generated/AircraftState';
 import type { FreshnessThresholds } from '../contract/generated/FreshnessThresholds';
 import type { GatewayState } from '../contract/generated/GatewayState';
 import type { GeoPoint } from '../contract/generated/GeoPoint';
+import type { MapElement } from '../contract/generated/MapElement';
 import type { TrackPoint } from '../contract/generated/TrackPoint';
 import { basemapStyle } from './basemapStyle';
+import { draftCollection, elementCollection, elementLabelCollection, type Draft } from './elements';
 import { MapBoundary } from './MapBoundary';
 import { aircraftGlyph, homeGlyph } from './glyphs';
 import {
@@ -37,9 +39,16 @@ interface Props {
   /** Folgen, Vergrößern, Verkleinern; das Großbild zeigt sie nicht, dort bedient niemand. */
   showTools?: boolean;
   label?: string;
+  /** Kartenelemente (M2); das Flugdetail zeigt keine. */
+  elements?: MapElement[];
+  selectedElementId?: string | null;
+  /** Form im Entstehen: Die Karte zeigt sie, ein Doppelklick zoomt dann nicht. */
+  draft?: Draft | null;
+  /** Klick in die Karte: die Koordinate und das getroffene Element, sonst `null`. Ohne: keine Bedienung. */
+  onMapClick?: (point: GeoPoint, elementId: string | null) => void;
 }
 
-type Source = 'track' | 'aircraft' | 'gateways' | 'home';
+type Source = 'track' | 'aircraft' | 'gateways' | 'home' | 'elements' | 'element-labels' | 'draft';
 type View = { center: maplibregl.LngLat; zoom: number };
 
 const EMPTY: Collection<never, never> = { type: 'FeatureCollection', features: [] };
@@ -47,6 +56,15 @@ const EMPTY: Collection<never, never> = { type: 'FeatureCollection', features: [
 const OVERVIEW = { center: [10.45, 51.16] as [number, number], zoom: 5 };
 const FIT = { padding: 64, maxZoom: 16, duration: 0 };
 const DEFAULT_LABEL = 'Lagekarte';
+const NO_ELEMENTS: MapElement[] = [];
+/** Ebenen, die ein Klick trifft; die oberste zuerst. */
+const ELEMENT_LAYERS = ['elements-point', 'elements-line', 'elements-fill'];
+/** Ein Klick daneben trifft noch: halbe Kantenlänge des Suchfelds in Pixeln. */
+const HIT_PX = 6;
+const POLYGON = ['==', ['geometry-type'], 'Polygon'] as maplibregl.FilterSpecification;
+const POINT = ['==', ['geometry-type'], 'Point'] as maplibregl.FilterSpecification;
+const NOT_POINT = ['!=', ['geometry-type'], 'Point'] as maplibregl.FilterSpecification;
+const LINE = ['==', ['geometry-type'], 'LineString'] as maplibregl.FilterSpecification;
 /** MapLibres Bedienhilfen sind englisch; nur diese drei erscheinen ohne eigene Steuerelemente. */
 const LOCALE = {
   'Map.Title': 'Karte',
@@ -83,6 +101,10 @@ function MapCanvas({
   staticFit = false,
   showTools = true,
   label = DEFAULT_LABEL,
+  elements = NO_ELEMENTS,
+  selectedElementId = null,
+  draft = null,
+  onMapClick,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -93,6 +115,22 @@ function MapCanvas({
   const [loaded, setLoaded] = useState(false);
   const { rollen, dunkel } = useRollen();
   const stopFollowing = useEffectEvent(() => onFollowChange?.(false));
+  // Beim Zeichnen zählt jeder Klick als Eckpunkt, auch auf einem vorhandenen Element.
+  const clicked = useEffectEvent((e: maplibregl.MapMouseEvent) => {
+    if (!onMapClick) return;
+    const { x, y } = e.point;
+    const hits = draft
+      ? []
+      : e.target.queryRenderedFeatures(
+          [
+            [x - HIT_PX, y - HIT_PX],
+            [x + HIT_PX, y + HIT_PX],
+          ],
+          { layers: ELEMENT_LAYERS },
+        );
+    const id = hits[0]?.properties?.id;
+    onMapClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }, typeof id === 'string' ? id : null);
+  });
 
   useEffect(() => {
     const pixelRatio = window.devicePixelRatio || 1;
@@ -114,6 +152,7 @@ function MapCanvas({
     map.on('dragstart', (e) => {
       if (e.originalEvent) stopFollowing();
     });
+    map.on('click', (e) => clicked(e));
     map.on('load', () => {
       const image = (id: string, data: ImageData) => map.addImage(id, data, { pixelRatio });
       image('aircraft-fresh', aircraftGlyph(rollen.bedien, false, 40 * pixelRatio));
@@ -121,9 +160,93 @@ function MapCanvas({
       image('aircraft-lost', aircraftGlyph(rollen.schwach, true, 40 * pixelRatio));
       image('home', homeGlyph(rollen.gedaempft, 24 * pixelRatio));
       registerUnitSign(map, pixelRatio);
-      for (const id of ['track', 'aircraft', 'gateways', 'home'] satisfies Source[]) {
+      for (const id of [
+        'elements',
+        'element-labels',
+        'track',
+        'aircraft',
+        'gateways',
+        'home',
+        'draft',
+      ] satisfies Source[]) {
         map.addSource(id, { type: 'geojson', data: EMPTY });
       }
+      // Kartenelemente liegen unter Spur und Fluggerät: Die Live-Lage bleibt immer sichtbar.
+      map.addLayer({
+        id: 'elements-fill',
+        type: 'fill',
+        source: 'elements',
+        filter: POLYGON,
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['case', ['get', 'selected'], 0.3, 0.16] },
+      });
+      map.addLayer({
+        id: 'elements-line',
+        type: 'line',
+        source: 'elements',
+        filter: NOT_POINT,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['get', 'color'], 'line-width': ['case', ['get', 'selected'], 4, 2.5] },
+      });
+      map.addLayer({
+        id: 'elements-point',
+        type: 'circle',
+        source: 'elements',
+        filter: POINT,
+        paint: {
+          'circle-color': ['get', 'color'],
+          'circle-radius': ['case', ['get', 'selected'], 9, 7],
+          'circle-stroke-color': ['case', ['get', 'selected'], rollen.text, rollen.grund],
+          'circle-stroke-width': 2,
+        },
+      });
+      const labelPaint = {
+        'text-color': rollen.text,
+        'text-halo-color': rollen.grund,
+        'text-halo-width': 1.5,
+      };
+      // Flächen zuerst: Symbole weiter oben im Stapel werden zuerst platziert, ein Punkt behält so
+      // seinen Namen. Die Flächenbeschriftung weicht bei einer Kollision auf eine andere Seite aus.
+      map.addLayer({
+        id: 'elements-area-label',
+        type: 'symbol',
+        source: 'element-labels',
+        filter: ['!=', ['get', 'kind'], 'point'],
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['noto_sans_regular'],
+          'text-size': 12,
+          'text-variable-anchor': ['center', 'top', 'bottom', 'left', 'right'],
+          'text-radial-offset': 1.2,
+        },
+        paint: labelPaint,
+      });
+      map.addLayer({
+        id: 'elements-point-label',
+        type: 'symbol',
+        source: 'element-labels',
+        filter: ['==', ['get', 'kind'], 'point'],
+        layout: {
+          'text-field': ['get', 'name'],
+          'text-font': ['noto_sans_regular'],
+          'text-size': 12,
+          'text-offset': [0, 1.1],
+          'text-anchor': 'top',
+        },
+        paint: labelPaint,
+      });
+      map.addLayer({
+        id: 'elements-line-label',
+        type: 'symbol',
+        source: 'elements',
+        filter: LINE,
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': ['get', 'name'],
+          'text-font': ['noto_sans_regular'],
+          'text-size': 12,
+        },
+        paint: labelPaint,
+      });
       map.addLayer({
         id: 'track',
         type: 'line',
@@ -195,6 +318,33 @@ function MapCanvas({
           'text-halo-width': 1.5,
         },
       });
+      // Die Form im Entstehen liegt über allem, gestrichelt in der Bedienfarbe.
+      map.addLayer({
+        id: 'draft-fill',
+        type: 'fill',
+        source: 'draft',
+        filter: POLYGON,
+        paint: { 'fill-color': rollen.bedien, 'fill-opacity': 0.12 },
+      });
+      map.addLayer({
+        id: 'draft-line',
+        type: 'line',
+        source: 'draft',
+        filter: NOT_POINT,
+        paint: { 'line-color': rollen.bedien, 'line-width': 2, 'line-dasharray': [2, 1.5] },
+      });
+      map.addLayer({
+        id: 'draft-vertex',
+        type: 'circle',
+        source: 'draft',
+        filter: POINT,
+        paint: {
+          'circle-radius': 5,
+          'circle-color': rollen.grund,
+          'circle-stroke-color': rollen.bedien,
+          'circle-stroke-width': 2,
+        },
+      });
       setLoaded(true);
     });
     return () => {
@@ -208,6 +358,28 @@ function MapCanvas({
   useEffect(() => {
     if (loaded) setData(mapRef.current!, 'track', trackCollection(tracks));
   }, [loaded, tracks]);
+
+  useEffect(() => {
+    if (loaded) setData(mapRef.current!, 'elements', elementCollection(elements, selectedElementId));
+  }, [loaded, elements, selectedElementId]);
+
+  useEffect(() => {
+    if (loaded) setData(mapRef.current!, 'element-labels', elementLabelCollection(elements));
+  }, [loaded, elements]);
+
+  const drafting = draft != null;
+  useEffect(() => {
+    if (!loaded) return;
+    const map = mapRef.current!;
+    setData(map, 'draft', draftCollection(draft));
+  }, [loaded, draft]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const zoom = mapRef.current!.doubleClickZoom;
+    if (drafting) zoom.disable();
+    else zoom.enable();
+  }, [loaded, drafting]);
 
   useEffect(() => {
     if (loaded) setData(mapRef.current!, 'home', homeCollection(aircraft));
@@ -237,17 +409,19 @@ function MapCanvas({
     }
     if (framed.current) return;
     // Spur, Fluggerät und Trupp zusammen: So sieht man, wo der Trupp steht und wohin geflogen wird.
-    const b = boundsOf([...tracks.flat(), positions(aircraft, gateways)]);
+    // Ohne Live-Lage holen die Kartenelemente den Einsatzort ins Bild.
+    const live = boundsOf([...tracks.flat(), positions(aircraft, gateways)]);
+    const b = live ?? boundsOf(elements.map((e) => e.points));
     if (b) {
       map.fitBounds(b, FIT);
       framed.current = true;
     }
-  }, [loaded, follow, aircraft, gateways, staticFit, tracks]);
+  }, [loaded, follow, aircraft, gateways, staticFit, tracks, elements]);
 
   const map = () => mapRef.current;
 
   return (
-    <div className="sl-map" role="region" aria-label={label}>
+    <div className="sl-map" role="region" aria-label={label} data-drawing={drafting}>
       <div ref={container} className="sl-map-canvas" />
       {!staticFit && showTools && (
         <div className="sl-map-tools">

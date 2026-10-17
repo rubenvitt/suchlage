@@ -3,6 +3,7 @@
 pub mod command;
 pub mod control;
 pub mod link;
+pub mod map;
 pub mod pilot;
 pub mod record;
 pub mod recorder;

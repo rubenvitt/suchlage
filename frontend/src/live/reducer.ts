@@ -4,6 +4,7 @@ import type { FlightSummary } from '../contract/generated/FlightSummary';
 import type { FreshnessThresholds } from '../contract/generated/FreshnessThresholds';
 import type { GatewayState } from '../contract/generated/GatewayState';
 import type { LiveEvent } from '../contract/generated/LiveEvent';
+import type { MapElement } from '../contract/generated/MapElement';
 import type { StreamState } from '../contract/generated/StreamState';
 import type { SystemStatus } from '../contract/generated/SystemStatus';
 import type { TrackPoint } from '../contract/generated/TrackPoint';
@@ -23,6 +24,8 @@ export interface LiveState {
   /** Livebild je Fernsteuerungs-SN. */
   streams: Record<string, StreamState>;
   system: SystemStatus | null;
+  /** Kartenelemente nach ID; ein Snapshot lässt sie stehen, die Liste danach ersetzt sie. */
+  mapElements: Record<string, MapElement>;
 }
 
 export const initialLiveState: LiveState = {
@@ -35,6 +38,7 @@ export const initialLiveState: LiveState = {
   ended: {},
   streams: {},
   system: null,
+  mapElements: {},
 };
 
 /** Wie `situation::track::haversine_m` im Kern. */
@@ -64,6 +68,7 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
         ended: s.ended,
         streams: byKey(snap.streams, (st) => st.gateway_sn),
         system: snap.system,
+        mapElements: s.mapElements,
       };
     }
     case 'gateway':
@@ -103,6 +108,20 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
       return { ...s, streams: { ...s.streams, [e.stream.gateway_sn]: e.stream } };
     case 'system':
       return { ...s, system: e.system };
+    case 'map_elements':
+      return { ...s, mapElements: byKey(e.elements, (el) => el.id) };
+    case 'map_element': {
+      // Antwort des Servers und Live-Strom können sich überholen: Ein älterer Stand ersetzt keinen neueren.
+      const known = s.mapElements[e.element.id];
+      if (known && known.updated_at_ms > e.element.updated_at_ms) return s;
+      return { ...s, mapElements: { ...s.mapElements, [e.element.id]: e.element } };
+    }
+    case 'map_element_deleted': {
+      if (!(e.id in s.mapElements)) return s;
+      const mapElements = { ...s.mapElements };
+      delete mapElements[e.id];
+      return { ...s, mapElements };
+    }
     default:
       // Ein lange offener Tab kann einen neueren Server erleben; dessen neue Ereignisse lassen den Stand stehen.
       console.warn('Unbekanntes Live-Ereignis – übersprungen');

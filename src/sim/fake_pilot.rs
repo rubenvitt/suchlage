@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use crate::contract::GeoPoint;
 use crate::dji::record::RecordLine;
 use crate::dji::topic::{self, DjiTopic};
 
@@ -204,6 +205,25 @@ fn speed(value: &str) -> Result<f64, String> {
     }
 }
 
+/// Ein Punkt, wie Pilot 2 ihn anlegt (Body von `POST …/elements`), 50 m nördlich des Startpunkts.
+/// Die ID hängt an der SN: Ein neuer Start des Simulators ändert denselben Punkt, statt einen
+/// weiteren anzulegen.
+pub fn pilot_pin(rc_sn: &str, home: GeoPoint) -> Value {
+    json!({
+        "id": format!("sim-pin-{rc_sn}"),
+        "name": "Simulator: Landeplatz",
+        "resource": {
+            "type": 0,
+            "user_name": "",
+            "content": {
+                "type": "Feature",
+                "properties": { "color": "#2D8CF0", "clampToGround": true },
+                "geometry": { "type": "Point", "coordinates": [home.lon, home.lat + 0.000_45] }
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +232,21 @@ mod tests {
         json!({"tid": "t1", "bid": "b1", "timestamp": 1, "method": method, "data": data})
             .to_string()
             .into_bytes()
+    }
+
+    #[test]
+    fn pilot_pin_is_a_dji_create_body_with_a_stable_id() {
+        let body = pilot_pin("SIMRC0001", crate::contract::examples::HOME);
+        let input: crate::dji::map::ElementCreateInput =
+            serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(input.id, "sim-pin-SIMRC0001");
+        let shape = input.resource.content.shape().unwrap();
+        assert_eq!(shape.kind, crate::contract::MapElementKind::Point);
+        assert!(shape.points[0].lat > crate::contract::examples::HOME.lat);
+        assert_eq!(
+            body,
+            pilot_pin("SIMRC0001", crate::contract::examples::HOME)
+        );
     }
 
     fn args(list: &[&str]) -> Result<Args, String> {

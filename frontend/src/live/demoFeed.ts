@@ -1,4 +1,4 @@
-import { snapshotFlying } from '../contract/fixtures.generated';
+import { mapElements, snapshotFlying } from '../contract/fixtures.generated';
 import type { LiveConnectionOptions } from './connection';
 
 /** Funkstille je Runde, in Sekunden ab Start – zeigt Schraffur, grauen Marker und neues Segment. */
@@ -38,6 +38,8 @@ export function demoFeed({ onEvent, onStatus }: LiveConnectionOptions): () => vo
       streams: base.streams.map((st) => ({ ...st, updated_at_ms: st.updated_at_ms + shift })),
     },
   });
+  // Wie der Server: direkt nach dem Snapshot alle Kartenelemente.
+  onEvent({ type: 'map_elements', elements: mapElements });
   onStatus('open');
 
   let segment = flight.segments.length - 1;

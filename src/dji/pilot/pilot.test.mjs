@@ -1,17 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PairingError, connect, pair, readRcSn, startManualLive, verify } from "./pilot.js";
+import { PairingError, connect, connectMap, pair, readRcSn, startManualLive, verify } from "./pilot.js";
 
 const lic = { appId: "1", appKey: "k", license: "l", workspaceId: "768d4a2e-1f34-477c-9fcc-872285e895f6", rcLabel: "RC Plus 1" };
 const conn = { mqttHost: "tcp://127.0.0.1:1883", mqttUser: "rc-RCSN01", mqttPass: "p", rtmpUrl: "rtmp://127.0.0.1:1935/live/RCSN01?user=rc-RCSN01&pass=x" };
+const map = { apiHost: "https://suchlage.test", wsHost: "wss://suchlage.test/pilot/ws", apiToken: "t0k" };
 
-/** JSBridge-Attrappe: jede Antwort ist eine JSON-Hülle wie in Pilot 2. */
-function fakeBridge({ failing = {}, data = {}, raw = {} } = {}) {
+/** JSBridge-Attrappe: jede Antwort ist eine JSON-Hülle wie in Pilot 2. `failsOn(name, args)` wählt Fehlschläge je Aufruf. */
+function fakeBridge({ failing = {}, data = {}, raw = {}, failsOn = () => false } = {}) {
   const calls = [];
   const handler = { get: (_, name) => (...args) => {
     calls.push([name, ...args]);
     if (name in raw) return raw[name];
-    if (failing[name]) return JSON.stringify({ code: -1, message: "nope" });
+    if (failing[name] || failsOn(name, args)) return JSON.stringify({ code: -1, message: "nope" });
     return JSON.stringify({ code: 0, message: "", data: name in data ? data[name] : true });
   } };
   return { bridge: new Proxy({}, handler), calls };
@@ -32,6 +33,33 @@ test("connect lädt Workspace, Information, thing und liveshare", () => {
   assert.deepEqual(calls[1].slice(1), ["Suchlage", "DRK I&K", "RC Plus 1"]);
   assert.deepEqual(JSON.parse(calls[2][2]), { host: conn.mqttHost, username: conn.mqttUser, password: "p", connectCallback: "onThingConnect" });
   assert.equal(JSON.parse(calls[3][2]).videoPublishType, "video-demand-aux-manual");
+});
+
+test("mit API-Token lädt connect danach api, ws und map in dieser Reihenfolge", () => {
+  const { bridge, calls } = fakeBridge();
+  connect({ ...lic, ...conn, ...map }, bridge, () => {});
+  const modules = calls.filter((c) => c[0] === "platformLoadComponent").map((c) => c[1]);
+  assert.deepEqual(modules, ["thing", "liveshare", "api", "ws", "map"]);
+  const param = (name) => JSON.parse(calls.find((c) => c[1] === name)[2]);
+  assert.deepEqual(param("api"), { host: "https://suchlage.test", token: "t0k" });
+  assert.deepEqual(param("ws"), { host: "wss://suchlage.test/pilot/ws", token: "t0k", connectCallback: "onWsConnect" });
+  assert.deepEqual(param("map"), { userName: "RC Plus 1", elementPreName: "Pilot" });
+});
+
+test("scheitert ein Kartenmodul, bleibt die Kopplung bestehen und das Protokoll nennt den Grund", () => {
+  const failsOn = (name, [module]) => name === "platformLoadComponent" && module === "ws";
+  const { bridge, calls } = fakeBridge({ failsOn });
+  const log = [];
+  assert.equal(connectMap({ ...lic, ...map }, bridge, (m) => log.push(m)), false);
+  assert.ok(log.some((m) => m.includes("Kartenelemente nicht verfügbar")), log.join("\n"));
+  assert.deepEqual(calls.map((c) => c[1]), ["api", "ws"], "map wird ohne ws nicht geladen");
+  assert.doesNotThrow(() => connect({ ...lic, ...conn, ...map }, fakeBridge({ failsOn }).bridge, () => {}));
+});
+
+test("ohne API-Token (älterer Server) lädt connectMap nichts", () => {
+  const { bridge, calls } = fakeBridge();
+  assert.equal(connectMap({ ...lic, ...conn }, bridge, () => {}), false);
+  assert.equal(calls.length, 0);
 });
 
 test("verify bricht bei abgelehnter Lizenz ab", () => {

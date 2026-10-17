@@ -17,7 +17,7 @@ direkt aus dem Internet erreichbar.
 ```
 Browser (Internet) ──HTTPS 443──▶ Traefik / cloudflared ──▶ 127.0.0.1:8080  server
 Browser (Tailnet)  ──UDP 8189──────────────────────────────▶ <TS-IP>:8189     media (WebRTC-Bild)
-RC Plus (Internet) ──HTTPS 443 (/pilot)──▶ Traefik / cloudflared
+RC Plus (Internet) ──HTTPS 443 (/pilot, /map/api/v1, WebSocket /pilot/ws)──▶ Traefik / cloudflared
 RC Plus (Tailnet)  ──TCP 1883──────────────────────────────▶ <TS-IP>:1883     mqtt
 RC Plus (Tailnet)  ──TCP 1935──────────────────────────────▶ <TS-IP>:1935     media (RTMP)
 server ──Compose-Netz──▶ mqtt, media (WHEP 8889, HLS 8888, Playback 9996, nie am Host)
@@ -278,7 +278,13 @@ unter `group:iuk` oder einer eigenen Regel auf UDP 8189 zugreifen dürfen.
 
 ## Abnahme
 
-`docs/betrieb/m1-realflug-checkliste.md`. Erst danach gilt die Auslieferung als fertig.
+`docs/betrieb/m1-realflug-checkliste.md`. Erst danach gilt die Auslieferung als fertig. Für die
+Kartenelemente (M2) zusätzlich `docs/betrieb/m2-realflug-checkliste.md`.
+
+Pilot 2 erreicht die Kartenelemente über `/map/api/v1/…` (HTTPS) und `/pilot/ws` (WebSocket), beides
+unter `https://suchlage.iuk-ue.de` wie `/pilot`. Die Regeln aus Schritt 6 decken das ab; Traefik und
+Cloudflare-Tunnel reichen WebSockets ohne weitere Einstellung durch. Zugang nur mit dem API-Token,
+den die Pilot-Seite beim Koppeln bekommt.
 
 ## Betrieb
 
@@ -331,4 +337,6 @@ nächsten Koppeln wieder an.
 | Livebild nur „verzögert (HLS)“ | Außerhalb des Tailnets erwartet. Im Tailnet: Der Browser erreicht `<TS-IP>:8189/udp` nicht, ACL prüfen |
 | Kein Bild, RC meldet Push-Fehler | Die RC erreicht `<TS-IP>:1935` nicht. Tailscale auf der RC, ACL und RTMP-Adresse unter *Einstellungen → Video* prüfen |
 | Pilot-Seite lädt nicht auf der RC | Die RC hat kein Internet. `/pilot` läuft über `suchlage.iuk-ue.de`, nicht über das Tailnet |
+| Kartenelemente fehlen in Pilot 2, Protokoll der Pilot-Seite ohne „Kartenabgleich: verbunden“ | Cloud-Seite in Pilot 2 neu öffnen (lädt `api`, `ws`, `map`). Meldet Pilot 2 „Anmeldung abgelaufen“, wurde dieselbe Fernsteuerung woanders neu gekoppelt: jedes Koppeln erzeugt einen neuen Token |
+| Pilot 2 meldet „Ressource existiert nicht“ beim Zeichnen | Die Workspace-ID unter *Einstellungen → DJI* wurde geändert. Zurückändern oder in Pilot 2 neu koppeln |
 | Anmeldung scheitert | Callback-URL in Pocket ID muss genau `https://suchlage.iuk-ue.de/api/auth/oidc/callback` sein |

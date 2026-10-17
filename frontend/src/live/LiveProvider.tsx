@@ -42,6 +42,14 @@ export function useLive<T>(selector: (s: LiveState) => T): T {
   return useSyncExternalStore(s.subscribe, () => selector(s.getState()));
 }
 
+/**
+ * Übernimmt eine Antwort des Servers sofort in die Lage (etwa ein neues Kartenelement), statt auf
+ * den Live-Strom zu warten. Der Strom bestätigt sie danach; doppelt angewendet ändert sie nichts.
+ */
+export function useLiveDispatch(): (e: LiveEvent) => void {
+  return useStore().dispatch;
+}
+
 export function useConnectionStatus() {
   const s = useStore();
   return useSyncExternalStore(s.subscribe, s.getStatus);

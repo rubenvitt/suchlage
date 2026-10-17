@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   liveEvents,
@@ -7,6 +7,12 @@ import {
   snapshotGatewayOnly,
 } from '../contract/fixtures.generated';
 import type { LiveEvent } from '../contract/generated/LiveEvent';
+import type { MapElementInput } from '../contract/generated/MapElementInput';
+import type { MapElementUpdate } from '../contract/generated/MapElementUpdate';
+import { http, HttpResponse } from 'msw';
+import { ELEMENT_COLORS } from '../map/elementColors';
+import type { SituationMap } from '../map/SituationMap';
+import { server } from '../test/server';
 import type { SituationSnapshot } from '../contract/generated/SituationSnapshot';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
@@ -14,7 +20,17 @@ import { SyncCell } from '../shell/SyncCell';
 import { renderWithApp } from '../test/render';
 import { WorkstationView } from './WorkstationView';
 
-vi.mock('../map/SituationMap', () => ({ SituationMap: () => <div data-testid="karte" /> }));
+// Die Karte selbst testet SituationMap.test.tsx; hier zählt, was die Ansicht ihr gibt und auf Klicks tut.
+const karte = vi.hoisted(() => ({ props: null as Parameters<typeof SituationMap>[0] | null }));
+vi.mock('../map/SituationMap', () => ({
+  SituationMap: (props: Parameters<typeof SituationMap>[0]) => {
+    karte.props = props;
+    return <div data-testid="karte" />;
+  },
+}));
+/** Klick in die Karte wie MapLibre ihn meldet. */
+const klick = (lat: number, lon: number, elementId: string | null = null) =>
+  act(() => karte.props!.onMapClick!({ lat, lon }, elementId));
 vi.mock('../video/whep', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../video/whep')>()),
   startWhep: vi.fn(() => new Promise(() => {})),
@@ -123,4 +139,119 @@ test('mit zwei Fernsteuerungen lässt sich die gezeigte wählen', async () => {
   await userEvent.click(within(choice).getByRole('radio', { name: 'RC Plus Reserve' }));
   expect(await screen.findByText('Fluggerät aus')).toBeInTheDocument();
   expect(screen.getByText(/RC Plus Reserve ist verbunden/)).toBeInTheDocument();
+});
+
+test('Operator zeichnet eine Fläche, benennt sie und legt sie an', async () => {
+  let sent: MapElementInput | null = null;
+  server.use(
+    http.post('/api/map/elements', async ({ request }) => {
+      sent = (await request.json()) as MapElementInput;
+      const now = Date.now();
+      return HttpResponse.json({
+        ...sent,
+        id: 'neu-1',
+        points: sent.points.map((p) => ({ ...p, alt_m: null })),
+        clamp_to_ground: true,
+        author: 'Gruppenführer I&K',
+        origin: 'web',
+        created_at_ms: now,
+        updated_at_ms: now,
+      });
+    }),
+  );
+  show(snapshotFlying);
+  const tools = await screen.findByRole('toolbar', { name: 'Zeichnen' });
+  await userEvent.click(within(tools).getByRole('button', { name: 'Fläche' }));
+  const bar = screen.getByRole('toolbar', { name: 'Fläche zeichnen' });
+  const fertig = within(bar).getByRole('button', { name: 'Fertig' });
+  expect(karte.props!.follow).toBe(false);
+  klick(52.43, 10.0);
+  klick(52.44, 10.0);
+  expect(fertig).toBeDisabled();
+  klick(52.44, 10.01);
+  expect(karte.props!.draft!.points).toHaveLength(3);
+  await userEvent.click(fertig);
+
+  const name = await screen.findByLabelText('Name');
+  expect(name).toHaveValue('Fläche 1');
+  await userEvent.clear(name);
+  await userEvent.type(name, 'Abschnitt Nord');
+  await userEvent.click(screen.getByRole('radio', { name: 'Gelb' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Anlegen' }));
+
+  expect(await screen.findByRole('heading', { name: 'Abschnitt Nord' })).toBeInTheDocument();
+  expect(sent).toEqual({
+    name: 'Abschnitt Nord',
+    kind: 'polygon',
+    points: [
+      { lat: 52.43, lon: 10.0 },
+      { lat: 52.44, lon: 10.0 },
+      { lat: 52.44, lon: 10.01 },
+    ],
+    color: ELEMENT_COLORS.find((c) => c.label === 'Gelb')!.wert,
+  });
+  // Die Antwort steht sofort in der Lage, ausgewählt; der Live-Strom bestätigt sie später.
+  expect(karte.props!.elements!.map((e) => e.id)).toContain('neu-1');
+  expect(karte.props!.selectedElementId).toBe('neu-1');
+});
+
+test('Escape bricht das Zeichnen ab, ein Punkt ist mit einem Klick fertig', async () => {
+  show(snapshotFlying);
+  await userEvent.click(await screen.findByRole('button', { name: 'Linie' }));
+  klick(52.43, 10.0);
+  await userEvent.keyboard('{Escape}');
+  expect(karte.props!.draft).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: 'Punkt' }));
+  klick(52.43, 10.0);
+  expect(await screen.findByRole('heading', { name: 'Neu: Punkt' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Verwerfen' }));
+  expect(screen.queryByRole('heading', { name: 'Neu: Punkt' })).not.toBeInTheDocument();
+});
+
+test('ein Klick auf ein Element aus Pilot 2 öffnet es zum Umbenennen und Löschen', async () => {
+  let renamed: MapElementUpdate | null = null;
+  let deleted = '';
+  const pin = eventOf('map_elements').elements[1]!;
+  server.use(
+    http.put('/api/map/elements/:id', async ({ request }) => {
+      renamed = (await request.json()) as MapElementUpdate;
+      return HttpResponse.json({ ...pin, ...renamed, updated_at_ms: pin.updated_at_ms + 1 });
+    }),
+    http.delete('/api/map/elements/:id', ({ params }) => {
+      deleted = String(params.id);
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  show(snapshotFlying, [eventOf('map_elements')]);
+  await screen.findByRole('toolbar', { name: 'Zeichnen' });
+  klick(pin.points[0]!.lat, pin.points[0]!.lon, pin.id);
+  expect(await screen.findByRole('heading', { name: 'Pilot 1' })).toBeInTheDocument();
+  expect(screen.getByText(/aus Pilot 2 \(RC Plus 1\)/)).toBeInTheDocument();
+  expect(screen.getByRole('radio', { name: 'Rot' })).toHaveAttribute('aria-checked', 'true');
+
+  const name = screen.getByLabelText('Name');
+  await userEvent.clear(name);
+  await userEvent.type(name, 'Fundstelle');
+  await userEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+  expect(await screen.findByRole('heading', { name: 'Fundstelle' })).toBeInTheDocument();
+  expect(renamed).toEqual({ name: 'Fundstelle', color: pin.color });
+
+  await userEvent.click(screen.getByRole('button', { name: 'Element löschen: Fundstelle' }));
+  expect(await screen.findByText('„Fundstelle“ löschen?')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Löschen' }));
+  await vi.waitFor(() => expect(deleted).toBe(pin.id));
+  await vi.waitFor(() =>
+    expect(screen.queryByRole('heading', { name: 'Fundstelle' })).not.toBeInTheDocument(),
+  );
+  expect(karte.props!.elements!.map((e) => e.id)).not.toContain(pin.id);
+});
+
+test('ein Klick ins Leere schließt das gewählte Element', async () => {
+  const pin = eventOf('map_elements').elements[1]!;
+  show(snapshotFlying, [eventOf('map_elements')]);
+  await screen.findByRole('toolbar', { name: 'Zeichnen' });
+  klick(52.4, 10.0, pin.id);
+  expect(await screen.findByRole('heading', { name: 'Pilot 1' })).toBeInTheDocument();
+  klick(52.4, 10.0);
+  expect(screen.queryByRole('heading', { name: 'Pilot 1' })).not.toBeInTheDocument();
 });

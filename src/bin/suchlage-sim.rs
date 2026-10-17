@@ -1,5 +1,6 @@
 //! Simulator: verhält sich wie Pilot 2 auf einer gekoppelten Fernsteuerung. Holt den Zugang über
-//! `/pilot/api/connect`, spielt einen Flug ab und beantwortet Livebild-Befehle mit einem Testbild.
+//! `/pilot/api/connect`, setzt einen Kartenpunkt, spielt einen Flug ab und beantwortet
+//! Livebild-Befehle mit einem Testbild.
 
 use std::process::{ExitCode, Stdio};
 use std::time::Duration;
@@ -10,7 +11,7 @@ use suchlage::dji::pilot::PilotConnection;
 use suchlage::dji::record::{RecordLine, read_lines};
 use suchlage::sim::fake_pilot::{
     Action, Args, ConnectOutcome, LiveVideo, broker_address, classify_connect, handle_service,
-    live_status, parse_args, replay_script, retry_delays,
+    live_status, parse_args, pilot_pin, replay_script, retry_delays,
 };
 use suchlage::sim::synth::{Scenario, generate};
 use tokio::process::{Child, Command};
@@ -44,6 +45,11 @@ async fn main() -> ExitCode {
 
 async fn run(args: Args) -> Result<(), String> {
     let connection = connect(&args).await?;
+    // Wie ein Pilot, der einen Punkt setzt: prüft den Weg über `/map/api/v1/…`. Kein Abbruch, wenn es scheitert.
+    match share_pin(&args, &connection.api_token).await {
+        Ok(()) => tracing::info!("Kartenpunkt gesetzt"),
+        Err(e) => tracing::warn!(error = %e, "Kartenpunkt nicht gesetzt"),
+    }
     let mut pilot = Pilot::new(args, &connection)?;
     let result = pilot.fly().await;
     pilot.finish().await;
@@ -80,6 +86,44 @@ async fn connect(args: &Args) -> Result<PilotConnection, String> {
         tracing::info!(?delay, %detail, "Server noch nicht bereit – neuer Versuch");
         tokio::time::sleep(delay).await;
     }
+}
+
+/// Legt den Punkt aus `pilot_pin` an. Die Workspace-ID kommt wie auf der Pilot-Seite aus der Lizenz.
+async fn share_pin(args: &Args, token: &str) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let server = args.server.trim_end_matches('/');
+    let license: Value = client
+        .post(format!("{server}/pilot/api/license"))
+        .json(&json!({ "code": args.code }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    let workspace = license["workspaceId"]
+        .as_str()
+        .ok_or("Lizenz ohne Workspace-ID")?;
+    let url = format!(
+        "{server}/map/api/v1/workspaces/{workspace}/element-groups/{}/elements",
+        suchlage::dji::map::SHARED_GROUP_ID
+    );
+    let response = client
+        .post(url)
+        .header("x-auth-token", token)
+        .json(&pilot_pin(&args.rc_sn, suchlage::contract::examples::HOME))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body: Value = response.json().await.unwrap_or_default();
+        return Err(format!("{status}: {}", body["message"]));
+    }
+    Ok(())
 }
 
 /// Der deutsche Satz aus `{"error": …}`, sonst der Statuscode.

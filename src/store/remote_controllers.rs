@@ -153,6 +153,32 @@ pub async fn bind(
     Ok(done.rows_affected() == 1)
 }
 
+/// Ersetzt den API-Token der Kartenelemente; der alte gilt danach nicht mehr. Nur der Hash wird gespeichert.
+pub async fn set_api_token(pool: &SqlitePool, id: i64, token: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE remote_controllers SET api_token_hash = ? WHERE id = ?")
+        .bind(token::hash(token))
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Gekoppelte Fernsteuerung zum API-Token. Eine ungekoppelte hat keinen Zugang.
+pub async fn find_by_api_token(
+    pool: &SqlitePool,
+    token: &str,
+) -> Result<Option<RemoteController>, sqlx::Error> {
+    let r = sqlx::query(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM remote_controllers WHERE api_token_hash = ? AND sn IS NOT NULL"
+    ))
+    .bind(token::hash(token))
+    .fetch_optional(pool)
+    .await?;
+    Ok(r.as_ref().map(row))
+}
+
 /// (SN, Bezeichnung) aller gekoppelten Fernsteuerungen.
 pub async fn labels(pool: &SqlitePool) -> Result<Vec<(String, String)>, sqlx::Error> {
     let rows = sqlx::query("SELECT sn, label FROM remote_controllers WHERE sn IS NOT NULL")
@@ -229,6 +255,29 @@ mod tests {
         );
         assert_eq!(delete(&pool, rc.id).await.unwrap(), None);
         assert!(list(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_new_api_token_replaces_the_old_one() {
+        let pool = test_pool().await;
+        let (rc, _) = create(&pool, "RC Plus 1", 0).await.unwrap();
+        set_api_token(&pool, rc.id, "erster").await.unwrap();
+        assert_eq!(
+            find_by_api_token(&pool, "erster").await.unwrap(),
+            None,
+            "ungekoppelt: kein Zugang"
+        );
+        bind(&pool, rc.id, "RC1", "pw", "key", 5).await.unwrap();
+        assert_eq!(
+            find_by_api_token(&pool, "erster")
+                .await
+                .unwrap()
+                .map(|r| r.id),
+            Some(rc.id)
+        );
+        set_api_token(&pool, rc.id, "zweiter").await.unwrap();
+        assert_eq!(find_by_api_token(&pool, "erster").await.unwrap(), None);
+        assert!(find_by_api_token(&pool, "zweiter").await.unwrap().is_some());
     }
 
     #[tokio::test]

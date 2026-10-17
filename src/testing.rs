@@ -34,6 +34,7 @@ pub async fn test_app() -> TestApp {
     let pool = crate::db::test_pool().await;
     let (stop, stop_rx) = watch::channel(false);
     let (live_tx, live_requests) = mpsc::unbounded_channel();
+    let map = crate::map::MapHub::new(pool.clone(), stop_rx.clone());
     let config = Config {
         auto_live_on_takeoff: false,
     };
@@ -69,6 +70,7 @@ pub async fn test_app() -> TestApp {
         oidc: Arc::new(crate::auth::oidc::OidcState::new()),
         mqtt,
         streams,
+        map,
         http: crate::media::http_client(),
     };
     TestApp {

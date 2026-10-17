@@ -24,4 +24,9 @@ export default tseslint.config(
     files: ['src/theme/**', 'src/components/instrument/**', 'src/map/basemapStyle.ts'],
     rules: { 'no-restricted-syntax': 'off' },
   },
+  // Kartenelemente tragen die DJI-Farben als Daten (M2): die Palette und die erzeugten Beispielwerte.
+  {
+    files: ['src/map/elementColors.ts', 'src/contract/fixtures.generated.ts'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
 );
