@@ -78,3 +78,11 @@ Jede Aufgabe endet mit grünem `scripts/check.sh` und einem eigenen Commit.
 4. **Gruppen-ID:** fest im Code. Ein Wechsel der Workspace-ID in den Einstellungen trennt Pilot 2 von den Elementen (404), bis neu gekoppelt wird.
 5. **Token-Rotation:** Jedes Koppeln erzeugt einen neuen Token und macht den alten ungültig. Öffnet jemand die Pilot-Seite auf einem zweiten Gerät mit demselben Code, verliert das erste den Kartenabgleich (401 meldet die Plattform dort ab).
 6. **Höhe:** `alt_m` wird nur durchgereicht. Der Browser zeichnet ohne Höhe und setzt `clampToGround: true`.
+7. **Bearbeiten während einer fremden Änderung:** Ändert Pilot 2 ein Element, das im Browser gerade bearbeitet wird, setzt das Formular den Namen auf den neuen Stand zurück. Selten; eine Anzeige „anderswo geändert“ wäre die Abhilfe.
+8. **Kartenstrom ohne Datenbank:** Scheitert nach einem überholten Kartenstrom das Neuladen der Liste, endet nur der Kartenteil des SSE-Stroms. Die Lage läuft weiter, neue Elemente erscheinen erst nach dem nächsten Neuverbinden.
+
+## Nach dem Review
+
+- Schreiben im `MapHub` ist eine Reihe (Sperre um Lesen, Schreiben, Verteilen), `updated_at_ms` steigt immer: Gleichzeitige Änderungen aus Browser und Pilot 2 gehen nicht verloren.
+- Eine fremde Farbe aus Pilot 2 bleibt beim Umbenennen im Browser erhalten; neue Farben aus dem Browser nur aus der Palette.
+- Der WebSocket schickt zuerst `map_group_refresh` (nichts zwischen GET und Abonnement geht verloren) und prüft den Token alle 30 s: Eine gelöschte oder neu gekoppelte Fernsteuerung bekommt danach nichts mehr.

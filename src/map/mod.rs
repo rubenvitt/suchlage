@@ -3,8 +3,10 @@
 
 pub mod rules;
 
+use std::sync::Arc;
+
 use sqlx::SqlitePool;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::contract::{MapElement, MapElementKind, MapElementOrigin, MapPoint};
 use crate::error::AppError;
@@ -48,6 +50,10 @@ pub struct MapHub {
     pool: SqlitePool,
     changes: broadcast::Sender<MapChange>,
     stop: watch::Receiver<bool>,
+    /// Schreiben ist eine Reihe: Lesen, Schreiben und Verteilen einer Änderung laufen ohne eine
+    /// zweite dazwischen. Sonst überschriebe eine Umbenennung im Browser eine gleichzeitige
+    /// Verschiebung aus Pilot 2, und Pilots und Browser sähen Änderungen in anderer Reihenfolge.
+    writes: Arc<Mutex<()>>,
 }
 
 impl MapHub {
@@ -58,6 +64,7 @@ impl MapHub {
             pool,
             changes,
             stop,
+            writes: Arc::new(Mutex::new(())),
         }
     }
 
@@ -73,8 +80,13 @@ impl MapHub {
         Ok(store::list(&self.pool).await?)
     }
 
+    pub async fn get(&self, id: &str) -> Result<Option<MapElement>, AppError> {
+        Ok(store::get(&self.pool, id).await?)
+    }
+
     /// Legt an. Gibt es die ID schon (Pilot 2 wiederholt eine Anfrage), wird der Stand überschrieben.
     pub async fn create(&self, new: NewElement, now_ms: i64) -> Result<MapElement, AppError> {
+        let _serial = self.writes.lock().await;
         let id = match new.id {
             Some(id) => valid_id(id)?,
             None => uuid::Uuid::new_v4().to_string(),
@@ -101,10 +113,21 @@ impl MapHub {
             shape: Some((element.kind, element.points)),
             clamp_to_ground: Some(element.clamp_to_ground),
         };
-        self.update(&element.id, patch, now_ms).await
+        self.apply(&element.id, patch, now_ms).await
     }
 
     pub async fn update(
+        &self,
+        id: &str,
+        patch: ElementPatch,
+        now_ms: i64,
+    ) -> Result<MapElement, AppError> {
+        let _serial = self.writes.lock().await;
+        self.apply(id, patch, now_ms).await
+    }
+
+    /// Nur mit gehaltener Schreibsperre.
+    async fn apply(
         &self,
         id: &str,
         patch: ElementPatch,
@@ -126,7 +149,8 @@ impl MapHub {
         if let Some(clamp) = patch.clamp_to_ground {
             element.clamp_to_ground = clamp;
         }
-        element.updated_at_ms = now_ms.max(element.created_at_ms);
+        // Steigt immer: Der Browser verwirft einen Stand, der älter ist als der bekannte.
+        element.updated_at_ms = now_ms.max(element.updated_at_ms + 1);
         if !store::update(&self.pool, &element).await? {
             return Err(AppError::NotFound);
         }
@@ -135,6 +159,7 @@ impl MapHub {
     }
 
     pub async fn delete(&self, id: &str) -> Result<(), AppError> {
+        let _serial = self.writes.lock().await;
         if !store::delete(&self.pool, id).await? {
             return Err(AppError::NotFound);
         }
@@ -239,6 +264,48 @@ mod tests {
         );
         assert!(matches!(rx.recv().await.unwrap(), MapChange::Updated(_)));
         assert_eq!(hub.list().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_changes_neither_get_lost_nor_go_back_in_time() {
+        let hub = hub().await;
+        let created = hub.create(pin(None), 100).await.unwrap();
+        let moved = vec![MapPoint {
+            lat: 52.5,
+            lon: 10.5,
+            alt_m: None,
+        }];
+        // Beide mit derselben Uhrzeit, wie zwei Anfragen in derselben Millisekunde.
+        let rename = hub.update(
+            &created.id,
+            ElementPatch {
+                name: Some("Fundstelle".into()),
+                ..ElementPatch::default()
+            },
+            100,
+        );
+        let shift = hub.update(
+            &created.id,
+            ElementPatch {
+                shape: Some((MapElementKind::Point, moved.clone())),
+                ..ElementPatch::default()
+            },
+            100,
+        );
+        let (a, b) = tokio::join!(rename, shift);
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_ne!(a.updated_at_ms, b.updated_at_ms);
+        let stored = hub.get(&created.id).await.unwrap().unwrap();
+        assert_eq!(
+            (stored.name.as_str(), stored.points.clone()),
+            ("Fundstelle", moved),
+            "keine Änderung geht verloren"
+        );
+        assert_eq!(
+            stored.updated_at_ms,
+            a.updated_at_ms.max(b.updated_at_ms),
+            "der zuletzt geschriebene Stand ist auch der neueste"
+        );
     }
 
     #[tokio::test]

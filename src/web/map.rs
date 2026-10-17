@@ -59,9 +59,18 @@ async fn update(
     Path(id): Path<String>,
     JsonBody(input): JsonBody<MapElementUpdate>,
 ) -> Result<Json<MapElement>, AppError> {
+    let current = state.map.get(&id).await?.ok_or(AppError::NotFound)?;
+    let color = match rules::palette_color(&input.color) {
+        Ok(color) => color,
+        // Eine eigene Farbe aus Pilot 2 bleibt, solange im Browser niemand eine andere wählt.
+        Err(_) if rules::normalize_color(&input.color).as_ref() == Some(&current.color) => {
+            current.color
+        }
+        Err(e) => return Err(AppError::Validation(e)),
+    };
     let patch = ElementPatch {
         name: Some(input.name),
-        color: Some(rules::palette_color(&input.color).map_err(AppError::Validation)?),
+        color: Some(color),
         ..ElementPatch::default()
     };
     Ok(Json(state.map.update(&id, patch, now_ms()).await?))
@@ -181,6 +190,50 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    /// Pilot 2 schickt womöglich Farben außerhalb der Palette (Beispiel der DJI-Doku: `#0091FF`).
+    #[tokio::test]
+    async fn renaming_keeps_a_foreign_pilot_color_but_does_not_accept_new_ones() {
+        let app = test_app().await;
+        let cookie = operator(&app).await;
+        let pin = app
+            .state
+            .map
+            .create(
+                crate::map::NewElement {
+                    id: Some("pilot-pin".into()),
+                    name: "Pilot 1".into(),
+                    kind: crate::contract::MapElementKind::Point,
+                    points: vec![crate::contract::MapPoint {
+                        lat: 52.4,
+                        lon: 10.0,
+                        alt_m: None,
+                    }],
+                    color: "#0091FF".into(),
+                    clamp_to_ground: false,
+                    author: "RC Plus 1".into(),
+                    origin: crate::contract::MapElementOrigin::Pilot,
+                },
+                1,
+            )
+            .await
+            .unwrap();
+        let uri = format!("/api/map/elements/{}", pin.id);
+        let rename = |color: &str| {
+            with_cookie(
+                put_json(&uri, json!({"name": "Fundstelle", "color": color})),
+                &cookie,
+            )
+        };
+        let (status, body) = send(&app.router, rename("#0091ff")).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            (body["name"].as_str(), body["color"].as_str()),
+            (Some("Fundstelle"), Some("#0091FF"))
+        );
+        let (status, _) = send(&app.router, rename("#123456")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

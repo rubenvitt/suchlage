@@ -23,6 +23,12 @@ use crate::time::now_ms;
 
 /// Name des Tokens im Header (`40.https.md`) und in der Query des WebSockets (`30.jsbridge.md`).
 const TOKEN: &str = "x-auth-token";
+/// So oft prüft ein offener WebSocket, ob sein Token noch gilt (Fernsteuerung gelöscht oder neu gekoppelt).
+const TOKEN_RECHECK: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_millis(200)
+} else {
+    std::time::Duration::from_secs(30)
+};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -69,19 +75,22 @@ fn query_param(query: Option<&str>, key: &str) -> Option<String> {
         .map(|(_, v)| v.into_owned())
 }
 
+fn token_of(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
+    headers
+        .get(TOKEN)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+        .or_else(|| query_param(query, TOKEN))
+        .filter(|t| !t.is_empty())
+}
+
 /// Fernsteuerung zum Token aus Header oder Query.
 async fn pilot(
     state: &AppState,
     headers: &HeaderMap,
     query: Option<&str>,
 ) -> Result<RemoteController, DjiError> {
-    let token = headers
-        .get(TOKEN)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string)
-        .or_else(|| query_param(query, TOKEN))
-        .filter(|t| !t.is_empty())
-        .ok_or(AppError::Unauthorized)?;
+    let token = token_of(headers, query).ok_or(AppError::Unauthorized)?;
     Ok(rcs::find_by_api_token(&state.pool, &token)
         .await
         .map_err(AppError::from)?
@@ -212,8 +221,21 @@ async fn websocket(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, DjiError> {
     let rc = pilot(&state, &headers, query.as_deref()).await?;
-    let hub = state.map.clone();
-    Ok(upgrade.on_upgrade(move |socket| push_to_pilot(socket, hub, rc.label)))
+    let token = token_of(&headers, query.as_deref()).unwrap_or_default();
+    let (hub, pool) = (state.map.clone(), state.pool.clone());
+    Ok(upgrade.on_upgrade(move |socket| push_to_pilot(socket, hub, pool, token, rc)))
+}
+
+/// Gilt der Token noch für dieselbe Fernsteuerung? Ein Fehler der Datenbank zählt als „ja“: Er
+/// soll keinen Piloten trennen, die nächste Prüfung entscheidet.
+async fn still_valid(pool: &sqlx::SqlitePool, token: &str, rc_id: i64) -> bool {
+    match rcs::find_by_api_token(pool, token).await {
+        Ok(found) => found.is_some_and(|rc| rc.id == rc_id),
+        Err(e) => {
+            tracing::warn!(error = %e, "Token des Kartenabgleichs nicht prüfbar");
+            true
+        }
+    }
 }
 
 fn push_for(change: &MapChange, at_ms: i64) -> String {
@@ -225,11 +247,30 @@ fn push_for(change: &MapChange, at_ms: i64) -> String {
 }
 
 /// Jede Änderung geht an jeden Pilot, auch an den, der sie gemacht hat (wie in der DJI-Demo).
-/// Wer Änderungen verpasst, lädt die Gruppe neu. Endet mit dem Server oder der Verbindung.
-async fn push_to_pilot(mut socket: WebSocket, hub: MapHub, rc_label: String) {
+/// Wer Änderungen verpasst, lädt die Gruppe neu. Endet mit dem Server, der Verbindung oder dem
+/// Token: Eine gelöschte oder neu gekoppelte Fernsteuerung bekommt nach spätestens `TOKEN_RECHECK`
+/// nichts mehr.
+async fn push_to_pilot(
+    mut socket: WebSocket,
+    hub: MapHub,
+    pool: sqlx::SqlitePool,
+    token: String,
+    rc: RemoteController,
+) {
+    let rc_label = rc.label.clone();
     let mut changes = hub.subscribe();
     let mut stop = hub.stop_signal();
+    let mut recheck =
+        tokio::time::interval_at(tokio::time::Instant::now() + TOKEN_RECHECK, TOKEN_RECHECK);
     tracing::info!(rc = %rc_label, "Pilot 2 am Kartenabgleich");
+    // Was zwischen dem Laden der Gruppen und diesem Abonnement geändert wurde, käme sonst nie an.
+    if socket
+        .send(Message::Text(dji::push_group_refresh(now_ms()).into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
     loop {
         tokio::select! {
             change = changes.recv() => {
@@ -250,6 +291,13 @@ async fn push_to_pilot(mut socket: WebSocket, hub: MapHub, rc_label: String) {
                 Some(Ok(Message::Close(_)) | Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
+            _ = recheck.tick() => {
+                if !still_valid(&pool, &token, rc.id).await {
+                    tracing::info!(rc = %rc_label, "Token ungültig – Kartenabgleich getrennt");
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
+                }
+            }
             // Der `Ref` aus `wait_for` ist nicht `Send` und darf nicht über das `await` unten leben.
             () = async {
                 let _ = stop.wait_for(|stopped| *stopped).await;
@@ -266,7 +314,7 @@ async fn push_to_pilot(mut socket: WebSocket, hub: MapHub, rc_label: String) {
 mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use futures::{SinkExt, StreamExt};
+    use futures::StreamExt;
     use serde_json::{Value, json};
     use tokio_tungstenite::tungstenite;
 
@@ -531,16 +579,16 @@ mod tests {
             tokio_tungstenite::connect_async(format!("ws://{addr}/pilot/ws?x-auth-token={TOKEN}"))
                 .await
                 .unwrap();
-        // Erst wenn der Server abonniert hat, kommt eine Änderung sicher an: Ping und Pong abwarten.
-        socket
-            .send(tungstenite::Message::Ping(vec![1].into()))
-            .await
-            .unwrap();
-        loop {
-            if let tungstenite::Message::Pong(_) = socket.next().await.unwrap().unwrap() {
-                break;
+        let next_text = async |socket: &mut tokio_tungstenite::WebSocketStream<_>| loop {
+            if let tungstenite::Message::Text(text) = socket.next().await.unwrap().unwrap() {
+                break serde_json::from_str::<Value>(&text).unwrap();
             }
-        }
+        };
+        // Zuerst „Gruppe neu laden“; danach hat der Server sicher abonniert.
+        assert_eq!(
+            next_text(&mut socket).await["biz_code"],
+            "map_group_refresh"
+        );
 
         let area = NewElement {
             id: None,
@@ -559,11 +607,6 @@ mod tests {
             origin: MapElementOrigin::Web,
         };
         let created = app.state.map.create(area, 1).await.unwrap();
-        let next_text = async |socket: &mut tokio_tungstenite::WebSocketStream<_>| loop {
-            if let tungstenite::Message::Text(text) = socket.next().await.unwrap().unwrap() {
-                break serde_json::from_str::<Value>(&text).unwrap();
-            }
-        };
         let push = tokio::time::timeout(std::time::Duration::from_secs(5), next_text(&mut socket))
             .await
             .expect("Push innerhalb von 5 s");
@@ -589,5 +632,34 @@ mod tests {
         })
         .await;
         assert!(closed.is_ok(), "Verbindung endet mit dem Server");
+    }
+
+    /// Eine gelöschte Fernsteuerung verliert auch einen schon offenen Kartenabgleich.
+    #[tokio::test]
+    async fn deleting_the_remote_controller_closes_its_websocket() {
+        let app = paired().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(axum::serve(listener, app.router.clone()).into_future());
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/pilot/ws?x-auth-token={TOKEN}"))
+                .await
+                .unwrap();
+        let rc = crate::store::remote_controllers::find_by_api_token(&app.state.pool, TOKEN)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::store::remote_controllers::delete(&app.state.pool, rc.id)
+            .await
+            .unwrap();
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(Ok(msg)) = socket.next().await {
+                if msg.is_close() {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "Verbindung endet nach der nächsten Prüfung");
     }
 }
