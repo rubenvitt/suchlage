@@ -29,6 +29,8 @@ pub struct AppState {
     pub oidc: Arc<OidcState>,
     pub mqtt: crate::mqtt::MqttLink,
     pub streams: StreamOrchestrator,
+    /// Kartenelemente (M2) für Browser und Pilots.
+    pub map: crate::map::MapHub,
     /// Für die Proxies zu MediaMTX (`media::http_client`).
     pub http: reqwest::Client,
 }
@@ -59,6 +61,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::admin::routes())
         .merge(crate::web::live::routes())
         .merge(crate::web::flights::routes())
+        .merge(crate::web::map::routes())
         .merge(crate::web::streams::routes())
         .merge(crate::web::media::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
@@ -137,6 +140,7 @@ pub async fn run(
             observation: Observation::Labels(labels),
         })
         .await;
+    let map = crate::map::MapHub::new(pool.clone(), stop_rx.clone());
     let (mqtt, link_requests) = crate::mqtt::MqttLink::channel();
     let session_task = tokio::spawn(crate::dji::session::run(
         settings.subscribe(),
@@ -163,6 +167,7 @@ pub async fn run(
         oidc: Arc::new(OidcState::new()),
         mqtt,
         streams,
+        map,
         http: crate::media::http_client(),
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
