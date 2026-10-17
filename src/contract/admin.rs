@@ -129,6 +129,40 @@ pub struct MediaSettings {
     pub rtmp_url: String,
 }
 
+/// Fotospeicher (Garage, M3). Geheimnisse verlassen den Server nie.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PhotoStorageSettingsView {
+    /// S3-Adresse, unter der der Server Garage erreicht, z. B. `http://fotos:3900`.
+    pub s3_url: String,
+    /// S3-Adresse für die Fernsteuerung (nur im VPN), z. B. `http://100.64.0.10:3900`.
+    pub rc_url: String,
+    /// Admin-API von Garage, z. B. `http://fotos:3903`.
+    pub admin_url: String,
+    pub bucket: String,
+    pub region: String,
+    /// Schlüssel des Servers (Lesen und Schreiben im Bucket).
+    pub access_key_id: String,
+    pub has_secret_access_key: bool,
+    /// Eingeschränkter Admin-Token (nur Schlüssel anlegen, freigeben, löschen).
+    pub has_admin_token: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PhotoStorageSettingsInput {
+    pub s3_url: String,
+    pub rc_url: String,
+    pub admin_url: String,
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+    /// `null` behält das gespeicherte Geheimnis.
+    pub secret_access_key: Option<String>,
+    /// `null` behält den gespeicherten Token.
+    pub admin_token: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct GeneralSettings {
@@ -145,6 +179,7 @@ pub struct SettingsView {
     pub dji: Option<DjiSettingsView>,
     pub broker: Option<BrokerSettingsView>,
     pub media: Option<MediaSettings>,
+    pub photo_storage: Option<PhotoStorageSettingsView>,
     pub general: GeneralSettings,
 }
 

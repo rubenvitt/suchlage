@@ -11,6 +11,8 @@ import type { GeneralSettings } from '../contract/generated/GeneralSettings';
 import type { MediaSettings } from '../contract/generated/MediaSettings';
 import type { OidcSettingsInput } from '../contract/generated/OidcSettingsInput';
 import type { OidcSettingsView } from '../contract/generated/OidcSettingsView';
+import type { PhotoStorageSettingsInput } from '../contract/generated/PhotoStorageSettingsInput';
+import type { PhotoStorageSettingsView } from '../contract/generated/PhotoStorageSettingsView';
 import type { SettingsView } from '../contract/generated/SettingsView';
 
 const KEEP = 'gespeichert – leer lassen zum Behalten';
@@ -242,6 +244,88 @@ export function MediaForm({ view }: { view: MediaSettings | null }) {
       <Result done={s.done} error={s.error} />
       <Button type="primary" htmlType="submit" loading={s.pending}>
         Video speichern
+      </Button>
+    </Form>
+  );
+}
+
+type PhotoStorageValues = WithSecrets<PhotoStorageSettingsInput, 'secret_access_key' | 'admin_token'>;
+
+/** Vorgaben für die erste Einrichtung: Dienstname und Bucket aus `deploy/fotos-init.sh`. */
+const PHOTO_STORAGE_DEFAULTS: Partial<PhotoStorageValues> = {
+  s3_url: 'http://fotos:3900',
+  admin_url: 'http://fotos:3903',
+  bucket: 'suchlage-fotos',
+  region: 'garage',
+};
+
+export function PhotoStorageForm({ view }: { view: PhotoStorageSettingsView | null }) {
+  const [form] = Form.useForm<PhotoStorageValues>();
+  const s = useSave<PhotoStorageSettingsInput>('photo_storage', form, ['secret_access_key', 'admin_token']);
+  const required = (what: string) => [{ required: true, message: `${what} fehlt` }];
+  return (
+    <Form<PhotoStorageValues>
+      form={form}
+      layout="vertical"
+      className="sl-form"
+      initialValues={
+        view
+          ? {
+              s3_url: view.s3_url,
+              rc_url: view.rc_url,
+              admin_url: view.admin_url,
+              bucket: view.bucket,
+              region: view.region,
+              access_key_id: view.access_key_id,
+            }
+          : PHOTO_STORAGE_DEFAULTS
+      }
+      onFinish={(v) =>
+        s.save({
+          s3_url: v.s3_url,
+          rc_url: v.rc_url,
+          admin_url: v.admin_url,
+          bucket: v.bucket,
+          region: v.region,
+          access_key_id: v.access_key_id,
+          secret_access_key: secretOrNull(v.secret_access_key),
+          admin_token: secretOrNull(v.admin_token),
+        })
+      }
+    >
+      <p className="sl-form-hint">
+        Die Werte gibt <code className="sl-code">deploy/fotos-init.sh</code> einmal aus.
+      </p>
+      <Form.Item label="S3-Adresse (vom Server aus)" name="s3_url" rules={required('S3-Adresse')}>
+        <Input placeholder="http://fotos:3900" />
+      </Form.Item>
+      <Form.Item label="S3-Adresse für die Fernsteuerung (im VPN)" name="rc_url" rules={required('Adresse')}>
+        <Input placeholder="http://100.64.0.10:3900" />
+      </Form.Item>
+      <Form.Item label="Admin-Adresse (vom Server aus)" name="admin_url" rules={required('Admin-Adresse')}>
+        <Input placeholder="http://fotos:3903" />
+      </Form.Item>
+      <Form.Item label="Bucket" name="bucket" rules={required('Bucket')}>
+        <Input />
+      </Form.Item>
+      <Form.Item label="Region" name="region" rules={required('Region')}>
+        <Input />
+      </Form.Item>
+      <Form.Item label="Schlüssel-ID des Servers" name="access_key_id" rules={required('Schlüssel-ID')}>
+        <Input placeholder="GK…" />
+      </Form.Item>
+      <Form.Item label="Geheimer Schlüssel des Servers" name="secret_access_key">
+        <Input.Password
+          placeholder={view?.has_secret_access_key ? KEEP : undefined}
+          autoComplete="new-password"
+        />
+      </Form.Item>
+      <Form.Item label="Admin-Token" name="admin_token">
+        <Input.Password placeholder={view?.has_admin_token ? KEEP : undefined} autoComplete="new-password" />
+      </Form.Item>
+      <Result done={s.done} error={s.error} />
+      <Button type="primary" htmlType="submit" loading={s.pending}>
+        Fotospeicher speichern
       </Button>
     </Form>
   );

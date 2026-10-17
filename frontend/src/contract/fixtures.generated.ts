@@ -767,6 +767,16 @@ export const settingsView: SettingsView = {
     "has_client_secret": true,
     "issuer": "https://id.example.org",
     "redirect_url": "https://suchlage.example.org/api/auth/oidc/callback"
+  },
+  "photo_storage": {
+    "access_key_id": "GK31c2f218a2e44f485b94239e",
+    "admin_url": "http://fotos:3903",
+    "bucket": "suchlage-fotos",
+    "has_admin_token": true,
+    "has_secret_access_key": true,
+    "rc_url": "http://100.64.0.10:3900",
+    "region": "garage",
+    "s3_url": "http://fotos:3900"
   }
 };
 
@@ -778,7 +788,8 @@ export const settingsEmpty: SettingsView = {
     "record_raw_mqtt": true
   },
   "media": null,
-  "oidc": null
+  "oidc": null,
+  "photo_storage": null
 };
 
 export const remoteControllers: RemoteControllerView[] = [

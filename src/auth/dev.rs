@@ -11,7 +11,9 @@ use sqlx::SqlitePool;
 
 use crate::auth::session::{secure_cookies, session_cookie};
 use crate::config::BootConfig;
-use crate::contract::{BrokerSettingsInput, DjiSettingsInput, MediaSettings};
+use crate::contract::{
+    BrokerSettingsInput, DjiSettingsInput, MediaSettings, PhotoStorageSettingsInput,
+};
 use crate::error::AppError;
 use crate::settings::SettingsHandle;
 use crate::store::{sessions, users};
@@ -54,6 +56,21 @@ pub async fn seed(settings: &SettingsHandle) -> Result<(), AppError> {
             })
             .await?;
     }
+    if s.photo_storage.is_none() {
+        // Dieselben Werte setzt `deploy/compose.dev.yaml` für Garage (`--default-bucket`).
+        settings
+            .update_photo_storage(PhotoStorageSettingsInput {
+                s3_url: "http://127.0.0.1:3900".into(),
+                rc_url: "http://127.0.0.1:3900".into(),
+                admin_url: "http://127.0.0.1:3903".into(),
+                bucket: DEV_PHOTO_BUCKET.into(),
+                region: "garage".into(),
+                access_key_id: DEV_PHOTO_KEY_ID.into(),
+                secret_access_key: Some(DEV_PHOTO_KEY_SECRET.into()),
+                admin_token: Some(DEV_PHOTO_ADMIN_TOKEN.into()),
+            })
+            .await?;
+    }
     if s.dji.is_none() {
         // Workspace-ID aus dem M0-Spike (deploy/pilot/config.tpl.js).
         settings
@@ -67,6 +84,13 @@ pub async fn seed(settings: &SettingsHandle) -> Result<(), AppError> {
     }
     Ok(())
 }
+
+/// Feste Werte des Fotospeichers im Dev-Stack; dieselben stehen in `deploy/compose.dev.yaml`.
+pub const DEV_PHOTO_BUCKET: &str = "suchlage-fotos";
+pub const DEV_PHOTO_KEY_ID: &str = "GK0123456789abcdef01234567";
+pub const DEV_PHOTO_KEY_SECRET: &str =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+pub const DEV_PHOTO_ADMIN_TOKEN: &str = "dev-fotos-admin";
 
 /// Fester Kopplungscode der Simulator-Fernsteuerung. Existiert nur mit Feature `dev`; ohne das
 /// Feature kennt der Server keinen Code, den er nicht selbst zufällig erzeugt hat.

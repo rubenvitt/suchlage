@@ -8,7 +8,8 @@ use tokio::sync::watch;
 use crate::config::BootConfig;
 use crate::contract::{
     BrokerSettingsInput, BrokerSettingsView, DjiSettingsInput, DjiSettingsView, GeneralSettings,
-    MediaSettings, OidcSettingsInput, OidcSettingsView, SettingsView,
+    MediaSettings, OidcSettingsInput, OidcSettingsView, PhotoStorageSettingsInput,
+    PhotoStorageSettingsView, SettingsView,
 };
 use crate::error::AppError;
 use crate::store;
@@ -38,12 +39,26 @@ pub struct BrokerSettings {
     pub rc_url: String,
 }
 
+/// Fotospeicher (Garage, M3). Ohne ihn nimmt der Server keine Fotos an (503).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhotoStorageSettings {
+    pub s3_url: String,
+    pub rc_url: String,
+    pub admin_url: String,
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub admin_token: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
     pub oidc: Option<OidcSettings>,
     pub dji: Option<DjiSettings>,
     pub broker: Option<BrokerSettings>,
     pub media: Option<MediaSettings>,
+    pub photo_storage: Option<PhotoStorageSettings>,
     pub general: GeneralSettings,
     /// Geheimnis des internen MediaMTX-Lesers (ADR 0003); beim ersten Start erzeugt.
     pub internal_secret: String,
@@ -112,6 +127,15 @@ fn is_uuid(v: &str) -> bool {
                 c.is_ascii_hexdigit()
             }
         })
+}
+
+/// S3-Regel für Bucket-Namen (ohne die Sonderfälle wie IP-Adressen).
+fn is_bucket_name(v: &str) -> bool {
+    (3..=63).contains(&v.len())
+        && v.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
+        && v.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && v.ends_with(|c: char| c.is_ascii_alphanumeric())
 }
 
 pub fn issuer_allowed(issuer: &str) -> bool {
@@ -188,6 +212,7 @@ impl SettingsHandle {
             dji: store::settings::get(&pool, "dji").await?,
             broker: store::settings::get(&pool, "broker").await?,
             media: store::settings::get(&pool, "media").await?,
+            photo_storage: store::settings::get(&pool, "photo_storage").await?,
             general: store::settings::get(&pool, "general")
                 .await?
                 .unwrap_or_else(default_general),
@@ -281,6 +306,42 @@ impl SettingsHandle {
             .await
     }
 
+    pub async fn update_photo_storage(
+        &self,
+        input: PhotoStorageSettingsInput,
+    ) -> Result<(), AppError> {
+        let web = ["http", "https"];
+        let bucket = non_empty(&input.bucket, "Bucket")?;
+        if !is_bucket_name(&bucket) {
+            return Err(invalid(
+                "Bucket: 3–63 Zeichen, Kleinbuchstaben, Ziffern, Punkt und Bindestrich",
+            ));
+        }
+        let current = self.current().photo_storage;
+        let value = PhotoStorageSettings {
+            s3_url: address(&input.s3_url, &web, "S3-Adresse")?,
+            rc_url: address(&input.rc_url, &web, "S3-Adresse für die Fernsteuerung")?,
+            admin_url: address(&input.admin_url, &web, "Admin-Adresse")?,
+            bucket,
+            region: non_empty(&input.region, "Region")?,
+            access_key_id: non_empty(&input.access_key_id, "Schlüssel-ID")?,
+            secret_access_key: secret(
+                input.secret_access_key,
+                current.as_ref().map(|c| &c.secret_access_key),
+                "Geheimer Schlüssel",
+            )?,
+            admin_token: secret(
+                input.admin_token,
+                current.as_ref().map(|c| &c.admin_token),
+                "Admin-Token",
+            )?,
+        };
+        self.save("photo_storage", &value, |s| {
+            s.photo_storage = Some(value.clone())
+        })
+        .await
+    }
+
     pub async fn update_general(&self, input: GeneralSettings) -> Result<(), AppError> {
         self.save("general", &input, |s| s.general = input.clone())
             .await
@@ -309,6 +370,16 @@ impl SettingsHandle {
                 rc_url: b.rc_url,
             }),
             media: s.media,
+            photo_storage: s.photo_storage.map(|p| PhotoStorageSettingsView {
+                s3_url: p.s3_url,
+                rc_url: p.rc_url,
+                admin_url: p.admin_url,
+                bucket: p.bucket,
+                region: p.region,
+                access_key_id: p.access_key_id,
+                has_secret_access_key: !p.secret_access_key.is_empty(),
+                has_admin_token: !p.admin_token.is_empty(),
+            }),
             general: s.general,
         }
     }
@@ -433,6 +504,56 @@ mod tests {
             "Abgelehntes wird nicht gespeichert"
         );
         assert_eq!(h.current().media, None);
+    }
+
+    fn photo_storage(bucket: &str, secret: Option<&str>) -> PhotoStorageSettingsInput {
+        PhotoStorageSettingsInput {
+            s3_url: "http://fotos:3900/".into(),
+            rc_url: "http://100.64.0.10:3900".into(),
+            admin_url: "http://fotos:3903".into(),
+            bucket: bucket.into(),
+            region: "garage".into(),
+            access_key_id: "GK1".into(),
+            secret_access_key: secret.map(Into::into),
+            admin_token: secret.map(|s| format!("{s}-admin")),
+        }
+    }
+
+    #[tokio::test]
+    async fn photo_storage_keeps_secrets_and_checks_the_bucket() {
+        let h = SettingsHandle::load(crate::db::test_pool().await)
+            .await
+            .unwrap();
+        let err = h
+            .update_photo_storage(photo_storage("suchlage-fotos", None))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Geheimer Schlüssel"), "{err}");
+        for bad in ["Fotos", "ab", "-fotos", "fotos_1"] {
+            let err = h
+                .update_photo_storage(photo_storage(bad, Some("s")))
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("Bucket"), "{bad}: {err}");
+        }
+        h.update_photo_storage(photo_storage("suchlage-fotos", Some("geheim")))
+            .await
+            .unwrap();
+        h.update_photo_storage(photo_storage("suchlage-fotos", None))
+            .await
+            .unwrap();
+        let stored = h.current().photo_storage.unwrap();
+        assert_eq!(stored.secret_access_key, "geheim");
+        assert_eq!(stored.admin_token, "geheim-admin");
+        assert_eq!(
+            stored.s3_url, "http://fotos:3900",
+            "ohne Schrägstrich am Ende"
+        );
+
+        let boot = BootConfig::from_lookup(|_| None).unwrap();
+        let json = serde_json::to_string(&h.view(&boot)).unwrap();
+        assert!(!json.contains("geheim"), "{json}");
+        assert!(json.contains("\"has_admin_token\":true"));
     }
 
     #[test]

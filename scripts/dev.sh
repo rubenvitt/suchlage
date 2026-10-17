@@ -8,7 +8,7 @@ for tool in docker cargo pnpm ffmpeg curl jq nc; do
 done
 
 # Ein belegter Port ließe einen Teil still ausfallen (Vite startet mit strictPort gar nicht).
-for port in 8080 5173 1883; do
+for port in 8080 5173 1883 3900; do
   if nc -z 127.0.0.1 "$port" 2>/dev/null; then
     echo "Port $port ist belegt – läuft schon \`mise run dev\`, \`mise run ui\` oder \`mise run dev:smoke\`? Erst beenden."; exit 1
   fi

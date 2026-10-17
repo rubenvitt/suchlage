@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { settingsView } from '../contract/fixtures.generated';
 import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
-import { BrokerForm, secretOrNull } from './SettingsForms';
+import { BrokerForm, PhotoStorageForm, secretOrNull } from './SettingsForms';
 
 test('leeres Geheimnis behält den gespeicherten Wert', () => {
   expect(secretOrNull('')).toBeNull();
@@ -69,4 +69,31 @@ test('Fehler des Servers stehen am Formular', async () => {
 test('ohne gespeichertes Passwort gibt es keinen Behalten-Hinweis', () => {
   renderWithApp(<BrokerForm view={null} />);
   expect(screen.getByLabelText('Admin-Passwort')).not.toHaveAttribute('placeholder');
+});
+
+test('Fotospeicher speichern behält beide Geheimnisse, wenn die Felder leer bleiben', async () => {
+  let body: unknown;
+  server.use(
+    http.put('/api/settings/photo_storage', async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json(settingsView);
+    }),
+  );
+  renderWithApp(<PhotoStorageForm view={settingsView.photo_storage} />);
+  expect(screen.getByLabelText('Admin-Token')).toHaveAttribute(
+    'placeholder',
+    'gespeichert – leer lassen zum Behalten',
+  );
+  await userEvent.click(screen.getByRole('button', { name: 'Fotospeicher speichern' }));
+  expect(await screen.findByText('Gespeichert.')).toBeInTheDocument();
+  expect(body).toEqual({
+    s3_url: 'http://fotos:3900',
+    rc_url: 'http://100.64.0.10:3900',
+    admin_url: 'http://fotos:3903',
+    bucket: 'suchlage-fotos',
+    region: 'garage',
+    access_key_id: 'GK31c2f218a2e44f485b94239e',
+    secret_access_key: null,
+    admin_token: null,
+  });
 });

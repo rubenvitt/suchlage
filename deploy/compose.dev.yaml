@@ -32,5 +32,24 @@ services:
       - ./mediamtx.m1.yml:/mediamtx.yml:ro
       - ../data/dev/video:/recordings
 
+  # Fotospeicher (M3). Ein Knoten; Layout, Bucket und Server-Schlüssel legt Garage beim Start selbst an.
+  # Die Werte stehen auch in src/auth/dev.rs.
+  fotos:
+    image: dxflrs/garage:v2.4.1
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      GARAGE_RPC_SECRET: 00000000000000000000000000000000000000000000000000000000000000de
+      GARAGE_ADMIN_TOKEN: dev-fotos-admin
+      GARAGE_DEFAULT_BUCKET: suchlage-fotos
+      GARAGE_DEFAULT_ACCESS_KEY: GK0123456789abcdef01234567
+      GARAGE_DEFAULT_SECRET_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    ports:
+      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:3903:3903"
+    volumes:
+      - ./garage/garage.dev.toml:/etc/garage.toml:ro
+      - fotos-data:/var/lib/garage
+
 volumes:
   mqtt-data:
+  fotos-data:
