@@ -2,7 +2,7 @@
 
 Lokaler, internetunabhängiger Lagehub für Personensuchen im Katastrophenschutz: UAV-Livebild und Telemetrie, Suchsektoren, Abdeckungsnachweis, Hinweise und Export für die Einsatzleitung.
 
-Nachfolger von `uav-lagebild` (archiviert). Stand: M1 in Arbeit.
+Nachfolger von `uav-lagebild` (archiviert). Stand: M1 abgenommen, M2 (Kartenelemente) umgesetzt, Feldabnahme offen.
 
 ## Entwickeln
 
