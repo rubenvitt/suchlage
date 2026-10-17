@@ -8,8 +8,9 @@ use axum::{Json, Router};
 
 use crate::app::AppState;
 use crate::auth::session::Operator;
-use crate::contract::{FlightDetail, FlightSummary, FlightVideo};
+use crate::contract::{FlightDetail, FlightSummary, FlightVideo, TrackPoint};
 use crate::error::AppError;
+use crate::situation::track::TrackBuilder;
 use crate::store;
 
 const LIST_LIMIT: i64 = 200;
@@ -25,7 +26,20 @@ async fn list(
     _: Operator,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<FlightSummary>>, AppError> {
-    Ok(Json(store::flights::list(&state.pool, LIST_LIMIT).await?))
+    let mut flights = store::flights::list(&state.pool, LIST_LIMIT).await?;
+    for f in flights.iter_mut().filter(|f| f.ended_at_ms.is_none()) {
+        let segments = store::flights::segments(&state.pool, f.id).await?;
+        with_track_so_far(f, &segments);
+    }
+    Ok(Json(flights))
+}
+
+/// Strecke und Höhe schreibt der Speicher erst beim Schließen; für einen laufenden Flug kommen sie
+/// aus den bisher gespeicherten Spurpunkten, nach derselben Regel wie im Kern.
+fn with_track_so_far(f: &mut FlightSummary, segments: &[Vec<TrackPoint>]) {
+    let track = TrackBuilder::from_segments(segments.to_vec());
+    f.distance_m = track.distance_m();
+    f.max_elevation_m = track.max_elevation_m();
 }
 
 async fn get_one(
@@ -59,10 +73,13 @@ async fn video(
 
 /// Flug samt Spur und, nach der Landung, dem Video, sofern MediaMTX eine Aufnahme meldet.
 pub async fn detail(state: &AppState, id: i64) -> Result<FlightDetail, AppError> {
-    let flight = store::flights::get(&state.pool, id)
+    let mut flight = store::flights::get(&state.pool, id)
         .await?
         .ok_or(AppError::NotFound)?;
     let segments = store::flights::segments(&state.pool, id).await?;
+    if flight.ended_at_ms.is_none() {
+        with_track_so_far(&mut flight, &segments);
+    }
     let has_video = flight.ended_at_ms.is_some()
         && crate::media::proxy::flight_video_available(state, &flight).await;
     let video = has_video.then(|| FlightVideo {
@@ -113,6 +130,41 @@ mod tests {
         let (status, list) = send(&app.router, with_cookie(get("/api/flights"), &admin)).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(list[0]["id"], 3);
+    }
+
+    #[tokio::test]
+    async fn running_flight_shows_its_track_so_far() {
+        let app = test_app().await;
+        let mut f = examples::flight_running();
+        (f.distance_m, f.max_elevation_m) = (0.0, None); // so steht er bis zum Schließen im Speicher
+        store::flights::insert(&app.state.pool, &f).await.unwrap();
+        let p = |t, lat, e| TrackPoint {
+            t_ms: t,
+            lat,
+            lon: 10.0,
+            elevation_m: Some(e),
+        };
+        // Zwei Segmente; die Lücke zählt nicht zur Strecke.
+        store::flights::append_points(
+            &app.state.pool,
+            f.id,
+            &[
+                (0, p(0, 52.0, 5.0)),
+                (0, p(2_000, 52.001, 30.0)),
+                (1, p(99_000, 52.1, 60.0)),
+            ],
+        )
+        .await
+        .unwrap();
+        let admin = app.cookie(Role::Admin).await;
+
+        let (_, detail) = send(&app.router, with_cookie(get("/api/flights/7"), &admin)).await;
+        let (_, list) = send(&app.router, with_cookie(get("/api/flights"), &admin)).await;
+        for flight in [&detail["flight"], &list[0]] {
+            let distance = flight["distance_m"].as_f64().unwrap();
+            assert!((distance - 111.2).abs() < 1.0, "{distance}");
+            assert_eq!(flight["max_elevation_m"], 60.0);
+        }
     }
 
     #[tokio::test]

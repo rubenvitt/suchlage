@@ -34,6 +34,26 @@ test('Spurpunkt hängt an das richtige Segment, Duplikate fallen weg', () => {
   expect(newSegment.flights[7]!.segments[0]).toBe(once.flights[7]!.segments[0]);
 });
 
+test('Spurpunkte führen Strecke und max. Höhe des laufenden Flugs mit, nicht über die Lücke', () => {
+  let s = applyEvent(initialLiveState, { type: 'snapshot', snapshot: snapshotEmpty }, 0);
+  const started = ev('flight_started');
+  // So meldet der Kern einen frisch begonnenen Flug.
+  s = applyEvent(s, { ...started, flight: { ...started.flight, distance_m: 0, max_elevation_m: null } }, 0);
+  const id = started.flight.id;
+  const at = (segment: number, t_ms: number, lat: number, elevation_m: number | null): LiveEvent => ({
+    type: 'track_point',
+    flight_id: id,
+    segment,
+    point: { t_ms, lat, lon: 10, elevation_m },
+  });
+  s = applyEvent(s, at(0, 0, 52.0, 5), 0);
+  s = applyEvent(s, at(0, 2_000, 52.001, 30), 0);
+  s = applyEvent(s, at(1, 99_000, 52.1, null), 0);
+  const flight = s.flights[id]!.flight;
+  expect(flight.distance_m).toBeCloseTo(111.2, 0);
+  expect(flight.max_elevation_m).toBe(30);
+});
+
 test('Spurpunkt eines unbekannten Flugs ändert nichts', () => {
   const s = flying();
   expect(applyEvent(s, { ...ev('track_point'), flight_id: 99 }, 0)).toBe(s);

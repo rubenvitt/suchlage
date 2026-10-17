@@ -6,6 +6,7 @@ import type { GatewayState } from '../contract/generated/GatewayState';
 import type { LiveEvent } from '../contract/generated/LiveEvent';
 import type { StreamState } from '../contract/generated/StreamState';
 import type { SystemStatus } from '../contract/generated/SystemStatus';
+import type { TrackPoint } from '../contract/generated/TrackPoint';
 
 export interface LiveState {
   /** Erst nach dem ersten Snapshot gibt es eine Lage; vorher zeigen die Paneele „laden“. */
@@ -35,6 +36,15 @@ export const initialLiveState: LiveState = {
   streams: {},
   system: null,
 };
+
+/** Wie `situation::track::haversine_m` im Kern. */
+function haversineM(a: TrackPoint, b: TrackPoint): number {
+  const rad = Math.PI / 180;
+  const h =
+    Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lon - a.lon) * rad) / 2) ** 2;
+  return 2 * 6_371_008.8 * Math.asin(Math.sqrt(h));
+}
 
 const byKey = <T>(items: T[], key: (t: T) => string | number) =>
   Object.fromEntries(items.map((i) => [key(i), i]));
@@ -77,7 +87,17 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
       // Nach einem Neuverbinden kann ein Punkt doppelt kommen; die Spur läuft nur vorwärts.
       if (last && last.t_ms >= e.point.t_ms) return s;
       segments[e.segment] = [...target, e.point];
-      return { ...s, flights: { ...s.flights, [e.flight_id]: { ...active, segments } } };
+      // Strecke und Höhe rechnet der Kern erst beim Schließen fest; bis dahin hier nach seiner Regel:
+      // Strecke nur innerhalb eines Segments.
+      const { distance_m, max_elevation_m } = active.flight;
+      const elevation = e.point.elevation_m;
+      const flight = {
+        ...active.flight,
+        distance_m: distance_m + (last ? haversineM(last, e.point) : 0),
+        max_elevation_m:
+          elevation == null ? max_elevation_m : Math.max(max_elevation_m ?? elevation, elevation),
+      };
+      return { ...s, flights: { ...s.flights, [e.flight_id]: { flight, segments } } };
     }
     case 'stream':
       return { ...s, streams: { ...s.streams, [e.stream.gateway_sn]: e.stream } };
