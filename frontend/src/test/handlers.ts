@@ -28,7 +28,7 @@ export const handlersFor = (me: Me) => [
     const { label } = (await request.json()) as RemoteControllerCreate;
     const created: RemoteControllerCreated = {
       controller: { id: 3, label, sn: null, paired_at_ms: null },
-      pairing_url: 'https://suchlage.example.org/pilot?code=vorschau',
+      pairing_url: 'https://suchlage.example.org/pilot#vorschau',
     };
     return HttpResponse.json(created);
   }),

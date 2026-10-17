@@ -19,7 +19,7 @@ test('ohne Fernsteuerung sagt das Paneel, was zu tun ist', async () => {
 });
 
 test('neue Fernsteuerung zeigt die Kopplungsadresse genau einmal mit QR-Code', async () => {
-  const url = 'https://suchlage.example.org/pilot?code=abc123';
+  const url = 'https://suchlage.example.org/pilot#abc123';
   let body: unknown;
   const created: RemoteControllerCreated = {
     controller: { id: 3, label: 'RC Plus 2', sn: null, paired_at_ms: null },

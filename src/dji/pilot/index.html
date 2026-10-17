@@ -29,7 +29,8 @@
     const log = (m) => { out.textContent += `${new Date().toLocaleTimeString("de-DE")} ${m}\n`; };
     const show = (m) => { stateEl.textContent = m; };
     const bridge = window.djiBridge;
-    const code = new URLSearchParams(location.search).get("code");
+    // Der Code steht im Fragment und erreicht so kein Log; `?code=` gilt noch für früher gespeicherte Links.
+    const code = location.hash.slice(1) || new URLSearchParams(location.search).get("code");
     const post = async (path, body) => {
       const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       return { ok: res.ok, body: await res.json().catch(() => ({})) };

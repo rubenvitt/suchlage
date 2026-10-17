@@ -3,6 +3,6 @@ import type { RemoteControllerView } from "./RemoteControllerView";
 
 export type RemoteControllerCreated = { controller: RemoteControllerView, 
 /**
- * Nur einmal sichtbar: `https://<host>/pilot?code=<code>`.
+ * Nur einmal sichtbar: `https://<host>/pilot#<code>`. Fragment, damit der Code in keinem Log steht.
  */
 pairing_url: string, };

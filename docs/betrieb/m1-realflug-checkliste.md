@@ -3,6 +3,7 @@
 Abnahme laut Spec §7: echter Flug, Position und Bild im FüKw und mobil sichtbar, Flug danach vollständig in der Liste, Verzögerung gemessen (Ziel ≤ 3 s über LTE).
 
 - [ ] Pilot 2 öffnet den Kopplungslink, Seite meldet „Angemeldet als …“; Suchlage zeigt die Fernsteuerung. Im Protokoll der Seite steht `platformGetRemoteControllerSN: ok` erst nach `platformIsVerified: ok`.
+- [ ] Pilot 2 behält das Fragment im gespeicherten Cloud-Link (`/pilot#<code>`): Nach Schließen und erneutem Öffnen der Cloud-Seite meldet sie wieder „Angemeldet als …“ statt „Kopplungscode fehlt“. Falls nicht: Link mit `?code=<code>` eintragen (die Seite liest beides) und die Query für `/pilot` in den Access-Logs von Traefik und Cloudflare ausblenden.
 - [ ] Fluggerät eingeschaltet: Marker, Startpunkt und Trupp-Zeichen auf der Karte; Instrumentenleiste ohne Schraffur.
 - [ ] Einheiten plausibel: Höhe ü. Start, Geschwindigkeit, Abstand (Referenz Kap. 3 – im Feld prüfen; Abweichungen hier notieren).
 - [ ] Start erkannt (Flug läuft), Livebild startet automatisch; sonst „Livebild starten“ und Fehlermeldung notieren.

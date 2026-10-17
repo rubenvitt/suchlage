@@ -159,7 +159,7 @@ pub struct RemoteControllerCreate {
 #[ts(export)]
 pub struct RemoteControllerCreated {
     pub controller: RemoteControllerView,
-    /// Nur einmal sichtbar: `https://<host>/pilot?code=<code>`.
+    /// Nur einmal sichtbar: `https://<host>/pilot#<code>`. Fragment, damit der Code in keinem Log steht.
     pub pairing_url: String,
 }
 

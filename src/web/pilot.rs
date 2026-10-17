@@ -294,7 +294,7 @@ mod tests {
     async fn page_is_served_without_secrets() {
         let app = test_app().await;
         configured(&app).await;
-        let (status, html) = send(&app.router, crate::testing::get("/pilot?code=x")).await;
+        let (status, html) = send(&app.router, crate::testing::get("/pilot")).await;
         assert_eq!(status, StatusCode::OK);
         assert!(!html.to_string().contains("APPKEY-GEHEIM"));
         let (status, js) = send(&app.router, crate::testing::get("/pilot/pilot.js")).await;

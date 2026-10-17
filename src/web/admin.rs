@@ -112,8 +112,10 @@ async fn create_rc(
         return Err(AppError::Validation("Bezeichnung: 1 bis 80 Zeichen".into()));
     }
     let (rc, code) = store::remote_controllers::create(&state.pool, label, now_ms()).await?;
+    // Fragment statt Query: Der Code läuft nicht ab und gäbe sonst aus jedem Access-Log
+    // (Cloudflare, Traefik, TraceLayer) Lizenz und Broker-Zugang frei.
     let pairing_url = format!(
-        "{}/pilot?code={code}",
+        "{}/pilot#{code}",
         state.boot.public_url.as_str().trim_end_matches('/')
     );
     Ok(Json(RemoteControllerCreated {
@@ -307,7 +309,7 @@ mod tests {
             "Bezeichnung ohne Rand"
         );
         let url = created["pairing_url"].as_str().unwrap();
-        assert!(url.starts_with("https://suchlage.test/pilot?code="));
+        assert!(url.starts_with("https://suchlage.test/pilot#"));
         let (_, list) = send(
             &app.router,
             with_cookie(get("/api/remote-controllers"), &admin),
@@ -315,9 +317,7 @@ mod tests {
         .await;
         assert_eq!(list.as_array().unwrap().len(), 1);
         assert!(
-            !list
-                .to_string()
-                .contains(url.split_once("code=").unwrap().1),
+            !list.to_string().contains(url.split_once('#').unwrap().1),
             "Code steht nur in der Antwort beim Anlegen"
         );
 

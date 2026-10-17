@@ -28,7 +28,7 @@ curl -sf http://127.0.0.1:8080/api/health >/dev/null; check $? "Server läuft"
 JAR="$TMP/jar"
 curl -sf -c "$JAR" -X POST http://127.0.0.1:8080/api/auth/dev-login >/dev/null
 api() { curl -sf -b "$JAR" -H 'content-type: application/json' "$@"; }
-code_for() { api -X POST -d "{\"label\":\"$1\"}" http://127.0.0.1:8080/api/remote-controllers | jq -r '.pairing_url | split("code=")[1]'; }
+code_for() { api -X POST -d "{\"label\":\"$1\"}" http://127.0.0.1:8080/api/remote-controllers | jq -r '.pairing_url | split("#")[1]'; }
 connect() { curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$1\",\"rc_sn\":\"$2\"}" http://127.0.0.1:8080/pilot/api/connect; }
 CODE_A=$(code_for "RC A"); CODE_B=$(code_for "RC B")
 # Die Broker-Sitzung braucht nach dem Start einen Moment; bis dahin antwortet connect mit 503.
