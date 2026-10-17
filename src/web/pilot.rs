@@ -141,6 +141,7 @@ async fn connect(
             .to_string(),
         ws_host: ws_url(&state.boot.public_url),
         api_token,
+        media: settings.photo_storage.is_some(),
     }))
 }
 
@@ -352,6 +353,7 @@ mod tests {
         let pass = cfg["mqttPass"].as_str().unwrap().to_string();
         assert_eq!(cfg["apiHost"], "https://suchlage.test");
         assert_eq!(cfg["wsHost"], "wss://suchlage.test/pilot/ws");
+        assert_eq!(cfg["media"], false, "ohne Fotospeicher kein Modul media");
         let first_token = cfg["apiToken"].as_str().unwrap().to_string();
         let rc_of = |token: String| {
             let pool = app.state.pool.clone();
@@ -379,6 +381,22 @@ mod tests {
                 .await
                 .is_some()
         );
+        app.state
+            .settings
+            .update_photo_storage(crate::contract::PhotoStorageSettingsInput {
+                s3_url: "http://fotos:3900".into(),
+                rc_url: "http://100.64.0.10:3900".into(),
+                admin_url: "http://fotos:3903".into(),
+                bucket: "suchlage-fotos".into(),
+                region: "garage".into(),
+                access_key_id: "GK1".into(),
+                secret_access_key: Some("s".into()),
+                admin_token: Some("t".into()),
+            })
+            .await
+            .unwrap();
+        let (_, with_photos) = send(&app.router, connect("RC1")).await;
+        assert_eq!(with_photos["media"], true);
         let (status, _) = send(&app.router, connect("RC2")).await;
         assert_eq!(status, StatusCode::CONFLICT, "Code gehört zu RC1");
         let bound = crate::store::remote_controllers::find_by_sn(&app.state.pool, "RC1")

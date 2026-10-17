@@ -48,7 +48,7 @@ export function connect(cfg, bridge, log) {
   call("platformLoadComponent", "liveshare", JSON.stringify({
     videoPublishType: "video-demand-aux-manual", statusCallback: "onLiveStatus",
   }));
-  connectMap(cfg, bridge, log);
+  return { map: connectMap(cfg, bridge, log), media: connectMedia(cfg, bridge, log) };
 }
 
 /**
@@ -71,6 +71,27 @@ export function connectMap(cfg, bridge, log) {
   }
 }
 
+/** Auto-Upload der Fotos (M3): Original, keine Videos (`30.jsbridge.md`, Modul `media`). */
+export const MEDIA_PARAMS = { autoUploadPhoto: true, autoUploadPhotoType: 0, autoUploadVideo: false };
+
+/**
+ * Fotos (M3): Modul `media` nach `api`, nur wenn der Server einen Fotospeicher hat. Scheitert es,
+ * laufen Telemetrie, Livebild und Karte weiter. `true`, wenn Pilot 2 Fotos automatisch hochlädt.
+ */
+export function connectMedia(cfg, bridge, log) {
+  if (!cfg.apiToken || !cfg.media) return false;
+  const call = caller(bridge, log);
+  try {
+    call("platformLoadComponent", "media", JSON.stringify(MEDIA_PARAMS));
+    const auto = call("mediaGetAutoUploadPhoto");
+    log(`Foto-Upload: ${auto ? "automatisch (Original)" : "aus – in Pilot 2 unter Cloud-Dienst einschalten"}`, auto ? "info" : "warn");
+    return Boolean(auto);
+  } catch (e) {
+    log(`Foto-Upload nicht verfügbar (${e.message})`, "warn");
+    return false;
+  }
+}
+
 /** Ganzer Ablauf. `post(path, body)` liefert `{ ok, body }`. Gibt die zusammengeführte Konfiguration zurück. */
 export async function pair(code, bridge, log, post) {
   const lic = await post("/pilot/api/license", { code });
@@ -80,7 +101,7 @@ export async function pair(code, bridge, log, post) {
   const conn = await post("/pilot/api/connect", { code, rc_sn: rcSn });
   if (!conn.ok) throw new PairingError(conn.body?.error ?? "Kopplung abgelehnt.");
   const cfg = { ...lic.body, ...conn.body };
-  connect(cfg, bridge, log);
+  cfg.modules = connect(cfg, bridge, log);
   return cfg;
 }
 
