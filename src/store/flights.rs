@@ -227,6 +227,23 @@ mod tests {
         let err: AppError = insert(&pool, &flight(2, "AC1")).await.unwrap_err().into();
         assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
         insert(&pool, &flight(3, "AC2")).await.unwrap();
+
+        // Der Index gilt nur für offene Flüge: nach der Landung darf AC1 wieder starten.
+        let landed = FlightSummary {
+            ended_at_ms: Some(1_500),
+            end_reason: Some(FlightEndReason::Landed),
+            ..flight(1, "AC1")
+        };
+        update(&pool, &landed).await.unwrap();
+        insert(&pool, &flight(4, "AC1")).await.unwrap();
+        let open_ac1: Vec<i64> = open(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|(f, _)| f.aircraft_sn == "AC1")
+            .map(|(f, _)| f.id)
+            .collect();
+        assert_eq!(open_ac1, vec![4]);
     }
 
     #[tokio::test]
