@@ -4,6 +4,7 @@ pub mod broker;
 pub mod config;
 pub mod contract;
 pub mod db;
+pub mod devlog;
 pub mod dji;
 pub mod error;
 pub mod extract;

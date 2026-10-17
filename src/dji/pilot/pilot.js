@@ -6,7 +6,8 @@ export class PairingError extends Error {}
 function caller(bridge, log) {
   return (name, ...args) => {
     const res = JSON.parse(bridge[name](...args));
-    log(`${name}: ${res.code === 0 ? "ok" : `FEHLER ${res.code} ${res.message}`}`);
+    if (res.code === 0) log(`${name}: ok`);
+    else log(`${name}: FEHLER ${res.code} ${res.message}`, "error");
     if (res.code !== 0) throw new Error(name);
     return res.data;
   };
@@ -65,7 +66,7 @@ export function connectMap(cfg, bridge, log) {
     call("platformLoadComponent", "map", JSON.stringify({ userName: cfg.rcLabel, elementPreName: "Pilot" }));
     return true;
   } catch (e) {
-    log(`Kartenelemente nicht verfügbar (${e.message})`);
+    log(`Kartenelemente nicht verfügbar (${e.message})`, "warn");
     return false;
   }
 }
@@ -87,4 +88,64 @@ export function startManualLive(cfg, bridge, log) {
   const call = caller(bridge, log);
   call("liveshareSetConfig", 2, JSON.stringify({ url: cfg.rtmpUrl }));
   call("liveshareStartLive");
+}
+
+/** `onThingConnect`/`onWsConnect` liefern `true`/`false`, je nach Version als Boolean oder Text. */
+export function isConnected(state) {
+  return String(state) === "true";
+}
+
+/**
+ * `onLiveStatus` liefert ein Objekt oder JSON-Text, je nach Pilot-2-Version. `text` ist die lesbare
+ * Form, `key` ändert sich nur, wenn sich der Zustand ändert (nicht bei jeder neuen Bitrate).
+ */
+export function liveStatus(raw) {
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return { text: raw, key: raw };
+    }
+  }
+  if (value === null || typeof value !== "object") return { text: String(value), key: String(value) };
+  const text = JSON.stringify(value);
+  const state = value.status ?? value.liveStatus ?? value.state ?? value.code;
+  return { text, key: state === undefined ? text : JSON.stringify(state) };
+}
+
+const FLUSH_MS = 2_000;
+const BATCH = 50;
+const KEEP = 200;
+
+/**
+ * Schickt Protokollzeilen gebündelt an `/pilot/api/log`, damit die Systemseite sie live zeigt.
+ * Fehler gehen sofort raus. Ohne Netz bleiben bis zu 200 Zeilen für den nächsten Versuch.
+ */
+export function remoteLog(code, post, { now = Date.now, schedule = setTimeout } = {}) {
+  let queue = [];
+  let timer = null;
+  let sending = false;
+  const flush = async () => {
+    timer = null;
+    if (sending || queue.length === 0) return;
+    sending = true;
+    const lines = queue.slice(0, BATCH);
+    try {
+      // Hat der Server geantwortet, hilft Wiederholen nicht (z. B. Code ungültig): Zeilen fallen weg.
+      await post("/pilot/api/log", { code, lines });
+      queue = queue.slice(lines.length);
+    } catch {
+      // kein Netz: dieselben Zeilen beim nächsten Versuch
+    }
+    sending = false;
+    if (queue.length > 0 && timer === null) timer = schedule(flush, FLUSH_MS);
+  };
+  const add = (text, level = "info") => {
+    queue.push({ at_ms: now(), level, text });
+    if (queue.length > KEEP) queue = queue.slice(-KEEP);
+    if (level === "error") return flush();
+    if (timer === null) timer = schedule(flush, FLUSH_MS);
+  };
+  return { add, flush };
 }

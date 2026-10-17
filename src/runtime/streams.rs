@@ -4,7 +4,7 @@
 use sqlx::SqlitePool;
 use tokio::sync::mpsc;
 
-use crate::contract::{Lens, MediaSettings, StreamPhase, StreamState};
+use crate::contract::{FRESHNESS_LOST_MS, Lens, MediaSettings, StreamPhase, StreamState};
 use crate::dji::control::{ControlError, LiveControl};
 use crate::error::AppError;
 use crate::runtime::service::SituationHandle;
@@ -40,6 +40,15 @@ pub async fn run_auto(mut rx: mpsc::UnboundedReceiver<String>, orchestrator: Str
                 tracing::warn!(gateway = %gateway_sn, error = %e, "Livebild beim Abheben nicht gestartet")
             }
         }
+    }
+}
+
+/// „45 s“, „3 min“, „2 h“.
+fn since(ms: i64) -> String {
+    match ms / 1_000 {
+        s if s < 120 => format!("{s} s"),
+        s if s < 7_200 => format!("{} min", s / 60),
+        s => format!("{} h", s / 3_600),
     }
 }
 
@@ -129,12 +138,24 @@ impl StreamOrchestrator {
         gateway_sn: &str,
         video_id: Option<String>,
     ) -> Result<StreamState, AppError> {
-        let gateway = self
-            .situation
-            .gateway(gateway_sn)
-            .await?
-            .filter(|g| g.aircraft_sn.is_some())
-            .ok_or_else(|| AppError::Conflict("Fernsteuerung nicht verbunden".into()))?;
+        let gateway = self.situation.gateway(gateway_sn).await?.ok_or_else(|| {
+            AppError::Conflict("Diese Fernsteuerung hat sich noch nie gemeldet".into())
+        })?;
+        let name = gateway.label.as_deref().unwrap_or(gateway_sn);
+        // Ohne frische Nachricht käme der Befehl nie an; nach 10 s nur „antwortet nicht“ zu melden
+        // hilft im Einsatz nicht weiter.
+        let silent_ms = now_ms() - gateway.last_seen_ms;
+        if silent_ms > FRESHNESS_LOST_MS {
+            return Err(AppError::Unavailable(format!(
+                "{name} meldet sich seit {} nicht – in Pilot 2 unter Cloud-Dienst die Verbindung zu Suchlage prüfen",
+                since(silent_ms)
+            )));
+        }
+        if gateway.aircraft_sn.is_none() {
+            return Err(AppError::Conflict(format!(
+                "An {name} ist kein Fluggerät verbunden – ist es eingeschaltet?"
+            )));
+        }
         let source = match video_id {
             Some(id) => gateway
                 .video_sources

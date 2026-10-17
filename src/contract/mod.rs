@@ -2,6 +2,7 @@
 //! `cargo test` erzeugt daraus `frontend/src/contract/generated/*.ts` und die Beispieldaten.
 
 pub mod admin;
+pub mod devicelog;
 pub mod examples;
 pub mod flights;
 pub mod live;
@@ -11,6 +12,7 @@ pub mod map;
 mod fixtures;
 
 pub use admin::*;
+pub use devicelog::*;
 pub use flights::*;
 pub use live::*;
 pub use map::*;

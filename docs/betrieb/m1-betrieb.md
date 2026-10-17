@@ -116,3 +116,13 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
   unter Einstellungen → Broker eintragen. Die Zugänge der Fernsteuerungen legt der Server beim
   nächsten Koppeln selbst wieder an.
 - **Abnahme:** `docs/betrieb/m1-realflug-checkliste.md`.
+- **Fehlersuche im Funkverkehr:** System → Funkprotokoll zeigt live, was zwischen Server und
+  Fernsteuerungen läuft: Befehle und Antworten (gleiche `tid`), Topologie, Broker-Verbindung,
+  Zeitüberschreitungen und die Protokollzeilen der Pilot-Seite (Verbindung zu Suchlage, Livebild,
+  Kartenabgleich). Telemetrie erscheint gedrosselt (ein Eintrag je 10 s und Gerät) und ist
+  standardmäßig ausgeblendet. Payloads kommen ohne Gerätegeheimnisse und ohne Stream-Schlüssel an.
+  Der Server hält die letzten 500 Einträge im Speicher, nach einem Neustart beginnt das Protokoll
+  leer. Dauerhaft aufzeichnen: Rohmitschnitt unter Einstellungen → Allgemein.
+- **Server-Log:** Jeder Livebild-Befehl steht mit Fernsteuerung, Methode, `tid` und Dauer im Log
+  (`Befehl bestätigt`, `Befehl abgelehnt`, `Befehl ohne Antwort`):
+  `docker compose -f compose.m1.yaml logs -f server`.

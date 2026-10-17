@@ -10,7 +10,12 @@
     main { padding: 16px; max-width: 720px; }
     button { font: inherit; font-weight: 600; padding: 14px 22px; margin: 0 8px 12px 0; border: 1px solid #626a73; background: #14171b; color: #e8ebee; border-radius: 0; }
     button.primary { background: #4d94d6; border-color: #4d94d6; color: #08090b; }
-    #state { font-size: 20px; margin: 8px 0 16px; }
+    #state { font-size: 20px; margin: 8px 0 12px; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 16px; }
+    dt { color: #9aa2ab; }
+    dd { margin: 0; overflow-wrap: anywhere; }
+    dd[data-ton="ok"] { color: #6cc28a; }
+    dd[data-ton="fehler"] { color: #e5735f; }
     #log { white-space: pre-wrap; font: 13px ui-monospace, monospace; background: #0f1215; border: 1px solid #22262b; padding: 8px; color: #9aa2ab; }
   </style>
 </head>
@@ -18,16 +23,19 @@
   <header>Suchlage – Pilot 2 verbinden</header>
   <main>
     <div id="state" role="status">Wird vorbereitet …</div>
+    <dl>
+      <dt>Verbindung zu Suchlage</dt><dd id="st-mqtt">noch nicht aufgebaut</dd>
+      <dt>Livebild</dt><dd id="st-live">–</dd>
+      <dt>Kartenabgleich</dt><dd id="st-ws">–</dd>
+    </dl>
     <button id="connect" class="primary">Verbinden</button>
     <button id="live">Livebild manuell starten</button>
     <div id="log"></div>
   </main>
   <script type="module">
-    import { PairingError, connect, pair, startManualLive } from "./pilot/pilot.js";
+    import { PairingError, connect, isConnected, liveStatus, pair, remoteLog, startManualLive } from "./pilot/pilot.js";
     const out = document.getElementById("log");
     const stateEl = document.getElementById("state");
-    const log = (m) => { out.textContent += `${new Date().toLocaleTimeString("de-DE")} ${m}\n`; };
-    const show = (m) => { stateEl.textContent = m; };
     const bridge = window.djiBridge;
     // Der Code steht im Fragment und erreicht so kein Log; `?code=` gilt noch für früher gespeicherte Links.
     const code = location.hash.slice(1) || new URLSearchParams(location.search).get("code");
@@ -35,10 +43,37 @@
       const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       return { ok: res.ok, body: await res.json().catch(() => ({})) };
     };
+    // Jede Zeile geht auch an Suchlage (Systemseite → Funkprotokoll), sobald ein Code da ist.
+    const remote = code ? remoteLog(code, post) : null;
+    const log = (m, level = "info") => {
+      out.textContent += `${new Date().toLocaleTimeString("de-DE")} ${m}\n`;
+      remote?.add(m, level);
+    };
+    const show = (m) => { stateEl.textContent = m; };
+    const row = (id, text, ton) => {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.dataset.ton = ton;
+    };
     let cfg = null;
-    window.onThingConnect = (s) => { log(`MQTT: ${s}`); show(String(s) === "true" ? "Mit Suchlage verbunden." : "Verbindung zu Suchlage getrennt."); };
-    window.onLiveStatus = (s) => log(`Livebild: ${s}`);
-    window.onWsConnect = (s) => log(`Kartenabgleich: ${String(s) === "true" ? "verbunden" : "getrennt"}`);
+    window.onThingConnect = (s) => {
+      const up = isConnected(s);
+      row("st-mqtt", up ? "verbunden" : "getrennt – Telemetrie und Befehle erreichen Suchlage nicht", up ? "ok" : "fehler");
+      log(`Verbindung zu Suchlage (MQTT): ${up ? "verbunden" : "getrennt"}`, up ? "info" : "warn");
+    };
+    let lastLive = null;
+    window.onLiveStatus = (s) => {
+      const { text, key } = liveStatus(s);
+      row("st-live", text, "");
+      // Pilot 2 meldet alle 2 s; ins Protokoll nur, wenn sich der Zustand ändert.
+      if (key !== lastLive) log(`Livebild: ${text}`);
+      lastLive = key;
+    };
+    window.onWsConnect = (s) => {
+      const up = isConnected(s);
+      row("st-ws", up ? "verbunden" : "getrennt", up ? "ok" : "fehler");
+      log(`Kartenabgleich: ${up ? "verbunden" : "getrennt"}`, up ? "info" : "warn");
+    };
 
     async function run(action) {
       if (!bridge) return show("Diese Seite in DJI Pilot 2 unter Cloud-Dienst öffnen.");
@@ -50,8 +85,11 @@
         if (action === "live") startManualLive(cfg, bridge, log);
         show(`Angemeldet als ${cfg.rcLabel}.`);
       } catch (e) {
-        if (e instanceof PairingError) return show(e.message);
-        log(`Abbruch bei ${e.message}`);
+        if (e instanceof PairingError) {
+          log(`Kopplung abgelehnt: ${e.message}`, "error");
+          return show(e.message);
+        }
+        log(`Abbruch bei ${e.message}`, "error");
         show("Anmeldung fehlgeschlagen – Protokoll unten.");
       }
     }

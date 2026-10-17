@@ -1,5 +1,6 @@
 // Erzeugt von `cargo test contract` (src/contract/fixtures.rs) – nicht von Hand ändern.
 import type { AuthOptions } from './generated/AuthOptions';
+import type { DeviceLogEvent } from './generated/DeviceLogEvent';
 import type { FlightDetail } from './generated/FlightDetail';
 import type { FlightSummary } from './generated/FlightSummary';
 import type { KioskTokenView } from './generated/KioskTokenView';
@@ -599,6 +600,54 @@ export const liveEvents: LiveEvent[] = [
   {
     "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
     "type": "map_element_deleted"
+  }
+];
+
+export const deviceLog: DeviceLogEvent[] = [
+  {
+    "entries": [
+      {
+        "at_ms": 1792150001000,
+        "device_sn": "RCSIM0001",
+        "level": "warn",
+        "method": null,
+        "payload": null,
+        "seq": 1,
+        "source": "pilot",
+        "summary": "Verbindung zu Suchlage: getrennt",
+        "topic": null
+      },
+      {
+        "at_ms": 1792150002000,
+        "device_sn": "RCSIM0001",
+        "level": "info",
+        "method": "live_start_push",
+        "payload": "{\"method\":\"live_start_push\",\"data\":{\"result\":0}}",
+        "seq": 2,
+        "source": "server",
+        "summary": "Befehl live_start_push",
+        "topic": "thing/product/RCSIM0001/services"
+      }
+    ],
+    "type": "history"
+  },
+  {
+    "entry": {
+      "at_ms": 1792150003000,
+      "device_sn": "RCSIM0001",
+      "level": "error",
+      "method": "live_start_push",
+      "payload": "{\"method\":\"live_start_push\",\"data\":{\"result\":0}}",
+      "seq": 3,
+      "source": "system",
+      "summary": "live_start_push: keine Antwort in 10 s",
+      "topic": null
+    },
+    "type": "entry"
+  },
+  {
+    "count": 4,
+    "type": "missed"
   }
 ];
 

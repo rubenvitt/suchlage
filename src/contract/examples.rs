@@ -261,6 +261,54 @@ pub fn map_elements() -> Vec<MapElement> {
     ]
 }
 
+pub fn device_log() -> Vec<DeviceLogEvent> {
+    let entry = |seq: u64, source, level, method: Option<&str>, summary: &str| DeviceLogEntry {
+        seq,
+        at_ms: T0 + seq as i64 * 1_000,
+        source,
+        level,
+        device_sn: Some(GATEWAY_SN.into()),
+        topic: match source {
+            DeviceLogSource::Device => Some(format!("thing/product/{GATEWAY_SN}/services_reply")),
+            DeviceLogSource::Server => Some(format!("thing/product/{GATEWAY_SN}/services")),
+            _ => None,
+        },
+        method: method.map(Into::into),
+        summary: summary.into(),
+        payload: method.map(|m| format!(r#"{{"method":"{m}","data":{{"result":0}}}}"#)),
+    };
+    vec![
+        DeviceLogEvent::History {
+            entries: vec![
+                entry(
+                    1,
+                    DeviceLogSource::Pilot,
+                    DeviceLogLevel::Warn,
+                    None,
+                    "Verbindung zu Suchlage: getrennt",
+                ),
+                entry(
+                    2,
+                    DeviceLogSource::Server,
+                    DeviceLogLevel::Info,
+                    Some("live_start_push"),
+                    "Befehl live_start_push",
+                ),
+            ],
+        },
+        DeviceLogEvent::Entry {
+            entry: entry(
+                3,
+                DeviceLogSource::System,
+                DeviceLogLevel::Error,
+                Some("live_start_push"),
+                "live_start_push: keine Antwort in 10 s",
+            ),
+        },
+        DeviceLogEvent::Missed { count: 4 },
+    ]
+}
+
 pub fn live_events() -> Vec<LiveEvent> {
     vec![
         LiveEvent::Snapshot {
@@ -430,6 +478,7 @@ pub fn all() -> Vec<Fixture> {
         ),
         fx("snapshotFlying", "SituationSnapshot", &snapshot_flying()),
         fx("liveEvents", "LiveEvent[]", &live_events()),
+        fx("deviceLog", "DeviceLogEvent[]", &device_log()),
         fx("flightList", "FlightSummary[]", &flight_list()),
         fx("flightDetail", "FlightDetail", &flight_detail()),
         fx("settingsView", "SettingsView", &settings_view()),
@@ -491,6 +540,7 @@ fn roundtrip<T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(valu
 pub fn assert_roundtrips() {
     roundtrip(snapshot_flying());
     roundtrip(live_events());
+    roundtrip(device_log());
     roundtrip(flight_detail());
     roundtrip(settings_view());
     roundtrip(remote_controllers());

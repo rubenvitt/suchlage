@@ -2,6 +2,7 @@
 
 pub mod command;
 pub mod control;
+pub mod devlog;
 pub mod link;
 pub mod map;
 pub mod pilot;
