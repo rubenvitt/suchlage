@@ -69,6 +69,7 @@ pub async fn test_app() -> TestApp {
         oidc: Arc::new(crate::auth::oidc::OidcState::new()),
         mqtt,
         streams,
+        http: crate::media::http_client(),
     };
     TestApp {
         router: router(state.clone()),

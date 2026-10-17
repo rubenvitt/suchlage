@@ -1,12 +1,14 @@
 //! Flugliste und Flugdetail. Nur für Konten: das Großbild zeigt die Lage, nicht das Archiv.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, header};
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::app::AppState;
 use crate::auth::session::Operator;
-use crate::contract::{FlightDetail, FlightSummary};
+use crate::contract::{FlightDetail, FlightSummary, FlightVideo};
 use crate::error::AppError;
 use crate::store;
 
@@ -16,6 +18,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/flights", get(list))
         .route("/flights/{id}", get(get_one))
+        .route("/flights/{id}/video", get(video))
 }
 
 async fn list(
@@ -33,16 +36,43 @@ async fn get_one(
     Ok(Json(detail(&state, id).await?))
 }
 
-/// Flug samt Spur. B15 ergänzt das Video.
+#[derive(serde::Deserialize)]
+struct VideoQuery {
+    #[serde(default)]
+    download: u8,
+}
+
+/// Aufnahme des Flugs aus MediaMTX, zum Ansehen oder mit `download=1` als Datei.
+async fn video(
+    _: Operator,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(q): Query<VideoQuery>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let flight = store::flights::get(&state.pool, id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let range = headers.get(header::RANGE).cloned();
+    crate::media::proxy::flight_video(&state, &flight, q.download == 1, range).await
+}
+
+/// Flug samt Spur und, nach der Landung, dem Video, sofern MediaMTX eine Aufnahme meldet.
 pub async fn detail(state: &AppState, id: i64) -> Result<FlightDetail, AppError> {
     let flight = store::flights::get(&state.pool, id)
         .await?
         .ok_or(AppError::NotFound)?;
     let segments = store::flights::segments(&state.pool, id).await?;
+    let has_video = flight.ended_at_ms.is_some()
+        && crate::media::proxy::flight_video_available(state, &flight).await;
+    let video = has_video.then(|| FlightVideo {
+        play_url: format!("/api/flights/{id}/video"),
+        download_url: format!("/api/flights/{id}/video?download=1"),
+    });
     Ok(FlightDetail {
         flight,
         segments,
-        video: None,
+        video,
     })
 }
 
@@ -89,7 +119,7 @@ mod tests {
     async fn flights_are_for_accounts_only() {
         let app = test_app().await;
         let kiosk = app.cookie(Role::Kiosk).await;
-        for uri in ["/api/flights", "/api/flights/1"] {
+        for uri in ["/api/flights", "/api/flights/1", "/api/flights/1/video"] {
             assert_eq!(
                 send(&app.router, get(uri)).await.0,
                 StatusCode::UNAUTHORIZED,

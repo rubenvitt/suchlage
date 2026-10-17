@@ -28,6 +28,8 @@ pub struct AppState {
     pub oidc: Arc<OidcState>,
     pub mqtt: crate::mqtt::MqttLink,
     pub streams: StreamOrchestrator,
+    /// Für die Proxies zu MediaMTX (`media::http_client`).
+    pub http: reqwest::Client,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -44,12 +46,14 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::live::routes())
         .merge(crate::web::flights::routes())
         .merge(crate::web::streams::routes())
+        .merge(crate::web::media::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()
         .nest("/api", api)
         // Pilot 2 öffnet `/pilot` direkt, nicht unter `/api`.
         .merge(crate::web::pilot::routes())
+        .merge(crate::web::media::internal_routes())
         .fallback(crate::static_files::serve)
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
         .layer(CatchPanicLayer::new())
@@ -145,6 +149,7 @@ pub async fn run(
         oidc: Arc::new(OidcState::new()),
         mqtt,
         streams,
+        http: crate::media::http_client(),
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
     // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503. Die MQTT-Sitzung
