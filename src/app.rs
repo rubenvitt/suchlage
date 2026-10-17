@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
+use axum::extract::FromRef;
 use axum::routing::get;
 use sqlx::SqlitePool;
 use tokio::sync::{mpsc, watch};
@@ -30,6 +31,19 @@ pub struct AppState {
     pub streams: StreamOrchestrator,
     /// Für die Proxies zu MediaMTX (`media::http_client`).
     pub http: reqwest::Client,
+}
+
+// Teilzustände für die Extractors in `auth`, damit `auth` den `AppState` nicht kennen muss.
+impl FromRef<AppState> for SqlitePool {
+    fn from_ref(state: &AppState) -> Self {
+        state.pool.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<BootConfig> {
+    fn from_ref(state: &AppState) -> Self {
+        state.boot.clone()
+    }
 }
 
 pub fn router(state: AppState) -> Router {

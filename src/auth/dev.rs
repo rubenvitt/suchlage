@@ -2,12 +2,15 @@
 //! der Einstellungen für den lokalen Stack aus `deploy/compose.dev.yaml` und die Fernsteuerung
 //! des Simulators.
 
+use std::sync::Arc;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::extract::CookieJar;
+use sqlx::SqlitePool;
 
-use crate::app::AppState;
 use crate::auth::session::{secure_cookies, session_cookie};
+use crate::config::BootConfig;
 use crate::contract::{BrokerSettingsInput, DjiSettingsInput, MediaSettings};
 use crate::error::AppError;
 use crate::settings::SettingsHandle;
@@ -15,13 +18,14 @@ use crate::store::{sessions, users};
 use crate::time::now_ms;
 
 pub async fn login(
-    State(state): State<AppState>,
+    State(pool): State<SqlitePool>,
+    State(boot): State<Arc<BootConfig>>,
     jar: CookieJar,
 ) -> Result<(CookieJar, StatusCode), AppError> {
     let now = now_ms();
-    let user = users::upsert_oidc(&state.pool, "dev", "dev", "Entwicklung", now).await?;
-    let token = sessions::create_for_user(&state.pool, user.id, now).await?;
-    let cookie = session_cookie(token, sessions::USER_TTL_MS, secure_cookies(&state.boot));
+    let user = users::upsert_oidc(&pool, "dev", "dev", "Entwicklung", now).await?;
+    let token = sessions::create_for_user(&pool, user.id, now).await?;
+    let cookie = session_cookie(token, sessions::USER_TTL_MS, secure_cookies(&boot));
     Ok((jar.add(cookie), StatusCode::NO_CONTENT))
 }
 
