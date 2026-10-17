@@ -66,6 +66,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::live::routes())
         .merge(crate::web::flights::routes())
         .merge(crate::web::map::routes())
+        .merge(crate::web::photos::routes())
         .merge(crate::web::streams::routes())
         .merge(crate::web::media::routes())
         .merge(crate::web::devlog::routes())
@@ -188,8 +189,12 @@ pub async fn run(
         public_url = %boot.public_url,
         "Suchlage läuft"
     );
-    let photos =
-        crate::photos::PhotoHub::new(pool.clone(), settings.clone(), crate::media::http_client());
+    let photos = crate::photos::PhotoHub::new(
+        pool.clone(),
+        settings.clone(),
+        crate::media::http_client(),
+        boot.thumbs_dir(),
+    );
     let state = AppState {
         boot: Arc::new(boot),
         pool: pool.clone(),
