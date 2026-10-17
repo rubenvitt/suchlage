@@ -1,0 +1,121 @@
+/* Instrumentenleiste. Größen kommen aus `--lfh-typo-*`, die Schraffur aus `--sl-schraffur-*` (frame.css).
+   Fugenraster nach LFH-961: Grund `paneel`, jede Zelle zeichnet ihre Fuge selbst (`[data-fugenraster]`
+   in sprache.css). Eine leere Restspur der letzten Zeile bleibt so Fläche statt grauer Kachel. */
+.sl-strip {
+  --sl-strip-label-zeile: calc(1.2 * var(--lfh-typo-augenbraue-groesse));
+  --sl-strip-wert-zeile: 1.1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 1px;
+  background: var(--lfh-paneel);
+  border-top: 1px solid var(--lfh-linie);
+  clip-path: inset(0);
+}
+.sl-strip-cell {
+  background: var(--lfh-paneel);
+  padding: 8px 12px;
+  min-height: 72px;
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Wörter brauchen Platz, sonst bräche ein Warnwort um und die Leiste würde höher. Am Arbeitsplatz
+   füllen die Spannen bei 1200 px genau zwei Zeilen zu je 8 Spuren: 6 + 2 | 1 + 3 + 1 + 3.
+   Mobil bleibt das 2×n-Raster aus der UI-Richtung; dort darf ein Warnwort umbrechen. Das Großbild
+   ordnet seine Auswahl selbst (`views/views.css`). */
+.sl-strip[data-size='compact'] .sl-strip-cell[data-key='gnss'] {
+  grid-column: span 2;
+}
+.sl-strip[data-size='compact'] :is(.sl-strip-cell[data-key='mode'], .sl-strip-age) {
+  grid-column: span 3;
+}
+.sl-strip.sl-hatch-delayed .sl-strip-cell {
+  background-image: var(--sl-schraffur-verzoegert);
+}
+.sl-strip.sl-hatch-lost .sl-strip-cell {
+  background-image: var(--sl-schraffur-verloren);
+}
+.sl-strip-label {
+  font: var(--lfh-typo-augenbraue-gewicht) var(--lfh-typo-augenbraue-groesse) var(--lfh-schrift-text);
+  line-height: var(--sl-strip-label-zeile);
+  letter-spacing: var(--lfh-typo-augenbraue-sperrung);
+  text-transform: uppercase;
+  color: var(--lfh-schwach);
+}
+.sl-strip-value {
+  font: var(--lfh-typo-datenwert-klein-gewicht) var(--lfh-typo-datenwert-klein-groesse)
+    var(--lfh-schrift-zahl);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--lfh-typo-datenwert-klein-sperrung);
+  line-height: var(--sl-strip-wert-zeile);
+  color: var(--lfh-text);
+  /* Ein Warnwort („RTK gestört“, „Verbindung verloren …“) bricht um, statt mit „…“ abzubrechen. */
+  overflow: hidden;
+}
+/* Die einzige Bewegung der Oberfläche: ein neuer Wert leuchtet 120 ms in der Bedienfarbe auf.
+   `prefers-reduced-motion` schaltet sie global in frame.css ab. */
+@keyframes sl-neuer-wert {
+  from {
+    color: var(--lfh-bedien);
+  }
+}
+.sl-strip-flash {
+  animation: sl-neuer-wert 120ms ease-out;
+}
+.sl-strip-unit {
+  font: var(--lfh-typo-meta-gewicht) var(--lfh-typo-meta-groesse) var(--lfh-schrift-text);
+  letter-spacing: 0;
+  color: var(--lfh-gedaempft);
+  margin-left: 4px;
+}
+.sl-strip-note {
+  font: var(--lfh-typo-meta-gewicht) var(--lfh-typo-meta-groesse) var(--lfh-schrift-zahl);
+  color: var(--lfh-gedaempft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sl-strip-cell[data-tone='normal'] .sl-strip-value {
+  color: var(--lfh-normal-text);
+}
+.sl-strip-cell[data-tone='achtung'] .sl-strip-value {
+  color: var(--lfh-achtung-text);
+}
+.sl-strip-cell[data-tone='alarm'] .sl-strip-value {
+  color: var(--lfh-alarm-text);
+}
+/* Ein alter Wert behauptet keinen Ton mehr: nur das Alter bleibt farbig. */
+.sl-strip[data-freshness='delayed'] .sl-strip-cell:not(.sl-strip-age) .sl-strip-value {
+  color: var(--lfh-gedaempft);
+}
+.sl-strip[data-freshness='lost'] .sl-strip-cell:not(.sl-strip-age) .sl-strip-value {
+  color: var(--lfh-schwach);
+}
+
+.sl-strip[data-size='large'] {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+/* Im Großbild passt „Verbindung verloren 14:31:02“ in 40 px nicht in eine Zeile. Die Zelle hält
+   deshalb von Anfang an Platz für zwei Wertzeilen, damit die Leiste beim Verlust nicht springt. */
+.sl-strip[data-size='large'] .sl-strip-cell {
+  min-height: calc(
+    16px + var(--sl-strip-label-zeile) + 4px + 2 * var(--sl-strip-wert-zeile) *
+      var(--lfh-typo-datenwert-gross-groesse)
+  );
+}
+.sl-strip[data-size='large'] .sl-strip-value {
+  font-size: var(--lfh-typo-datenwert-gross-groesse);
+  letter-spacing: var(--lfh-typo-datenwert-gross-sperrung);
+}
+.sl-strip[data-size='mobile'] {
+  grid-template-columns: 1fr 1fr;
+}
+.sl-strip[data-size='mobile'] .sl-strip-cell {
+  min-height: 56px;
+  padding: 6px 10px;
+}
+.sl-strip[data-size='mobile'] .sl-strip-value {
+  font-size: var(--sl-datenwert-mobil-groesse);
+}

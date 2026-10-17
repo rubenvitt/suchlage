@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest';
+import { server } from './src/test/server';
 
 // antd und MapLibre fragen matchMedia/ResizeObserver ab, die jsdom nicht kennt.
 if (!window.matchMedia) {
@@ -21,3 +22,8 @@ if (!('ResizeObserver' in window)) {
     disconnect() {}
   };
 }
+
+// Jeder Test spricht über MSW mit der API; eine unerwartete Anfrage ist ein Fehler.
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
