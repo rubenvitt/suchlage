@@ -9,11 +9,14 @@ const initial = (live: boolean): PlayerState =>
 /** Führt den Zustandsautomaten am Video-Element aus: Sitzung, ICE-Frist, Neuversuch und Hänger. */
 export function usePlayer(video: RefObject<HTMLVideoElement | null>, gatewaySn: string, isLive: boolean) {
   const [player, dispatch] = useReducer(nextState, isLive, initial);
-  // Beginn und Ende des Streams beim Rendern übernehmen statt im Effekt (React: Zustand an Props anpassen).
-  const [wasLive, setWasLive] = useState(isLive);
-  if (wasLive !== isLive) {
-    setWasLive(isLive);
-    dispatch({ type: isLive ? 'stream_live' : 'stream_gone' });
+  // Beginn, Ende und Wechsel der Fernsteuerung beim Rendern übernehmen statt im Effekt (React: Zustand
+  // an Props anpassen). Ein neuer Stream beginnt immer von vorn, also mit WebRTC.
+  const stream = `${gatewaySn}:${isLive}`;
+  const [seen, setSeen] = useState(stream);
+  if (seen !== stream) {
+    setSeen(stream);
+    dispatch({ type: 'stream_gone' });
+    if (isLive) dispatch({ type: 'stream_live' });
   }
 
   // Die Sitzung hängt an Transport und Versuch, nicht am ganzen Zustand: der Wechsel
@@ -57,20 +60,35 @@ export function usePlayer(video: RefObject<HTMLVideoElement | null>, gatewaySn: 
     return () => window.clearTimeout(id);
   }, [player]);
 
+  // Hänger: kommt `STALL_MS` lang kein neues Bild, gilt das Bild als eingefroren. Ein WebRTC-Strom
+  // meldet dabei kein `waiting`, darum zählt der Wächter Frames; `waiting` nur ohne Frame-Rückruf.
   useEffect(() => {
     const el = video.current;
     if (!el || player.kind !== 'playing') return;
     let timer: number | undefined;
-    const waiting = () => {
+    const arm = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => dispatch({ type: 'stalled' }), STALL_MS);
+      // Ein verdeckter Tab malt keine Frames; das ist kein Hänger.
+      timer = window.setTimeout(() => (document.hidden ? arm() : dispatch({ type: 'stalled' })), STALL_MS);
     };
+    if (typeof el.requestVideoFrameCallback === 'function') {
+      const onFrame = () => {
+        arm();
+        frame = el.requestVideoFrameCallback(onFrame);
+      };
+      let frame = el.requestVideoFrameCallback(onFrame);
+      arm();
+      return () => {
+        window.clearTimeout(timer);
+        el.cancelVideoFrameCallback(frame);
+      };
+    }
     const playing = () => window.clearTimeout(timer);
-    el.addEventListener('waiting', waiting);
+    el.addEventListener('waiting', arm);
     el.addEventListener('playing', playing);
     return () => {
       window.clearTimeout(timer);
-      el.removeEventListener('waiting', waiting);
+      el.removeEventListener('waiting', arm);
       el.removeEventListener('playing', playing);
     };
   }, [video, player]);
