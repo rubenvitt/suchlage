@@ -2822,7 +2822,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "axum-extra",
- "bytes",
  "chrono",
  "futures",
  "getrandom 0.3.4",
@@ -2842,7 +2841,6 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "tokio",
- "tokio-stream",
  "tower",
  "tower-http 0.7.1",
  "tracing",
@@ -3058,7 +3056,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]

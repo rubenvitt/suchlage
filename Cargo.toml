@@ -14,7 +14,6 @@ dev = []
 axum = "0.8"
 axum-extra = { version = "0.12", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "migrate"] }
 # SQLite ist eingebacken: ein SQLite-CVE schließt nur ein Crate-Bump.
@@ -41,7 +40,6 @@ getrandom = "0.3"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 time = "0.3"
-bytes = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
