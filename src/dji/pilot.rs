@@ -27,4 +27,10 @@ pub struct PilotConnection {
     pub mqtt_user: String,
     pub mqtt_pass: String,
     pub rtmp_url: String,
+    /// Modul `api`: Pilot 2 hängt `/map/api/v1/…` an.
+    pub api_host: String,
+    /// Modul `ws`: Kartenelemente-Pushes (`wss://…/pilot/ws`).
+    pub ws_host: String,
+    /// Für `api` und `ws`. Jedes Koppeln erzeugt einen neuen.
+    pub api_token: String,
 }

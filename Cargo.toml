@@ -11,7 +11,7 @@ default = []
 dev = []
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 axum-extra = { version = "0.12", features = ["cookie"] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
@@ -45,6 +45,8 @@ time = "0.3"
 tokio = { version = "1", features = ["full", "test-util"] }
 http-body-util = "0.1"
 tempfile = "3"
+# Gegenstelle für den WebSocket der Kartenelemente; dieselbe Version wie in axum.
+tokio-tungstenite = "0.29"
 
 [profile.dev]
 debug = "line-tables-only"

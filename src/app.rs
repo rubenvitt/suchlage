@@ -70,6 +70,8 @@ pub fn router(state: AppState) -> Router {
         .nest("/api", api)
         // Pilot 2 öffnet `/pilot` direkt, nicht unter `/api`.
         .merge(crate::web::pilot::routes())
+        // Pilot 2 hängt `/map/api/v1/…` an die Wurzel; der WebSocket liegt unter `/pilot/ws`.
+        .merge(crate::web::pilot_map::routes())
         .merge(crate::web::media::internal_routes())
         .fallback(crate::static_files::serve)
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))

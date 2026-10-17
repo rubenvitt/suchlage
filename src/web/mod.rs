@@ -6,4 +6,5 @@ pub mod live;
 pub mod map;
 pub mod media;
 pub mod pilot;
+pub mod pilot_map;
 pub mod streams;

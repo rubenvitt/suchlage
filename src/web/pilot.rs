@@ -103,12 +103,39 @@ async fn connect(
     let (password, stream_key) = credentials(&state, &rc, &req.rc_sn).await?;
     // Idempotent: legt nach einem Broker-Neuaufbau fehlende Zugänge wieder an.
     crate::broker::ensure_rc(&state.mqtt, &req.rc_sn, &password).await?;
+    // Erst nach dem Binden: Ein Token gilt nur für eine gekoppelte Fernsteuerung.
+    let api_token = crate::token::generate();
+    rcs::set_api_token(&state.pool, rc.id, &api_token).await?;
     Ok(Json(PilotConnection {
         mqtt_host: broker.rc_url,
         mqtt_user: crate::broker::dynsec::rc_username(&req.rc_sn),
         mqtt_pass: password,
         rtmp_url: publish_url(&media, &req.rc_sn, &stream_key),
+        api_host: state
+            .boot
+            .public_url
+            .as_str()
+            .trim_end_matches('/')
+            .to_string(),
+        ws_host: ws_url(&state.boot.public_url),
+        api_token,
     }))
+}
+
+/// `https://host` → `wss://host/pilot/ws`, `http://host` → `ws://host/pilot/ws`.
+fn ws_url(public: &url::Url) -> String {
+    let mut url = public.clone();
+    let scheme = if public.scheme() == "https" {
+        "wss"
+    } else {
+        "ws"
+    };
+    url.set_scheme(scheme)
+        .expect("http(s) und ws(s) sind beide besondere Schemata");
+    url.set_path("/pilot/ws");
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
 }
 
 /// MQTT-Passwort und Stream-Schlüssel: gespeichert, wenn die SN schon gebunden ist, sonst beim
@@ -263,12 +290,34 @@ mod tests {
                 .starts_with("rtmp://100.64.0.10:1935/live/RC1?user=rc-RC1&pass=")
         );
         let pass = cfg["mqttPass"].as_str().unwrap().to_string();
+        assert_eq!(cfg["apiHost"], "https://suchlage.test");
+        assert_eq!(cfg["wsHost"], "wss://suchlage.test/pilot/ws");
+        let first_token = cfg["apiToken"].as_str().unwrap().to_string();
+        let rc_of = |token: String| {
+            let pool = app.state.pool.clone();
+            async move {
+                crate::store::remote_controllers::find_by_api_token(&pool, &token)
+                    .await
+                    .unwrap()
+                    .map(|rc| rc.label)
+            }
+        };
+        assert_eq!(
+            rc_of(first_token.clone()).await.as_deref(),
+            Some("RC Plus 1")
+        );
 
         let (_, again) = send(&app.router, connect("RC1")).await;
         assert_eq!(
             again["mqttPass"],
             pass.as_str(),
             "stabil über Neustarts von Pilot 2"
+        );
+        assert_eq!(rc_of(first_token).await, None, "neues Koppeln, neuer Token");
+        assert!(
+            rc_of(again["apiToken"].as_str().unwrap().into())
+                .await
+                .is_some()
         );
         let (status, _) = send(&app.router, connect("RC2")).await;
         assert_eq!(status, StatusCode::CONFLICT, "Code gehört zu RC1");
