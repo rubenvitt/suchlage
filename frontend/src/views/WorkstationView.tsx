@@ -48,7 +48,7 @@ export function WorkstationView() {
   const empty = emptyOf(state, focus);
 
   return (
-    <div className="sl-work" data-swap={swapped}>
+    <div className="sl-work" data-swap={swapped && focus.gateway != null}>
       <div className="sl-work-map">
         <SituationMap
           gateways={gateways}
@@ -62,25 +62,28 @@ export function WorkstationView() {
         {empty && <div className="sl-work-empty">{empty}</div>}
       </div>
       <aside className="sl-work-side" aria-label="Livebild und Flug">
-        <div className="sl-work-tools">
-          {gateways.length > 1 && (
-            <Segmentleiste
-              beschriftung="Fernsteuerung wählen"
-              optionen={gateways.map((g) => ({ wert: g.sn, label: gatewayName(g) }))}
-              wert={focus.gateway?.sn ?? ''}
-              onWechsel={choose}
-            />
-          )}
-          <Button
-            size="small"
-            className="sl-work-swap"
-            aria-pressed={swapped}
-            type={swapped ? 'primary' : 'default'}
-            onClick={() => setSwapped((s) => !s)}
-          >
-            Livebild groß
-          </Button>
-        </div>
+        {/* Ohne Fernsteuerung gibt es nichts zu wählen und kein Bild zum Vergrößern. */}
+        {focus.gateway && (
+          <div className="sl-work-tools">
+            {gateways.length > 1 && (
+              <Segmentleiste
+                beschriftung="Fernsteuerung wählen"
+                optionen={gateways.map((g) => ({ wert: g.sn, label: gatewayName(g) }))}
+                wert={focus.gateway.sn}
+                onWechsel={choose}
+              />
+            )}
+            <Button
+              size="small"
+              className="sl-work-swap"
+              aria-pressed={swapped}
+              type={swapped ? 'primary' : 'default'}
+              onClick={() => setSwapped((s) => !s)}
+            >
+              Livebild groß
+            </Button>
+          </div>
+        )}
         <div className="sl-work-video">
           {focus.gateway ? (
             <VideoPanel

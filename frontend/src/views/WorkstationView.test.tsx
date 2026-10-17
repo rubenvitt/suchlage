@@ -57,6 +57,7 @@ test('ohne Fernsteuerung erklärt die Ansicht den nächsten Schritt', async () =
   expect(screen.getByText(/Einstellungen → Fernsteuerungen/)).toBeInTheDocument();
   expect(screen.getByTestId('karte')).toBeInTheDocument();
   expect(screen.queryByText('Am Boden')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Livebild groß' })).not.toBeInTheDocument();
 });
 
 test('Fernsteuerung ohne Fluggerät', async () => {
