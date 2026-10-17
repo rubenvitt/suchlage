@@ -18,3 +18,7 @@ run = "scripts/dev.sh"
 [tasks."dev:smoke"]
 description = "Ende-zu-Ende-Prüfung gegen echte Container (ACL, update_topo, Flug, Aufnahme, RTMP-Auth)"
 run = "scripts/dev-smoke.sh"
+
+[tasks.e2e]
+description = "Playwright-Smoke: Arbeitsplatz, Großbild, mobil gegen Simulator"
+run = "scripts/e2e.sh"
