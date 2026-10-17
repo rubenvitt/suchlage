@@ -47,6 +47,12 @@ const EMPTY: Collection<never, never> = { type: 'FeatureCollection', features: [
 const OVERVIEW = { center: [10.45, 51.16] as [number, number], zoom: 5 };
 const FIT = { padding: 64, maxZoom: 16, duration: 0 };
 const DEFAULT_LABEL = 'Lagekarte';
+/** MapLibres Bedienhilfen sind englisch; nur diese drei erscheinen ohne eigene Steuerelemente. */
+const LOCALE = {
+  'Map.Title': 'Karte',
+  'AttributionControl.ToggleAttribution': 'Quellenangabe ein- oder ausblenden',
+  'AttributionControl.MapFeedback': 'Rückmeldung zur Karte',
+};
 
 function setData<G, P>(map: maplibregl.Map, source: Source, data: Collection<G, P>) {
   map.getSource<maplibregl.GeoJSONSource>(source)?.setData(data);
@@ -98,6 +104,7 @@ function MapCanvas({
       touchPitch: false,
       dragRotate: false,
       attributionControl: { compact: true },
+      locale: LOCALE,
     });
     // Norden bleibt oben: Der Kurspfeil ist nur so auf einen Blick lesbar.
     map.touchZoomRotate.disableRotation();
