@@ -13,6 +13,7 @@ pub mod runtime;
 pub mod settings;
 pub mod sim;
 pub mod situation;
+pub mod sn;
 pub mod static_files;
 pub mod store;
 pub mod time;

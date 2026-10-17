@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use crate::dji::topic::is_valid_sn;
+use crate::sn::is_valid_sn;
 
 pub const INTERNAL_USER: &str = "suchlage-internal";
 

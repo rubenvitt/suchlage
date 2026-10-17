@@ -10,11 +10,11 @@ use serde::Deserialize;
 
 use crate::app::AppState;
 use crate::dji::pilot::{INDEX_HTML, PILOT_JS, PilotConnection, PilotLicense};
-use crate::dji::topic::is_valid_sn;
 use crate::error::AppError;
 use crate::extract::JsonBody;
 use crate::runtime::streams::publish_url;
 use crate::situation::observation::{Observation, Observed};
+use crate::sn::is_valid_sn;
 use crate::store::remote_controllers::{self as rcs, RemoteController};
 use crate::time::now_ms;
 
