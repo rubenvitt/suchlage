@@ -31,6 +31,8 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .merge(crate::web::auth::routes())
         .merge(crate::web::admin::routes())
+        .merge(crate::web::live::routes())
+        .merge(crate::web::flights::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()

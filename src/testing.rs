@@ -62,9 +62,18 @@ pub async fn test_app() -> TestApp {
 }
 
 impl TestApp {
-    /// Legt ein Konto mit der Rolle an und liefert `suchlage_sid=<token>`.
+    /// Legt ein Konto mit der Rolle an (beim Großbild einen Token) und liefert `suchlage_sid=<token>`.
     pub async fn cookie(&self, role: Role) -> String {
         let pool = &self.state.pool;
+        if role == Role::Kiosk {
+            let (kiosk, _) = crate::store::kiosk::create(pool, "Großbild", 0)
+                .await
+                .unwrap();
+            let token = sessions::create_for_kiosk(pool, kiosk.id, crate::time::now_ms())
+                .await
+                .unwrap();
+            return format!("{}={token}", crate::auth::session::COOKIE);
+        }
         if role == Role::Admin && users::count(pool).await.unwrap() > 0 {
             panic!("Admin zuerst anlegen: das erste Konto wird Admin");
         }
