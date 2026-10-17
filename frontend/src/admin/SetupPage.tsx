@@ -50,6 +50,13 @@ export function SetupPage() {
               : 'Callback-URL wird abgerufen …'}
           </p>
         )}
+        {/* Suchlage kennt keine Freigabe: Wer sich über Pocket ID anmelden darf, wird Operator. */}
+        <Alert
+          type="warning"
+          showIcon
+          title="Client auf die I&K-Gruppe beschränken"
+          description="In Pocket ID beim Client unter „Allowed User Groups“ nur die Gruppe der I&K eintragen. Sonst wird jedes Konto in Pocket ID beim ersten Anmelden Operator und sieht Lage und Livebild."
+        />
         <Form<SetupValues> layout="vertical" onFinish={submit} requiredMark={false}>
           <Form.Item label="Issuer" name="issuer" rules={[{ required: true, message: 'Issuer fehlt' }]}>
             <Input placeholder="https://id.example.org" />
