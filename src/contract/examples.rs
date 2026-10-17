@@ -351,6 +351,9 @@ pub fn live_events() -> Vec<LiveEvent> {
         LiveEvent::MapElementDeleted {
             id: map_elements()[0].id.clone(),
         },
+        LiveEvent::PhotoShot {
+            shot: photo_shots()[0].clone(),
+        },
     ]
 }
 

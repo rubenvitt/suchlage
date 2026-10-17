@@ -63,11 +63,14 @@ pub async fn test_app() -> TestApp {
         pool.clone(),
         settings.clone(),
     );
+    let photos =
+        crate::photos::PhotoHub::new(pool.clone(), settings.clone(), crate::media::http_client());
     let state = AppState {
         boot: Arc::new(boot),
         pool,
         situation,
         settings,
+        photos,
         oidc: Arc::new(crate::auth::oidc::OidcState::new()),
         mqtt,
         streams,

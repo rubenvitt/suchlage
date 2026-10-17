@@ -48,7 +48,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// `AppError` im DJI-Format. Pilot 2 zeigt je Status einen Toast; 401 meldet die Plattform ab.
-pub struct DjiError(AppError);
+pub struct DjiError(pub AppError);
 
 impl From<AppError> for DjiError {
     fn from(e: AppError) -> Self {
@@ -67,9 +67,9 @@ impl IntoResponse for DjiError {
     }
 }
 
-type DjiResult = Result<Json<Value>, DjiError>;
+pub(crate) type DjiResult = Result<Json<Value>, DjiError>;
 
-fn query_param(query: Option<&str>, key: &str) -> Option<String> {
+pub(crate) fn query_param(query: Option<&str>, key: &str) -> Option<String> {
     url::form_urlencoded::parse(query?.as_bytes())
         .find(|(k, _)| k == key)
         .map(|(_, v)| v.into_owned())
@@ -85,7 +85,7 @@ fn token_of(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
 }
 
 /// Fernsteuerung zum Token aus Header oder Query.
-async fn pilot(
+pub(crate) async fn pilot(
     state: &AppState,
     headers: &HeaderMap,
     query: Option<&str>,
@@ -100,7 +100,7 @@ async fn pilot(
 }
 
 /// Eine andere Workspace-ID als in den Einstellungen ist ein anderer Arbeitsbereich: 404.
-fn workspace(state: &AppState, workspace_id: &str) -> Result<(), DjiError> {
+pub(crate) fn workspace(state: &AppState, workspace_id: &str) -> Result<(), DjiError> {
     let dji = state.settings.current().dji.ok_or_else(|| {
         AppError::Unavailable("DJI-App-Daten fehlen (Einstellungen → DJI)".into())
     })?;
@@ -110,7 +110,7 @@ fn workspace(state: &AppState, workspace_id: &str) -> Result<(), DjiError> {
     Ok(())
 }
 
-fn parse<T: DeserializeOwned>(body: &Bytes) -> Result<T, DjiError> {
+pub(crate) fn parse<T: DeserializeOwned>(body: &Bytes) -> Result<T, DjiError> {
     serde_json::from_slice(body)
         .map_err(|e| AppError::Validation(format!("Ungültige Anfrage: {e}")).into())
 }

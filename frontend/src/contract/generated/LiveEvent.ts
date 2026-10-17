@@ -3,6 +3,7 @@ import type { AircraftState } from "./AircraftState";
 import type { FlightSummary } from "./FlightSummary";
 import type { GatewayState } from "./GatewayState";
 import type { MapElement } from "./MapElement";
+import type { PhotoShot } from "./PhotoShot";
 import type { SituationSnapshot } from "./SituationSnapshot";
 import type { StreamState } from "./StreamState";
 import type { SystemStatus } from "./SystemStatus";
@@ -11,4 +12,4 @@ import type { TrackPoint } from "./TrackPoint";
 /**
  * Eine SSE-Nachricht. Das Feld `type` unterscheidet die Varianten.
  */
-export type LiveEvent = { "type": "snapshot", snapshot: SituationSnapshot, } | { "type": "gateway", gateway: GatewayState, } | { "type": "aircraft", aircraft: AircraftState, } | { "type": "track_point", flight_id: number, segment: number, point: TrackPoint, } | { "type": "flight_started", flight: FlightSummary, } | { "type": "flight_ended", flight: FlightSummary, } | { "type": "stream", stream: StreamState, } | { "type": "system", system: SystemStatus, } | { "type": "map_elements", elements: Array<MapElement>, } | { "type": "map_element", element: MapElement, } | { "type": "map_element_deleted", id: string, };
+export type LiveEvent = { "type": "snapshot", snapshot: SituationSnapshot, } | { "type": "gateway", gateway: GatewayState, } | { "type": "aircraft", aircraft: AircraftState, } | { "type": "track_point", flight_id: number, segment: number, point: TrackPoint, } | { "type": "flight_started", flight: FlightSummary, } | { "type": "flight_ended", flight: FlightSummary, } | { "type": "stream", stream: StreamState, } | { "type": "system", system: SystemStatus, } | { "type": "map_elements", elements: Array<MapElement>, } | { "type": "map_element", element: MapElement, } | { "type": "map_element_deleted", id: string, } | { "type": "photo_shot", shot: PhotoShot, };
