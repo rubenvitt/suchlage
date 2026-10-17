@@ -114,11 +114,25 @@
 .sl-kiosk-strip {
   grid-area: strip;
 }
-/* Die acht Zellen des Großbilds (`KIOSK_VALUES` und das Alter) in einer Zeile. Bei 1920 px bekommt
-   der Modus Platz für „Rückkehr zum / Startpunkt“ und das Alter für „Verbindung verloren /
-   14:31:02“, jeweils in den zwei Wertzeilen, die die Leiste im Großbild ohnehin freihält. */
+/* Die acht Zellen des Großbilds (`KIOSK_VALUES` und das Alter). Schmaler als 1900 px in zwei Zeilen
+   zu fünf Spuren: oben die fünf Zahlen, unten Modus (2) · Flugzeit · Alter (2). So brechen weder
+   Ziffern noch Einheiten um, und „Rückkehr zum Startpunkt“ und „Verbindung verloren 14:31:02“
+   passen bei 1280 px in die zwei Wertzeilen, die die Leiste im Großbild ohnehin freihält. */
 .sl-kiosk-strip .sl-strip[data-size='large'] {
-  grid-template-columns: repeat(5, minmax(0, 8fr)) minmax(0, 13fr) minmax(0, 8fr) minmax(0, 20fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.sl-kiosk-strip .sl-strip[data-size='large'] :is(.sl-strip-cell[data-key='mode'], .sl-strip-age) {
+  grid-column: span 2;
+}
+/* Ab 1900 px in einer Zeile. Der Modus braucht für „Rückkehr zum“ 13 Teile, das Alter für
+   „Verbindung verloren“ 20; darunter bräche der Modus in drei Zeilen (gemessen bei 1700 px). */
+@media (min-width: 1900px) {
+  .sl-kiosk-strip .sl-strip[data-size='large'] {
+    grid-template-columns: repeat(5, minmax(0, 8fr)) minmax(0, 13fr) minmax(0, 8fr) minmax(0, 20fr);
+  }
+  .sl-kiosk-strip .sl-strip[data-size='large'] :is(.sl-strip-cell[data-key='mode'], .sl-strip-age) {
+    grid-column: auto;
+  }
 }
 
 /* Mobil: eine Spalte, die Seite scrollt. Die Karte füllt den Rest, mindestens die halbe Bildschirmhöhe. */

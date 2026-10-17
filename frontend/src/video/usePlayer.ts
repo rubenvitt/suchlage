@@ -29,21 +29,25 @@ export function usePlayer(video: RefObject<HTMLVideoElement | null>, gatewaySn: 
     const el = video.current;
     if (!transport || !el) return;
     let session: MediaSession | undefined;
-    let cancelled = false;
+    // Bricht auch eine noch laufende WHEP-Aushandlung ab, nicht nur die fertige Sitzung.
+    const abort = new AbortController();
+    const cancelled = () => abort.signal.aborted;
     const cb = {
-      onConnected: () => !cancelled && dispatch({ type: 'connected' }),
-      onFailed: () => !cancelled && dispatch({ type: 'failed' }),
+      onConnected: () => !cancelled() && dispatch({ type: 'connected' }),
+      onFailed: () => !cancelled() && dispatch({ type: 'failed' }),
     };
     const base = `/api/video/${encodeURIComponent(gatewaySn)}`;
     const start =
-      transport === 'webrtc' ? startWhep(`${base}/whep`, el, cb) : startHls(`${base}/hls/index.m3u8`, el, cb);
+      transport === 'webrtc'
+        ? startWhep(`${base}/whep`, el, cb, abort.signal)
+        : startHls(`${base}/hls/index.m3u8`, el, cb);
     start
-      .then((s) => (cancelled ? s.close() : (session = s)))
+      .then((s) => (cancelled() ? s.close() : (session = s)))
       .catch(
-        (e: unknown) => !cancelled && dispatch({ type: e instanceof WhepNotReady ? 'not_ready' : 'failed' }),
+        (e: unknown) => !cancelled() && dispatch({ type: e instanceof WhepNotReady ? 'not_ready' : 'failed' }),
       );
     return () => {
-      cancelled = true;
+      abort.abort();
       session?.close();
     };
   }, [video, gatewaySn, transport, attempt]);

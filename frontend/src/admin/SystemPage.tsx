@@ -15,7 +15,7 @@ const BROKER: Record<BrokerStatus, Chip> = {
 };
 
 const LIVE: Record<ConnectionStatus, Chip> = {
-  open: { ton: 'normal', wort: 'steht' },
+  open: { ton: 'normal', wort: 'verbunden' },
   connecting: { ton: 'neutral', wort: 'verbindet' },
   reconnecting: { ton: 'alarm', wort: 'getrennt – baut neu auf' },
 };

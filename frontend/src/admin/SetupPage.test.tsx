@@ -24,6 +24,7 @@ test('Einrichtung sendet Token und Pocket-ID-Daten und zeigt die Callback-Adress
   );
   renderWithApp(<SetupPage />, { route: '/einrichtung' });
   expect(await screen.findByText(authOptionsOidc.redirect_url)).toBeInTheDocument();
+  expect(screen.getByText('Client auf die I&K-Gruppe beschränken')).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText('Issuer'), 'https://id.example.org');
   await userEvent.type(screen.getByLabelText('Client-ID'), 'suchlage');
   await userEvent.type(screen.getByLabelText('Client-Secret'), 'geheim');

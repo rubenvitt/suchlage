@@ -26,17 +26,25 @@ function gathered(pc: RTCPeerConnection): Promise<void> {
   });
 }
 
-/** WHEP ohne Trickle-ICE: alle Kandidaten im Offer, die Signalisierung läuft über den Server-Proxy. */
+/**
+ * WHEP ohne Trickle-ICE: alle Kandidaten im Offer, die Signalisierung läuft über den Server-Proxy.
+ * `signal` bricht ab, wenn der Player inzwischen weiter ist (ICE-Frist, HLS, andere Fernsteuerung):
+ * Eine späte Antwort darf dann kein Bild mehr ans Element hängen, `srcObject` ginge vor HLS.
+ */
 export async function startWhep(
   url: string,
   video: HTMLVideoElement,
   cb: MediaCallbacks,
+  signal: AbortSignal,
 ): Promise<MediaSession> {
   const pc = new RTCPeerConnection();
+  // Eine geschlossene Verbindung lässt auch eine laufende Aushandlung scheitern.
+  signal.addEventListener('abort', () => pc.close(), { once: true });
   try {
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.addTransceiver('audio', { direction: 'recvonly' });
     pc.ontrack = (e) => {
+      if (signal.aborted) return;
       video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
       void video.play().catch(() => {});
     };
@@ -51,6 +59,7 @@ export async function startWhep(
       credentials: 'same-origin',
       headers: { 'content-type': 'application/sdp' },
       body: pc.localDescription!.sdp,
+      signal,
     });
     if (!res.ok) throw res.status === 404 ? new WhepNotReady('WHEP 404') : new Error(`WHEP ${res.status}`);
     await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });

@@ -82,6 +82,7 @@ test('laufender Stream verbindet und zeigt die Linsenwahl', () => {
     '/api/video/RCSIM0001/whep',
     expect.any(HTMLVideoElement),
     expect.anything(),
+    expect.any(AbortSignal),
   );
   expect(screen.getByRole('radiogroup', { name: 'Linse wählen' })).toBeInTheDocument();
   expect(screen.getByRole('radio', { name: 'Weit' })).toHaveAttribute('aria-checked', 'true');
@@ -138,6 +139,17 @@ test('ohne ICE-Verbindung wechselt das Paneel nach der Frist auf HLS', async () 
     expect.anything(),
   );
   expect(screen.getByText('H20N · verzögert (HLS)')).toBeInTheDocument();
+});
+
+// Antwortet WHEP erst nach der Frist, darf die späte Antwort das HLS-Bild nicht verdecken (whep.test.ts).
+test('nach der ICE-Frist bricht das Paneel eine noch offene WHEP-Aushandlung ab', async () => {
+  vi.useFakeTimers();
+  renderWithApp(<VideoPanel gatewaySn="RCSIM0001" stream={live} sources={sources} canControl={false} />);
+  const signal = vi.mocked(startWhep).mock.calls[0]![3];
+  expect(signal.aborted).toBe(false);
+  await act(() => vi.advanceTimersByTimeAsync(ICE_TIMEOUT_MS));
+  expect(startHls).toHaveBeenCalled();
+  expect(signal.aborted).toBe(true);
 });
 
 // Review Focus 2: ein WHEP 404 kurz nach dem Streamstart ist kein Grund für den Rückfall.
@@ -263,6 +275,7 @@ test('wechselt die Fernsteuerung, verbindet das Paneel neu mit WebRTC', async ()
     '/api/video/RCSIM0002/whep',
     expect.any(HTMLVideoElement),
     expect.anything(),
+    expect.any(AbortSignal),
   );
   expect(screen.getByText('Verbindet …')).toBeInTheDocument();
 });

@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
-import { useFlights } from '../api/queries';
-import { flightList, liveEvents, snapshotFlying } from '../contract/fixtures.generated';
+import { useFlight, useFlights } from '../api/queries';
+import { flightDetail, flightList, liveEvents, snapshotFlying } from '../contract/fixtures.generated';
 import type { LiveEvent } from '../contract/generated/LiveEvent';
 import { server } from '../test/server';
 import { LiveProvider, useConnectionStatus, useLive, useServerNow } from './LiveProvider';
@@ -44,28 +44,65 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test('verbindet sich selbst, zeigt Live-Stand und erneuert die Flugliste bei Flugereignissen', async () => {
-  vi.stubGlobal('EventSource', FakeSource);
-  let flightRequests = 0;
+/** Zählt die Abrufe von Flugliste und Flugdetail. */
+function countFlightRequests() {
+  const count = { list: 0, detail: 0 };
   server.use(
     http.get('/api/flights', () => {
-      flightRequests += 1;
+      count.list += 1;
       return HttpResponse.json(flightList);
     }),
+    http.get('/api/flights/:id', () => {
+      count.detail += 1;
+      return HttpResponse.json(flightDetail);
+    }),
   );
+  return count;
+}
+
+function DetailProbe() {
+  const detail = useFlight(flightDetail.flight.id);
+  return <p>{detail.data ? 'Detail da' : 'Detail lädt'}</p>;
+}
+
+test('verbindet sich selbst, zeigt Live-Stand und erneuert die Flugliste bei Flugereignissen', async () => {
+  vi.stubGlobal('EventSource', FakeSource);
+  const count = countFlightRequests();
   render(withClient(<LiveProvider url="/api/live"><Probe /></LiveProvider>));
   expect(FakeSource.last.url).toBe('/api/live');
   expect(await screen.findByText(`connecting · 0 Fluggeräte · ${flightList.length} Flüge`)).toBeInTheDocument();
-  expect(flightRequests).toBe(1);
+  expect(count.list).toBe(1);
 
   act(() => FakeSource.last.onopen?.());
   send({ type: 'snapshot', snapshot: snapshotFlying });
   expect(screen.getByText(`open · 1 Fluggeräte · ${flightList.length} Flüge`)).toBeInTheDocument();
+  await vi.waitFor(() => expect(count.list).toBe(2));
 
   send(liveEvents.find((e) => e.type === 'aircraft')!);
-  expect(flightRequests).toBe(1);
+  await new Promise((r) => setTimeout(r, 20));
+  expect(count.list).toBe(2);
   send(liveEvents.find((e) => e.type === 'flight_ended')!);
-  await vi.waitFor(() => expect(flightRequests).toBe(2));
+  await vi.waitFor(() => expect(count.list).toBe(3));
+});
+
+// Fällt eine Landung in eine SSE-Lücke, kommt beim Neuverbinden nur ein Snapshot.
+test('nach dem Neuverbinden laden Flugliste und Flugdetail neu', async () => {
+  vi.stubGlobal('EventSource', FakeSource);
+  const count = countFlightRequests();
+  render(
+    withClient(
+      <LiveProvider url="/api/live">
+        <Probe />
+        <DetailProbe />
+      </LiveProvider>,
+    ),
+  );
+  expect(await screen.findByText('Detail da')).toBeInTheDocument();
+  await vi.waitFor(() => expect(count).toEqual({ list: 1, detail: 1 }));
+
+  act(() => FakeSource.last.onerror?.());
+  send({ type: 'snapshot', snapshot: snapshotFlying });
+  await vi.waitFor(() => expect(count).toEqual({ list: 2, detail: 2 }));
 });
 
 test('ein übergebener Speicher ersetzt die Verbindung', () => {
