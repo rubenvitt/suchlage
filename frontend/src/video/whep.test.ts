@@ -12,7 +12,7 @@ class FakePeer {
   transceivers: string[] = [];
   closed = false;
   onconnectionstatechange: (() => void) | null = null;
-  ontrack: unknown = null;
+  ontrack: ((e: { streams: object[] }) => void) | null = null;
   constructor() {
     FakePeer.last = this;
   }
@@ -55,7 +55,7 @@ test('schickt das Angebot als SDP und übernimmt die Antwort', async () => {
       return new HttpResponse('v=0 answer', { status: 201, headers: { 'content-type': 'application/sdp' } });
     }),
   );
-  const session = await startWhep(WHEP_URL, document.createElement('video'), callbacks());
+  const session = await startWhep(WHEP_URL, document.createElement('video'), callbacks(), new AbortController().signal);
   const pc = FakePeer.last;
   expect(request).toEqual({ type: 'application/sdp', body: 'v=0 offer' });
   expect(pc.transceivers).toEqual(['video', 'audio']);
@@ -68,7 +68,7 @@ test('schickt das Angebot als SDP und übernimmt die Antwort', async () => {
 test('meldet Verbindung und Abbruch der Peer-Verbindung', async () => {
   answer(201);
   const cb = callbacks();
-  await startWhep(WHEP_URL, document.createElement('video'), cb);
+  await startWhep(WHEP_URL, document.createElement('video'), cb, new AbortController().signal);
   FakePeer.last.enter('connected');
   expect(cb.onConnected).toHaveBeenCalledTimes(1);
   FakePeer.last.enter('disconnected');
@@ -80,7 +80,7 @@ test('meldet Verbindung und Abbruch der Peer-Verbindung', async () => {
 // Review Focus 2: Pilot 2 sendet kurz nach dem Streamstart noch nicht – das ist kein Fehlversuch.
 test('WHEP 404 heißt „noch nicht bereit“ und schließt die Verbindung', async () => {
   answer(404);
-  await expect(startWhep(WHEP_URL, document.createElement('video'), callbacks())).rejects.toBeInstanceOf(
+  await expect(startWhep(WHEP_URL, document.createElement('video'), callbacks(), new AbortController().signal)).rejects.toBeInstanceOf(
     WhepNotReady,
   );
   expect(FakePeer.last.closed).toBe(true);
@@ -88,7 +88,7 @@ test('WHEP 404 heißt „noch nicht bereit“ und schließt die Verbindung', asy
 
 test('andere WHEP-Fehler sind echte Fehlversuche', async () => {
   answer(502);
-  const result = startWhep(WHEP_URL, document.createElement('video'), callbacks());
+  const result = startWhep(WHEP_URL, document.createElement('video'), callbacks(), new AbortController().signal);
   await expect(result).rejects.toThrow('WHEP 502');
   await expect(result).rejects.not.toBeInstanceOf(WhepNotReady);
   expect(FakePeer.last.closed).toBe(true);
@@ -96,6 +96,40 @@ test('andere WHEP-Fehler sind echte Fehlversuche', async () => {
 
 test('ohne Netz bleibt keine Peer-Verbindung offen', async () => {
   server.use(http.post(WHEP_URL, () => HttpResponse.error()));
-  await expect(startWhep(WHEP_URL, document.createElement('video'), callbacks())).rejects.toThrow();
+  await expect(startWhep(WHEP_URL, document.createElement('video'), callbacks(), new AbortController().signal)).rejects.toThrow();
   expect(FakePeer.last.closed).toBe(true);
+});
+
+// Kommt die Antwort erst nach der ICE-Frist, läuft schon HLS. Das späte WebRTC-Bild darf es nicht
+// verdecken: `srcObject` hat Vorrang vor `src` und der MSE-Quelle von hls.js.
+test('nach dem Abbruch hängt eine späte WHEP-Antwort kein Bild mehr ans Video', async () => {
+  let release!: () => void;
+  const answered = new Promise<void>((r) => (release = r));
+  server.use(
+    http.post(WHEP_URL, async () => {
+      await answered;
+      return new HttpResponse('v=0 answer', { status: 201 });
+    }),
+  );
+  const video = document.createElement('video');
+  video.srcObject = null; // jsdom kennt srcObject nicht
+  const abort = new AbortController();
+  const result = startWhep(WHEP_URL, video, callbacks(), abort.signal);
+  await vi.waitFor(() => expect(FakePeer.last.localDescription).not.toBeNull());
+  abort.abort();
+  release();
+  await expect(result).rejects.toThrow();
+  expect(FakePeer.last.closed).toBe(true);
+  FakePeer.last.ontrack?.({ streams: [{}] });
+  expect(video.srcObject).toBeNull();
+});
+
+test('vor dem Abbruch hängt ein Track sein Bild ans Video', async () => {
+  answer(201);
+  const video = document.createElement('video');
+  video.play = () => Promise.resolve(); // jsdom spielt nicht ab
+  await startWhep(WHEP_URL, video, callbacks(), new AbortController().signal);
+  const stream = {};
+  FakePeer.last.ontrack?.({ streams: [stream] });
+  expect(video.srcObject).toBe(stream);
 });
