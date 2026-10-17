@@ -2,13 +2,15 @@
 //! Endpunkte etwas Geheimes heraus (Review Focus 1).
 
 use axum::extract::State;
-use axum::http::header;
+use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::app::AppState;
+use crate::contract::{DeviceLogEntry, DeviceLogLevel, DeviceLogSource};
+use crate::dji::devlog::mask_passwords;
 use crate::dji::pilot::{INDEX_HTML, PILOT_JS, PilotConnection, PilotLicense};
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -27,6 +29,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/pilot/api/license", post(license))
         .route("/pilot/api/connect", post(connect))
+        .route("/pilot/api/log", post(log))
 }
 
 fn asset(mime: &str, body: &'static str) -> impl IntoResponse {
@@ -49,6 +52,25 @@ struct ConnectRequest {
     code: String,
     rc_sn: String,
 }
+
+#[derive(Deserialize)]
+struct LogRequest {
+    code: String,
+    lines: Vec<LogLine>,
+}
+
+#[derive(Deserialize)]
+struct LogLine {
+    /// Uhr der Fernsteuerung; weicht sie stark ab, gilt die Empfangszeit.
+    at_ms: i64,
+    level: DeviceLogLevel,
+    text: String,
+}
+
+/// Mehr Zeilen schickt die Seite nie auf einmal.
+const LOG_BATCH: usize = 50;
+const LOG_LINE_CHARS: usize = 500;
+const CLOCK_SKEW_MS: i64 = 10 * 60_000;
 
 async fn by_code(state: &AppState, code: &str) -> Result<RemoteController, AppError> {
     let rejected = || {
@@ -120,6 +142,44 @@ async fn connect(
         ws_host: ws_url(&state.boot.public_url),
         api_token,
     }))
+}
+
+/// Protokollzeilen der Pilot-Seite ins Funkprotokoll: So sieht die Systemseite, was die JSBridge
+/// meldet (Verbindung, Livebild), auch wenn MQTT gerade nicht läuft.
+async fn log(
+    State(state): State<AppState>,
+    JsonBody(req): JsonBody<LogRequest>,
+) -> Result<StatusCode, AppError> {
+    if req.lines.len() > LOG_BATCH {
+        return Err(AppError::Validation(format!(
+            "Höchstens {LOG_BATCH} Zeilen je Anfrage"
+        )));
+    }
+    let rc = by_code(&state, &req.code).await?;
+    let now = now_ms();
+    for line in req.lines {
+        let text: String = line.text.chars().take(LOG_LINE_CHARS).collect();
+        let summary = match &rc.sn {
+            Some(_) => mask_passwords(&text),
+            None => format!("{}: {}", rc.label, mask_passwords(&text)),
+        };
+        state.devlog.push(DeviceLogEntry {
+            seq: 0,
+            at_ms: if (line.at_ms - now).abs() < CLOCK_SKEW_MS {
+                line.at_ms
+            } else {
+                now
+            },
+            source: DeviceLogSource::Pilot,
+            level: line.level,
+            device_sn: rc.sn.clone(),
+            topic: None,
+            method: None,
+            summary,
+            payload: None,
+        });
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `https://host` → `wss://host/pilot/ws`, `http://host` → `ws://host/pilot/ws`.
@@ -325,6 +385,49 @@ mod tests {
             .await
             .unwrap();
         assert!(bound.is_some(), "RC1 bleibt gekoppelt");
+    }
+
+    #[tokio::test]
+    async fn pilot_log_lines_reach_the_device_log_only_with_a_valid_code() {
+        let app = test_app().await;
+        let code = configured(&app).await;
+        let line =
+            |text: &str| json!({"at_ms": crate::time::now_ms(), "level": "warn", "text": text});
+        let (status, _) = send(
+            &app.router,
+            post_json(
+                "/pilot/api/log",
+                json!({"code": "falsch", "lines": [line("x")]}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = send(
+            &app.router,
+            post_json(
+                "/pilot/api/log",
+                json!({"code": code, "lines": [line("Verbindung zu Suchlage: getrennt"), line("url pass=GEHEIM")]}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (history, _) = app.state.devlog.subscribe();
+        let texts: Vec<_> = history.iter().map(|e| e.summary.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "RC Plus 1: Verbindung zu Suchlage: getrennt",
+                "RC Plus 1: url pass=***"
+            ]
+        );
+        assert_eq!(history[0].source, crate::contract::DeviceLogSource::Pilot);
+        let many: Vec<_> = (0..51).map(|_| line("x")).collect();
+        let (status, _) = send(
+            &app.router,
+            post_json("/pilot/api/log", json!({"code": code, "lines": many})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

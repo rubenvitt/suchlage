@@ -51,6 +51,8 @@ export function VideoPanel({ gatewaySn, stream, sources, canControl }: Props) {
   const overlay = isLive ? playerMessage(player) : streamMessage(stream, canControl);
   const look = (player.kind === 'retrying' || player.kind === 'connecting') && player.hadPicture ? 'stalled' : player.kind;
   const busy = stream?.phase === 'starting' || stream?.phase === 'stopping';
+  // Steht der Grund schon im Bild (`failed`), nicht noch einmal darunter.
+  const note = error && error !== overlay ? error : null;
 
   const actions = canControl && !busy && (
     <div className="sl-video-actions">
@@ -71,9 +73,9 @@ export function VideoPanel({ gatewaySn, stream, sources, canControl }: Props) {
           {stream?.phase === 'failed' ? 'Erneut versuchen' : 'Livebild starten'}
         </Button>
       )}
-      {(error || command.isPending) && (
-        <p className="sl-video-note" role={error ? 'alert' : 'status'}>
-          {error || PENDING}
+      {(note || command.isPending) && (
+        <p className="sl-video-note" role={note ? 'alert' : 'status'}>
+          {note || PENDING}
         </p>
       )}
     </div>

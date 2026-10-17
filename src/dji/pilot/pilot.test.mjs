@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PairingError, connect, connectMap, pair, readRcSn, startManualLive, verify } from "./pilot.js";
+import { PairingError, connect, connectMap, isConnected, liveStatus, pair, readRcSn, remoteLog, startManualLive, verify } from "./pilot.js";
 
 const lic = { appId: "1", appKey: "k", license: "l", workspaceId: "768d4a2e-1f34-477c-9fcc-872285e895f6", rcLabel: "RC Plus 1" };
 const conn = { mqttHost: "tcp://127.0.0.1:1883", mqttUser: "rc-RCSN01", mqttPass: "p", rtmpUrl: "rtmp://127.0.0.1:1935/live/RCSN01?user=rc-RCSN01&pass=x" };
@@ -100,4 +100,69 @@ test("startManualLive setzt RTMP und startet", () => {
   startManualLive(conn, bridge, () => {});
   assert.deepEqual(calls[0], ["liveshareSetConfig", 2, JSON.stringify({ url: conn.rtmpUrl })]);
   assert.equal(calls[1][0], "liveshareStartLive");
+});
+
+test("verify meldet Fehler der JSBridge als Fehlerzeile", () => {
+  const { bridge } = fakeBridge({ failing: { platformVerifyLicense: true } });
+  const levels = [];
+  assert.throws(() => verify(lic, bridge, (m, level) => levels.push(level)));
+  assert.deepEqual(levels, ["error"]);
+});
+
+test("isConnected versteht Boolean und Text", () => {
+  assert.equal(isConnected(true), true);
+  assert.equal(isConnected("true"), true);
+  assert.equal(isConnected(false), false);
+  assert.equal(isConnected("false"), false);
+});
+
+test("liveStatus macht aus dem Objekt lesbaren Text und ändert den Schlüssel nur mit dem Zustand", () => {
+  const a = liveStatus({ status: 1, fps: 30 });
+  assert.equal(a.text, '{"status":1,"fps":30}');
+  assert.equal(liveStatus('{"status":1,"fps":25}').key, a.key, "nur die Bildrate ist anders");
+  assert.notEqual(liveStatus({ status: 2, fps: 30 }).key, a.key);
+  assert.equal(liveStatus({ fps: 30 }).key, '{"fps":30}', "ohne Zustandsfeld zählt alles");
+  assert.deepEqual(liveStatus("kein json"), { text: "kein json", key: "kein json" });
+  assert.equal(liveStatus(3).text, "3");
+});
+
+function manualTimers() {
+  const pending = [];
+  return { schedule: (fn) => { pending.push(fn); return pending.length; }, run: async () => { const fns = pending.splice(0); for (const f of fns) await f(); } };
+}
+
+test("remoteLog bündelt Zeilen, schickt Fehler sofort und behält sie ohne Netz", async () => {
+  const sent = [];
+  let online = true;
+  const post = async (path, body) => {
+    if (!online) throw new Error("offline");
+    sent.push([path, body]);
+    return { ok: true, body: {} };
+  };
+  const timers = manualTimers();
+  const log = remoteLog("CODE", post, { now: () => 5, schedule: timers.schedule });
+  log.add("a");
+  log.add("b", "warn");
+  assert.equal(sent.length, 0, "gebündelt");
+  await timers.run();
+  assert.deepEqual(sent[0], ["/pilot/api/log", { code: "CODE", lines: [
+    { at_ms: 5, level: "info", text: "a" }, { at_ms: 5, level: "warn", text: "b" },
+  ] }]);
+
+  online = false;
+  await log.add("kaputt", "error");
+  assert.equal(sent.length, 1, "ohne Netz nichts gesendet");
+  online = true;
+  await timers.run();
+  assert.equal(sent[1][1].lines[0].text, "kaputt", "beim nächsten Versuch nachgeholt");
+});
+
+test("remoteLog verwirft Zeilen, die der Server abgelehnt hat", async () => {
+  const sent = [];
+  const post = async (_, body) => { sent.push(body); return { ok: false, body: {} }; };
+  const timers = manualTimers();
+  const log = remoteLog("FALSCH", post, { schedule: timers.schedule });
+  await log.add("x", "error");
+  await timers.run();
+  assert.equal(sent.length, 1, "kein Wiederholen ohne Aussicht");
 });

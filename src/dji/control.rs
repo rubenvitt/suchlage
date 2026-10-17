@@ -1,9 +1,10 @@
 //! Livebild-Befehle an Pilot 2 mit Domänenargumenten. Außerhalb von `dji/` sieht niemand
 //! Methodennamen oder Ergebniscodes.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::contract::Lens;
+use crate::contract::{DeviceLogLevel, Lens};
+use crate::devlog::DeviceLog;
 use crate::mqtt::{Correlation, LinkError, MqttLink};
 use crate::time::now_ms;
 
@@ -27,11 +28,12 @@ pub enum ControlError {
 #[derive(Clone)]
 pub struct LiveControl {
     link: MqttLink,
+    devlog: DeviceLog,
 }
 
 impl LiveControl {
-    pub fn new(link: MqttLink) -> Self {
-        Self { link }
+    pub fn new(link: MqttLink, devlog: DeviceLog) -> Self {
+        Self { link, devlog }
     }
 
     async fn call(
@@ -41,30 +43,68 @@ impl LiveControl {
         data: serde_json::Value,
     ) -> Result<(), ControlError> {
         let (tid, payload) = command::envelope(method, data, now_ms());
+        let started = Instant::now();
         let reply = self
             .link
             .request(
                 topic::services(gateway_sn),
                 payload,
-                Correlation::Tid(tid),
+                Correlation::Tid(tid.clone()),
                 TIMEOUT,
             )
             .await;
-        match reply {
+        let ms = started.elapsed().as_millis() as u64;
+        let result = match reply {
             Ok(reply) => match reply["result"].as_i64() {
                 Some(0) => Ok(()),
-                Some(code) => Err(ControlError::Refused(live_error_text(code))),
+                Some(code) => {
+                    tracing::warn!(
+                        gateway = gateway_sn,
+                        method,
+                        tid,
+                        code,
+                        ms,
+                        "Befehl abgelehnt"
+                    );
+                    Err(ControlError::Refused(live_error_text(code)))
+                }
                 None => Err(ControlError::Refused(
                     "Pilot 2 antwortet ohne Ergebnis.".into(),
                 )),
             },
-            Err(LinkError::Timeout) => Err(ControlError::Refused(
-                "Pilot 2 antwortet nicht (keine Antwort in 10 s).".into(),
-            )),
-            Err(e @ (LinkError::NotConnected | LinkError::Closed)) => Err(
-                ControlError::Unreachable(format!("Befehl nicht gesendet: {e}.")),
-            ),
+            Err(LinkError::Timeout) => {
+                tracing::warn!(gateway = gateway_sn, method, tid, ms, "Befehl ohne Antwort");
+                self.devlog.system(
+                    DeviceLogLevel::Error,
+                    Some(gateway_sn),
+                    format!(
+                        "{method}: keine Antwort in {} s · tid {}",
+                        TIMEOUT.as_secs(),
+                        short(&tid)
+                    ),
+                );
+                Err(ControlError::Refused(format!(
+                    "Pilot 2 antwortet nicht (keine Antwort in {} s). Ist die Flugansicht offen? \
+                     Läuft dort schon ein manuell gestartetes Livebild?",
+                    TIMEOUT.as_secs()
+                )))
+            }
+            Err(e @ (LinkError::NotConnected | LinkError::Closed)) => {
+                tracing::warn!(gateway = gateway_sn, method, error = %e, "Befehl nicht gesendet");
+                self.devlog.system(
+                    DeviceLogLevel::Error,
+                    Some(gateway_sn),
+                    format!("{method} nicht gesendet: {e}"),
+                );
+                Err(ControlError::Unreachable(format!(
+                    "Befehl nicht gesendet: {e}."
+                )))
+            }
+        };
+        if result.is_ok() {
+            tracing::info!(gateway = gateway_sn, method, tid, ms, "Befehl bestätigt");
         }
+        result
     }
 
     pub async fn start(
@@ -103,4 +143,8 @@ impl LiveControl {
         )
         .await
     }
+}
+
+fn short(tid: &str) -> String {
+    tid.chars().take(8).collect()
 }

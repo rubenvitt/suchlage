@@ -9,12 +9,14 @@ use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use sqlx::SqlitePool;
 use tokio::sync::{mpsc, watch};
 
+use super::devlog::{Describer, outbound};
 use super::link::Inbox;
 use super::record::RecordLine;
 use super::recorder::Recorder;
 use super::topic::SUBSCRIPTIONS;
 use crate::broker::dynsec;
-use crate::contract::BrokerStatus;
+use crate::contract::{BrokerStatus, DeviceLogLevel};
+use crate::devlog::DeviceLog;
 use crate::mqtt::{DYNSEC_RESPONSE_TOPIC, DYNSEC_TOPIC, LinkError, LinkRequest};
 use crate::settings::{BrokerSettings, Settings};
 use crate::situation::observation::{Observation, Observed};
@@ -112,14 +114,28 @@ async fn wait_for_settings(
     }
 }
 
+/// Was die Sitzung außer dem Broker braucht.
+pub struct SessionDeps {
+    pub observer: mpsc::Sender<Observed>,
+    pub pool: SqlitePool,
+    pub records_dir: PathBuf,
+    /// Funkprotokoll für die Systemseite.
+    pub devlog: DeviceLog,
+}
+
 pub async fn run(
     mut settings: watch::Receiver<Settings>,
-    observer: mpsc::Sender<Observed>,
-    pool: SqlitePool,
-    records_dir: PathBuf,
+    deps: SessionDeps,
     mut requests: mpsc::Receiver<LinkRequest>,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let SessionDeps {
+        observer,
+        pool,
+        records_dir,
+        devlog,
+    } = deps;
+    let mut describer = Describer::new();
     let mut recorder: Option<Recorder> = None;
     // Einmal je Prozess: über Neuverbindungen hinweg bleibt der Merge-Stand des Übersetzers erhalten.
     let mut inbox = restored_inbox(&pool, &observer).await;
@@ -160,6 +176,7 @@ pub async fn run(
                         if let Err(e) = client.try_publish(DYNSEC_TOPIC, QoS::AtLeastOnce, false, payload) {
                             tracing::error!(error = %e, "Serverrolle nicht gesetzt");
                         }
+                        devlog.system(DeviceLogLevel::Info, None, format!("Broker {}:{} verbunden", broker.host, broker.port));
                         report(&observer, Observation::Broker(BrokerStatus::Connected)).await;
                     }
                     Ok(Event::Incoming(Packet::Publish(p))) => {
@@ -169,11 +186,17 @@ pub async fn run(
                         {
                             tracing::warn!(error = %e, "Rohmitschnitt: Schreiben fehlgeschlagen");
                         }
+                        if let Some(entry) = describer.inbound(at, &p.topic, &p.payload) {
+                            devlog.push(entry);
+                        }
                         let out = inbox.on_publish(at, &p.topic, &p.payload);
                         for o in out.observations {
                             let _ = observer.send(o).await;
                         }
                         for msg in out.publish {
+                            if let Some(entry) = outbound(at, &msg.topic, &msg.payload) {
+                                devlog.push(entry);
+                            }
                             if let Err(e) = client.try_publish(msg.topic, QoS::AtLeastOnce, false, msg.payload) {
                                 tracing::warn!(error = %e, "Antwort nicht gesendet");
                             }
@@ -189,6 +212,7 @@ pub async fn run(
                     Err(e) => {
                         if connected {
                             tracing::warn!(error = %e, "MQTT-Verbindung verloren");
+                            devlog.system(DeviceLogLevel::Error, None, format!("Broker-Verbindung verloren: {e}"));
                         }
                         connected = false;
                         inbox.fail_all(LinkError::NotConnected);
@@ -201,6 +225,9 @@ pub async fn run(
                     if !connected {
                         let _ = req.reply.send(Err(LinkError::NotConnected));
                         continue;
+                    }
+                    if let Some(entry) = outbound(now_ms(), &req.topic, &req.payload) {
+                        devlog.push(entry);
                     }
                     match client.try_publish(req.topic, QoS::AtLeastOnce, false, req.payload) {
                         // Die Antwort kann erst im nächsten poll() kommen, also nach dem Eintragen.
@@ -263,9 +290,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let task = tokio::spawn(run(
             settings.subscribe(),
-            observer,
-            pool,
-            dir.path().to_path_buf(),
+            SessionDeps {
+                observer,
+                pool,
+                records_dir: dir.path().to_path_buf(),
+                devlog: DeviceLog::new(watch::channel(false).1),
+            },
             requests,
             stop_rx,
         ));

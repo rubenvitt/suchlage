@@ -60,7 +60,7 @@ mod tests {
     async fn connect(app: &TestApp) {
         let s = &app.state.situation;
         s.observe(Observed {
-            at_ms: 1,
+            at_ms: crate::time::now_ms(),
             observation: Observation::Topology {
                 gateway_sn: "RC1".into(),
                 aircraft_sn: Some("AC1".into()),
@@ -68,7 +68,7 @@ mod tests {
         })
         .await;
         s.observe(Observed {
-            at_ms: 2,
+            at_ms: crate::time::now_ms(),
             observation: Observation::VideoSources {
                 gateway_sn: "RC1".into(),
                 sources: examples::video_sources(),
@@ -276,7 +276,7 @@ mod tests {
         let op = operator(&app).await;
         let s = app.state.situation.clone();
         s.observe(Observed {
-            at_ms: 1,
+            at_ms: crate::time::now_ms(),
             observation: Observation::Topology {
                 gateway_sn: "RC1".into(),
                 aircraft_sn: None,
@@ -289,7 +289,7 @@ mod tests {
             "Fluggerät aus"
         );
         s.observe(Observed {
-            at_ms: 2,
+            at_ms: crate::time::now_ms(),
             observation: Observation::Topology {
                 gateway_sn: "RC1".into(),
                 aircraft_sn: Some("AC1".into()),
@@ -305,6 +305,39 @@ mod tests {
         assert_eq!(
             body["error"],
             "Keine Videoquelle gemeldet – ist das Fluggerät eingeschaltet?"
+        );
+    }
+
+    /// Ohne Namen aus der Verwaltung steht die Seriennummer im Satz.
+    #[tokio::test]
+    async fn silent_gateway_is_refused_at_once() {
+        let mut app = test_app().await;
+        pair(&app).await;
+        configure_media(&app).await;
+        let op = operator(&app).await;
+        app.state
+            .situation
+            .observe(Observed {
+                at_ms: crate::time::now_ms() - 180_000,
+                observation: Observation::Topology {
+                    gateway_sn: "RC1".into(),
+                    aircraft_sn: Some("AC1".into()),
+                },
+            })
+            .await;
+        let (status, body) = send(
+            &app.router,
+            with_cookie(post_json("/api/streams/start", start_default()), &op),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            body["error"],
+            "RC1 meldet sich seit 3 min nicht – in Pilot 2 unter Cloud-Dienst die Verbindung zu Suchlage prüfen"
+        );
+        assert!(
+            app.mqtt_requests.try_recv().is_err(),
+            "kein Befehl an eine stumme Fernsteuerung"
         );
     }
 

@@ -43,7 +43,7 @@ pub async fn test_app() -> TestApp {
         config,
         crate::runtime::system_clock(),
         live_tx,
-        stop_rx,
+        stop_rx.clone(),
     )
     .await
     .unwrap();
@@ -55,10 +55,11 @@ pub async fn test_app() -> TestApp {
         .await
         .unwrap();
     let (mqtt, mqtt_requests) = crate::mqtt::MqttLink::channel();
+    let devlog = crate::devlog::DeviceLog::new(stop_rx.clone());
     // Wie in `app::run`, aber ohne `run_auto`: Aufträge des Aktors landen in `live_requests`.
     let streams = crate::runtime::streams::StreamOrchestrator::new(
         situation.clone(),
-        crate::dji::control::LiveControl::new(mqtt.clone()),
+        crate::dji::control::LiveControl::new(mqtt.clone(), devlog.clone()),
         pool.clone(),
         settings.clone(),
     );
@@ -72,6 +73,7 @@ pub async fn test_app() -> TestApp {
         streams,
         map,
         http: crate::media::http_client(),
+        devlog,
     };
     TestApp {
         router: router(state.clone()),

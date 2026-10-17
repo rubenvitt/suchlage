@@ -33,6 +33,8 @@ pub struct AppState {
     pub map: crate::map::MapHub,
     /// Für die Proxies zu MediaMTX (`media::http_client`).
     pub http: reqwest::Client,
+    /// Funkprotokoll der Fernsteuerungen für die Systemseite.
+    pub devlog: crate::devlog::DeviceLog,
 }
 
 // Teilzustände für die Extractors in `auth`, damit `auth` den `AppState` nicht kennen muss.
@@ -64,6 +66,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::map::routes())
         .merge(crate::web::streams::routes())
         .merge(crate::web::media::routes())
+        .merge(crate::web::devlog::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()
@@ -144,17 +147,21 @@ pub async fn run(
         .await;
     let map = crate::map::MapHub::new(pool.clone(), stop_rx.clone());
     let (mqtt, link_requests) = crate::mqtt::MqttLink::channel();
+    let devlog = crate::devlog::DeviceLog::new(stop_rx.clone());
     let session_task = tokio::spawn(crate::dji::session::run(
         settings.subscribe(),
-        situation.observer(),
-        pool.clone(),
-        boot.records_dir(),
+        crate::dji::session::SessionDeps {
+            observer: situation.observer(),
+            pool: pool.clone(),
+            records_dir: boot.records_dir(),
+            devlog: devlog.clone(),
+        },
         link_requests,
         stop_rx,
     ));
     let streams = StreamOrchestrator::new(
         situation.clone(),
-        LiveControl::new(mqtt.clone()),
+        LiveControl::new(mqtt.clone(), devlog.clone()),
         pool.clone(),
         settings.clone(),
     );
@@ -171,6 +178,7 @@ pub async fn run(
         streams,
         map,
         http: crate::media::http_client(),
+        devlog,
     };
     // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
     // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503. Die MQTT-Sitzung

@@ -77,3 +77,66 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Funkprotokoll: dichte Liste, Zeit und Topic in Ziffernschrift, Warnungen und Fehler farbig. */
+.sl-devlog-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px;
+  border-bottom: 1px solid var(--lfh-linie);
+}
+.sl-devlog-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--lfh-text-2);
+}
+.sl-devlog-empty {
+  padding: 12px;
+  margin: 0;
+}
+.sl-devlog td {
+  vertical-align: top;
+  padding: 4px 8px;
+}
+.sl-devlog-time,
+.sl-devlog-topic {
+  font-family: var(--lfh-schrift-zahl);
+  white-space: nowrap;
+}
+.sl-devlog-source {
+  white-space: nowrap;
+  color: var(--lfh-schwach);
+}
+.sl-devlog-summary {
+  overflow-wrap: anywhere;
+}
+.sl-devlog-topic {
+  display: block;
+  color: var(--lfh-schwach);
+  font-size: 0.85em;
+}
+.sl-devlog-toggle {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.sl-devlog-toggle:focus-visible {
+  outline: 2px solid var(--lfh-bedien);
+}
+.sl-devlog tr[data-level='warn'] td {
+  color: var(--lfh-achtung-text);
+}
+.sl-devlog tr[data-level='error'] td {
+  color: var(--lfh-alarm-text);
+}
+.sl-devlog-payload pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font: 12px/1.4 var(--lfh-schrift-zahl);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
