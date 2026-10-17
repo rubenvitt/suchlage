@@ -75,16 +75,15 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
    ssh <vserver> "ss -tulnp | grep -E ':(1883|1935|8080|8189)\b'"
    ```
 
-7. **Ersteinrichtung.** Der Server schreibt beim ersten Start einen Einmal-Link ins Log (24 h
-   gültig). Link öffnen, die Pocket-ID-Daten eintragen und anmelden. Das erste Konto wird Admin.
+7. **Ersteinrichtung.** Zuerst, **Pflicht:** Den Pocket-ID-Client auf eine I&K-Gruppe beschränken
+   (Client → „Allowed User Groups“). Suchlage kennt keine eigene Kontenfreigabe: Jedes Konto, das
+   sich über den Client anmelden darf, wird Operator, darf Livebild starten und stoppen und sieht
+   das ganze Flugarchiv mit Video. Ohne Beschränkung gilt das für alle Konten der
+   Pocket-ID-Instanz, auch die anderer DRK-Dienste. Wer aus der Gruppe entfernt wird, kann sich
+   nicht mehr neu anmelden; eine bestehende Sitzung gilt aber bis zu 7 Tage weiter.
 
-   **Pflicht, bevor die Pocket-ID-Daten eingetragen werden:** Den Pocket-ID-Client auf eine
-   I&K-Gruppe beschränken (Client → „Allowed User Groups“). Suchlage kennt keine eigene
-   Kontenfreigabe: Jedes Konto, das sich über den Client anmelden darf, wird Operator, darf
-   Livebild starten und stoppen und sieht das ganze Flugarchiv mit Video. Ohne Beschränkung gilt
-   das für alle Konten der Pocket-ID-Instanz, auch die anderer DRK-Dienste. Wer aus der Gruppe
-   entfernt wird, kann sich nicht mehr neu anmelden; eine bestehende Sitzung gilt aber bis zu
-   7 Tage weiter.
+   Danach: Der Server schreibt beim ersten Start einen Einmal-Link ins Log (24 h gültig). Link
+   öffnen, die Pocket-ID-Daten eintragen und anmelden. Das erste Konto wird Admin.
 
    ```sh
    ssh <vserver> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml logs server | grep Ersteinrichtung'
