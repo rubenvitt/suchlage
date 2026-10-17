@@ -149,6 +149,13 @@ test('wer die Karte selbst verschiebt, beendet das Folgen', () => {
   expect(onFollowChange).toHaveBeenCalledWith(false);
 });
 
+test('Großbild: Live-Zeichen ohne Kartenknöpfe', () => {
+  render(light(<SituationMap {...live} follow showTools={false} />));
+  const map = loaded();
+  expect(map.features('aircraft')).toHaveLength(1);
+  expect(screen.queryAllByRole('button')).toHaveLength(0);
+});
+
 test('der Wechsel Hell/Dunkel behält den Ausschnitt', () => {
   const { rerender } = render(light(<SituationMap {...live} />));
   const first = loaded();

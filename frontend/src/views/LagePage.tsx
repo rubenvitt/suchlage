@@ -1,6 +1,8 @@
 import { useViewMode } from '../app/viewMode';
 import { Frame } from '../shell/Frame';
 import { SyncCell } from '../shell/SyncCell';
+import { KioskView } from './KioskView';
+import { MobileView } from './MobileView';
 import { gatewayName } from './selectors';
 import { useFocus } from './useFocus';
 import './views.css';
@@ -26,11 +28,14 @@ export function LagePage() {
       status={
         <>
           <SyncCell />
-          <Context />
+          {/* Mobil reicht der Platz im Kopf nur für den Live-Strom (UI-Richtung). */}
+          {mode !== 'mobile' && <Context />}
         </>
       }
     >
       {mode === 'workstation' && <WorkstationView />}
+      {mode === 'kiosk' && <KioskView />}
+      {mode === 'mobile' && <MobileView />}
     </Frame>
   );
 }

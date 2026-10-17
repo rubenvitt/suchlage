@@ -1,16 +1,17 @@
 import { Button } from 'antd';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useMe } from '../api/queries';
-import { Paneel, Segmentleiste } from '../components/instrument';
+import { Segmentleiste } from '../components/instrument';
 import { useServerNow } from '../live/LiveProvider';
 import type { LiveState } from '../live/reducer';
 import { SituationMap } from '../map/SituationMap';
 import { TelemetryStrip } from '../telemetry/TelemetryStrip';
-import { VideoPanel } from '../video/VideoPanel';
 import { EmptyState } from './EmptyState';
 import { FlightPanel } from './FlightPanel';
 import { gatewayName, type Focus } from './selectors';
 import { useFocus } from './useFocus';
+import { useLiveMapData } from './useLiveMapData';
+import { VideoSlot } from './VideoSlot';
 
 /** Was über der Karte steht, solange es nichts zu fliegen gibt. */
 function emptyOf(state: LiveState, focus: Focus) {
@@ -40,10 +41,8 @@ export function WorkstationView() {
   const { data: me } = useMe();
   const [follow, setFollow] = useState(true);
   const [swapped, setSwapped] = useState(false);
-  // Die Karte bekommt nur bei neuen Daten neue Arrays; der Sekundentakt der Uhr allein baut die Spur nicht neu.
-  const gateways = useMemo(() => Object.values(state.gateways), [state.gateways]);
-  const aircraft = useMemo(() => (focus.aircraft ? [focus.aircraft] : []), [focus.aircraft]);
-  const tracks = useMemo(() => (focus.flight ? [focus.flight.segments] : []), [focus.flight]);
+  const map = useLiveMapData(state, focus);
+  const { gateways } = map;
   const canControl = me?.role === 'admin' || me?.role === 'operator';
   const empty = emptyOf(state, focus);
 
@@ -51,15 +50,13 @@ export function WorkstationView() {
     <div className="sl-work" data-swap={swapped && focus.gateway != null}>
       <div className="sl-work-map">
         <SituationMap
-          gateways={gateways}
-          aircraft={aircraft}
-          tracks={tracks}
+          {...map}
           serverNow={serverNow}
           thresholds={state.thresholds}
           follow={follow}
           onFollowChange={setFollow}
         />
-        {empty && <div className="sl-work-empty">{empty}</div>}
+        {empty && <div className="sl-view-notice">{empty}</div>}
       </div>
       <aside className="sl-work-side" aria-label="Livebild und Flug">
         {/* Ohne Fernsteuerung gibt es nichts zu wählen und kein Bild zum Vergrößern. */}
@@ -85,20 +82,7 @@ export function WorkstationView() {
           </div>
         )}
         <div className="sl-work-video">
-          {focus.gateway ? (
-            <VideoPanel
-              gatewaySn={focus.gateway.sn}
-              stream={focus.stream}
-              sources={focus.gateway.video_sources}
-              canControl={canControl}
-            />
-          ) : (
-            <Paneel titel="Livebild" koerperPolster>
-              <p className="sl-muted">
-                {state.ready ? 'Ohne Fernsteuerung kein Livebild.' : 'Wird abgerufen …'}
-              </p>
-            </Paneel>
-          )}
+          <VideoSlot focus={focus} ready={state.ready} canControl={canControl} />
         </div>
         {state.ready && <FlightPanel focus={focus} serverNow={serverNow} />}
       </aside>

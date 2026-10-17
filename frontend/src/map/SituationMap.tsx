@@ -34,6 +34,8 @@ interface Props {
   onFollowChange?: (follow: boolean) => void;
   /** Flugdetail: einmal auf die Spur zoomen, keine Live-Gerätezeichen. */
   staticFit?: boolean;
+  /** Folgen, Vergrößern, Verkleinern; das Großbild zeigt sie nicht, dort bedient niemand. */
+  showTools?: boolean;
   label?: string;
 }
 
@@ -73,6 +75,7 @@ function MapCanvas({
   follow = false,
   onFollowChange,
   staticFit = false,
+  showTools = true,
   label = DEFAULT_LABEL,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
@@ -239,7 +242,7 @@ function MapCanvas({
   return (
     <div className="sl-map" role="region" aria-label={label}>
       <div ref={container} className="sl-map-canvas" />
-      {!staticFit && (
+      {!staticFit && showTools && (
         <div className="sl-map-tools">
           <Button
             aria-pressed={follow}
