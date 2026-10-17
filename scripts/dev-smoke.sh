@@ -57,24 +57,24 @@ mq mosquitto_sub -u rc-RCA -P "$PASS_A" -t thing/product/RCB/services -C 1 -W 2 
 grep -qi "denied" "$TMP/acl1"; check $? "RC A darf services von RC B nicht abonnieren"
 # Gegenprobe im selben Lauf: RC B bekommt die Antwort auf die eigene Meldung. Sonst hieße eine leere
 # Datei nur, dass RC B nicht verbunden war, nicht dass die ACL RC A abgewiesen hat.
+# „eigen“ geht zuerst raus: Kommt seine Antwort an, lauschte das Abo schon, als „fremd“ gesendet wurde.
 ( mq mosquitto_sub -u rc-RCB -P "$PASS_B" -t sys/product/RCB/status_reply -C 2 -W 6 > "$TMP/acl2" 2>&1 ) & sub=$!
 sleep 1
-mq mosquitto_pub -u rc-RCA -P "$PASS_A" -t sys/product/RCB/status -m '{"tid":"fremd","bid":"x","method":"update_topo","data":{"sub_devices":[]}}'
 mq mosquitto_pub -u rc-RCB -P "$PASS_B" -t sys/product/RCB/status -m '{"tid":"eigen","bid":"x","method":"update_topo","data":{"sub_devices":[]}}'
+mq mosquitto_pub -u rc-RCA -P "$PASS_A" -t sys/product/RCB/status -m '{"tid":"fremd","bid":"x","method":"update_topo","data":{"sub_devices":[]}}'
 wait $sub
 grep -q '"tid":"eigen"' "$TMP/acl2"; check $? "RC B bekommt die Antwort auf die eigene Meldung"
 ! grep -q '"tid":"fremd"' "$TMP/acl2"; check $? "RC A kann nicht als RC B melden"
 # Rollenpriorität (ADR 0003): RC A darf Fluggeräte-Telemetrie senden, aber nicht die Topics von RC B.
-# acl4 ist die Gegenprobe für acl3: derselbe Abonnent, derselbe Absender.
-( mq mosquitto_sub -u suchlage-admin -P dev-admin -t thing/product/RCB/state -C 1 -W 4 > "$TMP/acl3" 2>/dev/null ) & sub3=$!
-( mq mosquitto_sub -u suchlage-admin -P dev-admin -t thing/product/ACX/osd -C 1 -W 4 > "$TMP/acl4" 2>/dev/null ) & sub4=$!
+# Ein Abonnent auf beiden Topics, das erlaubte Publish zuerst: Kommt es an, lauschte das Abo schon beim verbotenen.
+( mq mosquitto_sub -u suchlage-admin -P dev-admin -v -t thing/product/RCB/state -t thing/product/ACX/osd -C 2 -W 4 > "$TMP/acl34" 2>/dev/null ) & sub=$!
 sleep 1
-mq mosquitto_pub -u rc-RCA -P "$PASS_A" -t thing/product/RCB/state -m '{"gateway":"RCB","data":{"live_status":[]}}'
 # Legt im Kern ein Phantom-Fluggerät ACX an RCA an; die Flugprüfung unten zählt nur gelandete Flüge und bleibt davon unberührt.
 mq mosquitto_pub -u rc-RCA -P "$PASS_A" -t thing/product/ACX/osd -m '{"gateway":"RCA","data":{"latitude":52.0,"longitude":10.0}}'
-wait $sub3 $sub4
-[ ! -s "$TMP/acl3" ]; check $? "RC A kann nicht als RC B telemetrieren"
-[ -s "$TMP/acl4" ]; check $? "RC A darf Fluggeräte-Telemetrie senden"
+mq mosquitto_pub -u rc-RCA -P "$PASS_A" -t thing/product/RCB/state -m '{"gateway":"RCB","data":{"live_status":[]}}'
+wait $sub
+grep -q '^thing/product/ACX/osd' "$TMP/acl34"; check $? "RC A darf Fluggeräte-Telemetrie senden"
+! grep -q '^thing/product/RCB/state' "$TMP/acl34"; check $? "RC A kann nicht als RC B telemetrieren"
 
 # RTMP mit falschem Schlüssel wird abgewiesen
 ffmpeg -loglevel error -re -f lavfi -i testsrc=size=320x180:rate=10 -t 2 -c:v libx264 -preset ultrafast -f flv "rtmp://127.0.0.1:1935/live/RCA?user=rc-RCA&pass=falsch" 2>/dev/null
