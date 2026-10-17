@@ -51,8 +51,12 @@
   letter-spacing: var(--lfh-typo-datenwert-klein-sperrung);
   line-height: var(--sl-strip-wert-zeile);
   color: var(--lfh-text);
-  /* Ein Warnwort („RTK gestört“, „Verbindung verloren …“) bricht um, statt mit „…“ abzubrechen. */
+  /* Ein Warnwort („RTK gestört“, „Verbindung verloren …“) bricht um, statt mit „…“ abzubrechen.
+     Ein einzelnes langes Wort („Hinderniserkennung“) trennt, statt am Zellrand abgeschnitten zu
+     werden (`lang="de"` in index.html). */
   overflow: hidden;
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 /* Die einzige Bewegung der Oberfläche: ein neuer Wert leuchtet 120 ms in der Bedienfarbe auf.
    `prefers-reduced-motion` schaltet sie global in frame.css ab. */

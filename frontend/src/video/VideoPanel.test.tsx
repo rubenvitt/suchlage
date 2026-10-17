@@ -169,7 +169,9 @@ test('ein hängendes Bild bekommt die Schraffur und einen Neuversuch', async () 
   expect(container.querySelector('.sl-video')).toHaveAttribute('data-player', 'stalled');
   await act(() => vi.advanceTimersByTimeAsync(RETRY_MS));
   expect(startWhep).toHaveBeenCalledTimes(2);
-  expect(container.querySelector('.sl-video')).toHaveAttribute('data-player', 'connecting');
+  // Auch der Neuversuch zeigt das hängende Bild, nicht „kein Bild“.
+  expect(screen.getByText('Bild hängt – verbindet neu …')).toBeInTheDocument();
+  expect(container.querySelector('.sl-video')).toHaveAttribute('data-player', 'stalled');
 });
 
 /** WebRTC-Sitzung, die sofort verbindet. */

@@ -40,6 +40,21 @@ test('nur ein Neuversuch nach laufendem Bild weiß, dass es ein Bild gab', () =>
   expect(nextState(live(), { type: 'not_ready' })).not.toHaveProperty('hadPicture');
 });
 
+test('ein hängendes Bild bleibt über gescheiterte Neuversuche als hängend markiert', () => {
+  const playing = nextState(live(), { type: 'connected' });
+  let s = nextState(playing, { type: 'stalled' });
+  s = nextState(s, { type: 'retry_due' });
+  expect(s).toMatchObject({ kind: 'connecting', hadPicture: true });
+  s = nextState(s, { type: 'failed' });
+  expect(s).toMatchObject({ kind: 'retrying', hadPicture: true });
+  s = nextState(nextState(s, { type: 'retry_due' }), { type: 'not_ready' });
+  expect(s).toMatchObject({ kind: 'retrying', hadPicture: true });
+  s = nextState(nextState(s, { type: 'retry_due' }), { type: 'ice_timeout' });
+  expect(s).toMatchObject({ kind: 'connecting', transport: 'hls', hadPicture: true });
+  expect(nextState(s, { type: 'connected' })).not.toHaveProperty('hadPicture');
+  expect(nextState(s, { type: 'stream_gone' })).toEqual({ kind: 'idle' });
+});
+
 test('ICE-Frist nach erfolgreicher Verbindung ändert nichts', () => {
   const playing = nextState(live(), { type: 'connected' });
   expect(nextState(playing, { type: 'ice_timeout' })).toBe(playing);

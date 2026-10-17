@@ -137,9 +137,15 @@
 .sl-mobile > .sl-empty {
   border: 0;
 }
+/* Die Karte füllt den Rest bis zum unteren Rand; mit einer Mindesthöhe scrollte die Seite und
+   „Folgen“ zentrierte das Fluggerät außerhalb des Sichtbaren. */
 .sl-mobile > .sl-mobile-map {
-  flex: 1 0 50dvh;
+  flex: 1 1 0;
+  min-height: 200px;
   position: relative;
+}
+.sl-mobile-map > .sl-map {
+  min-height: 0;
 }
 
 .sl-empty {

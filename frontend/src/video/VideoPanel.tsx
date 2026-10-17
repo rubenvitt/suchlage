@@ -49,7 +49,7 @@ export function VideoPanel({ gatewaySn, stream, sources, canControl }: Props) {
     .filter(Boolean)
     .join(' · ');
   const overlay = isLive ? playerMessage(player) : streamMessage(stream, canControl);
-  const look = player.kind === 'retrying' && player.hadPicture ? 'stalled' : player.kind;
+  const look = (player.kind === 'retrying' || player.kind === 'connecting') && player.hadPicture ? 'stalled' : player.kind;
   const busy = stream?.phase === 'starting' || stream?.phase === 'stopping';
 
   const actions = canControl && !busy && (

@@ -2,9 +2,10 @@ export type Transport = 'webrtc' | 'hls';
 
 export type PlayerState =
   | { kind: 'idle' }
-  | { kind: 'connecting'; transport: Transport; attempt: number }
+  /** `hadPicture`: das Bild lief schon und hängt jetzt (Schraffur über dem letzten Bild). Bleibt
+   *  über alle Neuversuche, bis wieder ein Bild kommt oder der Stream endet. */
+  | { kind: 'connecting'; transport: Transport; attempt: number; hadPicture?: true }
   | { kind: 'playing'; transport: Transport; attempt: number }
-  /** `hadPicture`: das Bild lief schon und hängt jetzt (Schraffur über dem letzten Bild). */
   | { kind: 'retrying'; transport: Transport; attempt: number; hadPicture?: true };
 
 export type PlayerEvent =
@@ -35,24 +36,29 @@ export function nextState(s: PlayerState, e: PlayerEvent): PlayerState {
   switch (s.kind) {
     case 'idle':
       return e.type === 'stream_live' ? { kind: 'connecting', transport: 'webrtc', attempt: 1 } : s;
-    case 'connecting':
+    case 'connecting': {
+      // Bedingt gespreizt: Ein `hadPicture: undefined` wäre eine vorhandene Eigenschaft.
+      const pic = s.hadPicture && { hadPicture: s.hadPicture };
       if (e.type === 'connected') return { kind: 'playing', transport: s.transport, attempt: s.attempt };
       if (e.type === 'ice_timeout' && s.transport === 'webrtc') {
-        return { kind: 'connecting', transport: 'hls', attempt: 1 };
+        return { kind: 'connecting', transport: 'hls', attempt: 1, ...pic };
       }
-      if (e.type === 'not_ready') return { kind: 'retrying', transport: s.transport, attempt: s.attempt };
+      if (e.type === 'not_ready') return { kind: 'retrying', transport: s.transport, attempt: s.attempt, ...pic };
       if (e.type === 'failed') {
         if (s.transport === 'webrtc' && s.attempt >= WEBRTC_ATTEMPTS) {
-          return { kind: 'retrying', transport: 'hls', attempt: 1 };
+          return { kind: 'retrying', transport: 'hls', attempt: 1, ...pic };
         }
-        return { kind: 'retrying', transport: s.transport, attempt: s.attempt + 1 };
+        return { kind: 'retrying', transport: s.transport, attempt: s.attempt + 1, ...pic };
       }
       return s;
+    }
     case 'playing':
       return e.type === 'stalled' || e.type === 'failed'
         ? { kind: 'retrying', transport: s.transport, attempt: 1, hadPicture: true }
         : s;
     case 'retrying':
-      return e.type === 'retry_due' ? { kind: 'connecting', transport: s.transport, attempt: s.attempt } : s;
+      return e.type === 'retry_due'
+        ? { kind: 'connecting', transport: s.transport, attempt: s.attempt, ...(s.hadPicture && { hadPicture: s.hadPicture }) }
+        : s;
   }
 }

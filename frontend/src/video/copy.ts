@@ -32,7 +32,7 @@ export function playerMessage(player: PlayerState): string {
   const retry = `neuer Versuch in ${RETRY_MS / 1000} s`;
   switch (player.kind) {
     case 'connecting':
-      return 'Verbindet …';
+      return player.hadPicture ? 'Bild hängt – verbindet neu …' : 'Verbindet …';
     case 'retrying':
       return player.hadPicture ? `Bild hängt – ${retry}` : `Noch kein Bild – ${retry}`;
     default:
