@@ -135,7 +135,10 @@ mod tests {
                                 .into_response();
                         }
                         (
-                            [("content-type", "application/vnd.apple.mpegurl")],
+                            [
+                                ("content-type", "application/vnd.apple.mpegurl"),
+                                ("cache-control", "max-age=3600"),
+                            ],
                             "#EXTM3U\nmain_stream.m3u8?session=x\n",
                         )
                             .into_response()
@@ -147,12 +150,13 @@ mod tests {
                 "/live/RC2/index.m3u8",
                 axum::routing::get(|| async { StatusCode::UNAUTHORIZED }),
             )
-            // Aufnahme beginnt 30 s nach dem Flugstart (Auto-Livebild nach dem Abheben).
+            // Aufnahme beginnt knapp 30 s nach dem Flugstart (Auto-Livebild nach dem Abheben),
+            // mit Sekundenbruchteil wie bei `recordPath …%f`.
             .route(
                 "/list",
                 axum::routing::get(|| async {
                     axum::Json(
-                        serde_json::json!([{"start": "2026-10-16T11:27:10Z", "duration": 1050.0}]),
+                        serde_json::json!([{"start": "2026-10-16T11:27:09.400Z", "duration": 1050.0}]),
                     )
                 }),
             )
@@ -304,6 +308,11 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         assert!(res.headers().get("set-cookie").is_none());
+        assert_eq!(
+            res.headers()["cache-control"],
+            "private, no-cache",
+            "kein öffentliches max-age von MediaMTX, sonst cacht Cloudflare das Livebild"
+        );
         let body = res.into_body().collect().await.unwrap().to_bytes();
         assert!(String::from_utf8_lossy(&body).contains("main_stream.m3u8?session=x"));
     }

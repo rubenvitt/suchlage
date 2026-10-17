@@ -14,9 +14,9 @@ use crate::error::AppError;
 use super::hook::INTERNAL_USER;
 
 /// Antwortköpfe, die der Browser von MediaMTX sehen darf. `Set-Cookie` und `Location` nie.
-const PASSED_HEADERS: [HeaderName; 5] = [
+/// `Cache-Control` setzt der Proxy selbst.
+const PASSED_HEADERS: [HeaderName; 4] = [
     header::CONTENT_TYPE,
-    header::CACHE_CONTROL,
     header::CONTENT_LENGTH,
     header::ACCEPT_RANGES,
     header::CONTENT_RANGE,
@@ -62,7 +62,11 @@ pub fn safe_file(file: &str) -> bool {
 }
 
 fn passthrough(res: reqwest::Response, extra: Option<(HeaderName, HeaderValue)>) -> Response {
-    let mut out = Response::builder().status(res.status());
+    // Video hinter der Sitzung: Ein öffentliches `max-age` von MediaMTX (HLS-Segmente) ließe
+    // Cloudflare es am Edge zwischenspeichern und ohne Anmeldung ausliefern.
+    let mut out = Response::builder()
+        .status(res.status())
+        .header(header::CACHE_CONTROL, "private, no-cache");
     for name in PASSED_HEADERS {
         if let Some(v) = res.headers().get(&name) {
             out = out.header(name, v.clone());
@@ -172,7 +176,9 @@ async fn recording_window(
         .first()
         .and_then(|r| r["start"].as_str())
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|t| t.timestamp_millis());
+        // Auf die volle Sekunde aufgerundet: `rfc3339` schneidet Bruchteile ab, und `/get` vor
+        // dem ersten Segment findet nichts.
+        .map(|t| (t.timestamp() + i64::from(t.timestamp_subsec_nanos() > 0)) * 1000);
     let Some(first) = first else {
         return Ok(None);
     };
