@@ -219,10 +219,10 @@ function MapCanvas({
       return;
     }
     const p = aircraft[0]?.telemetry.position;
-    if (follow && p) {
+    // Folgen verschiebt nur; den Maßstab setzt erst das Einpassen darunter, sonst bliebe die Übersicht stehen.
+    if (follow && p && framed.current) {
       const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       map.easeTo({ center: [p.lon, p.lat], duration: reduced ? 0 : 400 });
-      framed.current = true;
       return;
     }
     if (framed.current) return;

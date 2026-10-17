@@ -117,11 +117,17 @@ test('holt die Lage einmal ins Bild, danach bestimmt der Nutzer den Ausschnitt',
   expect(map.fitBounds).toHaveBeenCalledTimes(1);
 });
 
-test('Folgen führt die Karte mit dem Fluggerät', () => {
-  render(light(<SituationMap {...live} follow />));
+test('Folgen holt die Lage zuerst ins Bild und führt die Karte dann mit dem Fluggerät', () => {
+  const { rerender } = render(light(<SituationMap {...live} follow />));
   const map = loaded();
-  expect(map.easeTo.mock.calls.at(-1)![0].center).toEqual([10.0134, 52.4321]);
-  expect(map.fitBounds).not.toHaveBeenCalled();
+  // Ohne erstes Einpassen bliebe die Karte auf der Deutschland-Übersicht stehen.
+  expect(map.fitBounds).toHaveBeenCalledTimes(1);
+  expect(map.easeTo).not.toHaveBeenCalled();
+  const a = s.aircraft[0]!;
+  const moved = { ...a, telemetry: { ...a.telemetry, position: { ...a.telemetry.position!, lon: 10.015 } } };
+  rerender(light(<SituationMap {...live} aircraft={[moved]} follow />));
+  expect(map.easeTo.mock.calls.at(-1)![0].center).toEqual([10.015, 52.4321]);
+  expect(map.fitBounds).toHaveBeenCalledTimes(1);
 });
 
 test('Folgen ist ein Schalter', async () => {

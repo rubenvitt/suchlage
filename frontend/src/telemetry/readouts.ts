@@ -38,7 +38,8 @@ function linkTone(sdr: number | null): Tone {
   return sdr === 2 ? 'achtung' : 'neutral';
 }
 
-function flightTime(flight: FlightSummary | undefined, serverNow: number): string {
+/** Laufend gegen die Serveruhr, abgeschlossen bis zum Ende; ohne Flug ein Strich. */
+export function flightTime(flight: FlightSummary | undefined, serverNow: number): string {
   if (!flight) return DASH;
   return fmt.duration(((flight.ended_at_ms ?? serverNow) - flight.started_at_ms) / 1000);
 }
