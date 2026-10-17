@@ -10,5 +10,6 @@ export function useLiveMapData(state: LiveState, focus: Focus) {
   const gateways = useMemo(() => Object.values(state.gateways), [state.gateways]);
   const aircraft = useMemo(() => (focus.aircraft ? [focus.aircraft] : []), [focus.aircraft]);
   const tracks = useMemo(() => (focus.flight ? [focus.flight.segments] : []), [focus.flight]);
-  return { gateways, aircraft, tracks };
+  const elements = useMemo(() => Object.values(state.mapElements), [state.mapElements]);
+  return { gateways, aircraft, tracks, elements };
 }

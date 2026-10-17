@@ -42,3 +42,67 @@
 .sl-map .maplibregl-ctrl-attrib a {
   color: var(--lfh-gedaempft);
 }
+/* Beim Zeichnen setzt jeder Klick einen Eckpunkt: Fadenkreuz statt Hand. */
+.sl-map[data-drawing='true'] .maplibregl-canvas {
+  cursor: crosshair;
+}
+/* Zeichnen und Kartenelemente: unten links über der Karte, die Quellenangabe bleibt rechts frei. */
+.sl-map-editor {
+  position: absolute;
+  left: 12px;
+  bottom: 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(380px, calc(100% - 24px));
+  z-index: 1;
+}
+.sl-draw-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--lfh-paneel);
+  border: 1px solid var(--lfh-linie);
+  color: var(--lfh-text);
+  font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-groesse) var(--lfh-schrift-text);
+}
+.sl-draw-hint b {
+  font-weight: 600;
+}
+.sl-element-form {
+  width: min(380px, calc(100vw - 48px));
+}
+.sl-element-fields {
+  display: grid;
+  gap: 6px;
+}
+.sl-element-fields > label,
+.sl-element-fields > span {
+  color: var(--lfh-gedaempft);
+}
+.sl-swatches {
+  display: flex;
+  gap: 6px;
+}
+/* Die Farbe ist das Datum; der Rahmen zeigt die Wahl und hält auch Schwarz auf dunklem Grund sichtbar. */
+.sl-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--lfh-linie);
+  border-radius: 0;
+  cursor: pointer;
+}
+.sl-swatch[aria-checked='true'] {
+  outline: 2px solid var(--lfh-text);
+  outline-offset: 2px;
+}
+.sl-element-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
