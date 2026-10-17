@@ -93,6 +93,10 @@ mod tests {
         );
         assert_eq!(names.last().map(String::as_str), Some("getClient"));
         assert!(!names.iter().any(|n| n == "addClientRole"), "{names:?}");
+        assert!(
+            !names.iter().any(|n| n == "setClientPassword"),
+            "trennt die RC: {names:?}"
+        );
     }
 
     #[tokio::test]

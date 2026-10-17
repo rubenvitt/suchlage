@@ -33,6 +33,8 @@ fn rc_roles(sn: &str) -> [(String, i32); 3] {
 
 /// Rollen, ACLs und Client. Die Zuordnung der Rollen folgt erst nach `getClient`
 /// (`missing_rc_roles`): 2.0.22 beantwortet ein doppeltes `addClientRole` mit „Internal error“.
+/// Kein `setClientPassword`: Es trennt den Client in 2.0.22 bei jedem Erfolg, und das gespeicherte
+/// Passwort einer gekoppelten RC ändert sich nie – `createClient` setzt es auch nach einem neuen Broker.
 pub fn ensure_rc_commands(sn: &str, password: &str) -> Vec<Value> {
     let name = rc_username(sn);
     let own =
@@ -64,7 +66,6 @@ pub fn ensure_rc_commands(sn: &str, password: &str) -> Vec<Value> {
             false,
         ),
         json!({ "command": "createClient", "username": name, "password": password }),
-        json!({ "command": "setClientPassword", "username": name, "password": password }),
     ]
 }
 
@@ -72,9 +73,10 @@ pub fn get_client_command(username: &str) -> Value {
     json!({ "command": "getClient", "username": username })
 }
 
-/// `addClientRole` nur für die Rollen, die laut `getClient`-Antwort fehlen. So trennt ein
-/// wiederholtes Koppeln die Fernsteuerung nicht: Jedes erfolgreiche `addClientRole` wirft den
-/// verbundenen Client in 2.0.22 hinaus, und Pilot 2 hält seine MQTT-Verbindung auch ohne die Seite.
+/// `addClientRole` nur für die Rollen, die laut `getClient`-Antwort fehlen. Zusammen mit
+/// `ensure_rc_commands`, das bei Bestand nur an „already exists“ scheitert, trennt ein wiederholtes
+/// Koppeln die Fernsteuerung so nicht: Jedes erfolgreiche `addClientRole` wirft den verbundenen
+/// Client in 2.0.22 hinaus, und Pilot 2 hält seine MQTT-Verbindung auch ohne die Seite.
 pub fn missing_rc_roles(sn: &str, get_client: &Value) -> Vec<Value> {
     let assigned: Vec<&str> = get_client["data"]["client"]["roles"]
         .as_array()
@@ -283,7 +285,6 @@ mod tests {
             !is_benign("addClientRole", "Role not found"),
             "halb angelegte ACL"
         );
-        assert!(!is_benign("setClientPassword", "Client not found"));
         assert!(!is_benign("getClient", "Client not found"));
         assert!(!is_benign("addClientRole", "Internal error"));
         assert!(!is_benign("createRole", "Permission denied"));
