@@ -6,12 +6,30 @@ use std::sync::Arc;
 use axum::Json;
 use axum::Router;
 use axum::routing::get;
+use sqlx::SqlitePool;
+use tokio::sync::{mpsc, watch};
 
+use crate::auth::oidc::OidcState;
 use crate::config::BootConfig;
+use crate::dji::control::LiveControl;
+use crate::error::AppError;
+use crate::runtime::service::{self, SituationHandle};
+use crate::runtime::streams::{StreamOrchestrator, run_auto};
+use crate::settings::SettingsHandle;
+use crate::situation::observation::{Observation, Observed};
+use crate::situation::state::Config;
 
 #[derive(Clone)]
 pub struct AppState {
     pub boot: Arc<BootConfig>,
+    pub pool: SqlitePool,
+    pub situation: SituationHandle,
+    pub settings: SettingsHandle,
+    pub oidc: Arc<OidcState>,
+    pub mqtt: crate::mqtt::MqttLink,
+    pub streams: StreamOrchestrator,
+    /// Für die Proxies zu MediaMTX (`media::http_client`).
+    pub http: reqwest::Client,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -23,10 +41,19 @@ pub fn router(state: AppState) -> Router {
     // damit eine falsche API-Adresse nie die SPA bekommt. Spätere Tasks ergänzen hier `.merge(...)`.
     let api = Router::new()
         .route("/health", get(health))
+        .merge(crate::web::auth::routes())
+        .merge(crate::web::admin::routes())
+        .merge(crate::web::live::routes())
+        .merge(crate::web::flights::routes())
+        .merge(crate::web::streams::routes())
+        .merge(crate::web::media::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()
         .nest("/api", api)
+        // Pilot 2 öffnet `/pilot` direkt, nicht unter `/api`.
+        .merge(crate::web::pilot::routes())
+        .merge(crate::web::media::internal_routes())
         .fallback(crate::static_files::serve)
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
         .layer(CatchPanicLayer::new())
@@ -45,31 +72,131 @@ pub async fn run(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), std::io::Error> {
     std::fs::create_dir_all(&boot.data_dir)?;
+    let pool = crate::db::connect(&boot.db_path())
+        .await
+        .map_err(std::io::Error::other)?;
+    crate::db::migrate(&pool)
+        .await
+        .map_err(std::io::Error::other)?;
+    let settings = SettingsHandle::load(pool.clone())
+        .await
+        .map_err(std::io::Error::other)?;
+    #[cfg(feature = "dev")]
+    crate::auth::dev::seed(&settings)
+        .await
+        .map_err(startup_error)?;
+    #[cfg(feature = "dev")]
+    crate::auth::dev::seed_simulator(&pool)
+        .await
+        .map_err(startup_error)?;
+    if let Some(link) =
+        crate::auth::setup::ensure_token(&pool, &settings, &boot, crate::time::now_ms())
+            .await
+            .map_err(startup_error)?
+    {
+        tracing::warn!("Ersteinrichtung: {link}  (24 h gültig, einmal verwendbar)");
+    }
+    // Vor dem Lesen abonnieren: Keine Änderung fällt zwischen Startwert und Nachführen heraus.
+    let settings_rx = settings.subscribe();
+    let (stop_tx, stop_rx) = watch::channel(false);
+    // Livebild-Aufträge des Kerns beim Abheben; `run_auto` arbeitet sie ab, sobald der Befehlsweg steht.
+    let (live_tx, live_rx) = mpsc::unbounded_channel::<String>();
+    let config = Config {
+        auto_live_on_takeoff: settings_rx.borrow().general.auto_live_on_takeoff,
+    };
+    let (situation, situation_task) = service::start(
+        pool.clone(),
+        config,
+        crate::runtime::system_clock(),
+        live_tx,
+        stop_rx.clone(),
+    )
+    .await
+    .map_err(std::io::Error::other)?;
+    follow_settings(settings_rx, situation.clone());
+    let labels = crate::store::remote_controllers::labels(&pool)
+        .await
+        .map_err(std::io::Error::other)?;
+    situation
+        .observe(Observed {
+            at_ms: crate::time::now_ms(),
+            observation: Observation::Labels(labels),
+        })
+        .await;
+    let (mqtt, link_requests) = crate::mqtt::MqttLink::channel();
+    let session_task = tokio::spawn(crate::dji::session::run(
+        settings.subscribe(),
+        situation.observer(),
+        pool.clone(),
+        boot.records_dir(),
+        link_requests,
+        stop_rx,
+    ));
+    let streams = StreamOrchestrator::new(
+        situation.clone(),
+        LiveControl::new(mqtt.clone()),
+        pool.clone(),
+        settings.clone(),
+    );
+    tokio::spawn(run_auto(live_rx, streams.clone()));
     let listener = tokio::net::TcpListener::bind(boot.bind).await?;
     tracing::info!(bind = %boot.bind, public_url = %boot.public_url, "Suchlage läuft");
     let state = AppState {
         boot: Arc::new(boot),
+        pool: pool.clone(),
+        situation,
+        settings,
+        oidc: Arc::new(OidcState::new()),
+        mqtt,
+        streams,
+        http: crate::media::http_client(),
     };
-    axum::serve(listener, router(state))
+    // Der Aktor stoppt schon mit dem Signal: Erst sein Ende schließt offene Live-Ströme, und erst
+    // danach kehrt `serve` zurück. Bis dahin melden Anfragen an die Lage 503. Die MQTT-Sitzung
+    // trennt mit demselben Signal vom Broker.
+    let shutdown = async move {
+        shutdown.await;
+        let _ = stop_tx.send(true);
+    };
+    let result = axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown)
-        .await
+        .await;
+    let _ = situation_task.await;
+    let _ = session_task.await;
+    pool.close().await;
+    result
+}
+
+/// `Display` verschweigt bei `AppError::Internal` das Detail; beim Start gehört es ins Log.
+fn startup_error(e: AppError) -> std::io::Error {
+    std::io::Error::other(format!("{e:?}"))
+}
+
+/// Die Lage übernimmt „Livebild beim Start“ ohne Neustart. Endet, wenn die Einstellungen wegfallen.
+fn follow_settings(
+    mut settings: watch::Receiver<crate::settings::Settings>,
+    situation: SituationHandle,
+) {
+    tokio::spawn(async move {
+        while settings.changed().await.is_ok() {
+            let auto_live_on_takeoff = settings.borrow_and_update().general.auto_live_on_takeoff;
+            situation
+                .set_config(Config {
+                    auto_live_on_takeoff,
+                })
+                .await;
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::testing::{get as get_req, send};
+    use crate::testing::{get as get_req, send, test_app};
     use axum::http::StatusCode;
-
-    fn state() -> AppState {
-        AppState {
-            boot: Arc::new(BootConfig::from_lookup(|_| None).unwrap()),
-        }
-    }
 
     #[tokio::test]
     async fn health_reports_ok_and_version() {
-        let (status, body) = send(&router(state()), get_req("/api/health")).await;
+        let (status, body) = send(&test_app().await.router, get_req("/api/health")).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
         assert_eq!(body["version"], env!("CARGO_PKG_VERSION"));
@@ -77,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_api_route_is_json_404() {
-        let (status, body) = send(&router(state()), get_req("/api/gibt-es-nicht")).await;
+        let (status, body) = send(&test_app().await.router, get_req("/api/gibt-es-nicht")).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"], "Nicht gefunden");
     }
