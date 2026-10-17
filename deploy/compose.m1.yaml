@@ -1,0 +1,41 @@
+# Betrieb M1 auf dem vServer. MQTT, RTMP und WebRTC-UDP nur an der Tailscale-IP (Spec §6);
+# der Server nur an 127.0.0.1 für Traefik. Traefik routet /internal/* NICHT nach außen (ADR 0003).
+name: suchlage-m1
+
+services:
+  server:
+    image: suchlage:m1
+    environment:
+      SUCHLAGE_PUBLIC_URL: "${SUCHLAGE_PUBLIC_URL:?öffentliche Adresse, z. B. https://suchlage.example.org}"
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: ["server-data:/data"]
+    depends_on: [mqtt, media]
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    entrypoint: ["/entrypoint.sh"]
+    ports: ["${SUCHLAGE_BIND_IP:?Tailscale-IP}:1883:1883"]
+    volumes:
+      - ./mosquitto/mosquitto.m1.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/entrypoint.sh:ro
+      - mqtt-data:/mosquitto/data
+    restart: unless-stopped
+
+  media:
+    image: bluenviron/mediamtx:1.21.2
+    environment:
+      MTX_WEBRTCADDITIONALHOSTS: "${SUCHLAGE_BIND_IP:?}"
+      MTX_AUTHHTTPADDRESS: http://server:8080/internal/media/auth
+    ports:
+      - "${SUCHLAGE_BIND_IP:?}:1935:1935"
+      - "${SUCHLAGE_BIND_IP:?}:8189:8189/udp"
+    volumes:
+      - ./mediamtx.m1.yml:/mediamtx.yml:ro
+      - video:/recordings
+    restart: unless-stopped
+
+volumes:
+  server-data:
+  mqtt-data:
+  video:

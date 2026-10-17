@@ -22,3 +22,7 @@ run = "scripts/dev-smoke.sh"
 [tasks.e2e]
 description = "Playwright-Smoke: Arbeitsplatz, Großbild, mobil gegen Simulator"
 run = "scripts/e2e.sh"
+
+[tasks.image]
+description = "Betriebs-Image suchlage:m1 bauen (ohne Feature dev)"
+run = "docker build -f deploy/Dockerfile -t suchlage:m1 ."
