@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { snapshotFlying } from '../contract/fixtures.generated';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
@@ -14,8 +14,9 @@ test('System zeigt Broker, Mitschnitt und nicht ausgewertete Felder', () => {
       <SystemView />
     </LiveProvider>,
   );
-  expect(screen.getByText('verbunden')).toBeInTheDocument();
-  expect(screen.getByText('steht')).toBeInTheDocument();
+  const field = (label: string) => within(screen.getByText(label).closest('[data-lfh="datenfeld"]') as HTMLElement);
+  expect(field('Broker').getByText('verbunden')).toBeInTheDocument();
+  expect(field('Live-Strom zum Browser').getByText('verbunden')).toBeInTheDocument();
   expect(screen.getByText('20261016T120000Z.jsonl')).toBeInTheDocument();
   expect(screen.getByText('aircraft.wind_speed_extra')).toBeInTheDocument();
   expect(screen.getByText('3')).toBeInTheDocument();

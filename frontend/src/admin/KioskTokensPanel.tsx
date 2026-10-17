@@ -10,7 +10,13 @@ import { OnceVisibleLink } from './OnceVisibleLink';
 import { zustandOf } from './zustand';
 
 const createdAt = (ms: number) =>
-  new Date(ms).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+  new Date(ms).toLocaleString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
 export function KioskTokensPanel() {
   const query = useKioskTokens();
