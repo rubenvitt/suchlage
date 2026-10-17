@@ -328,6 +328,34 @@ mod tests {
         assert_eq!(body["error"], "Fernsteuerung ist nicht gekoppelt");
     }
 
+    /// Trennt der Browser während des Wartens auf Pilot 2, verwirft der Server das Handler-Future.
+    /// Die Antwort muss den Stream trotzdem abschließen, sonst bleibt er in `starting` gesperrt.
+    #[tokio::test]
+    async fn dropped_request_still_finishes_the_command() {
+        let mut app = test_app().await;
+        let op = ready(&app).await;
+        let router = app.router.clone();
+        let request = with_cookie(post_json("/api/streams/start", start_default()), &op);
+        let client = tokio::spawn(async move { send(&router, request).await });
+        let command = tokio::time::timeout(WAIT, app.mqtt_requests.recv())
+            .await
+            .expect("kein MQTT-Befehl gesendet")
+            .expect("Kanal offen");
+        client.abort();
+        assert!(client.await.unwrap_err().is_cancelled());
+        assert!(
+            command.reply.send(result(0)).is_ok(),
+            "der Befehl wartet weiter auf Pilot 2"
+        );
+        tokio::time::timeout(WAIT, async {
+            while phase(&app).await != StreamPhase::Live {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Stream bleibt nach abgebrochener Anfrage nicht in starting");
+    }
+
     #[tokio::test]
     async fn second_start_while_live_is_refused_and_keeps_the_stream() {
         let mut app = test_app().await;

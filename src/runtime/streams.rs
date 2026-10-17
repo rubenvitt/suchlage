@@ -76,25 +76,34 @@ impl StreamOrchestrator {
     }
 
     /// Meldet Beginn und Ergebnis eines Befehls an den Kern; jeder Ausgang endet mit
-    /// `CommandFinished`, damit kein Stream in `starting` hängen bleibt.
+    /// `CommandFinished`, damit kein Stream in `starting` hängen bleibt. Der Ablauf läuft in
+    /// einem eigenen Task: Trennt der Browser während der bis zu 10 s Wartezeit, verwirft der
+    /// Server nur das Warten auf das Ergebnis, nicht den Befehl.
     async fn run(
         &self,
         gateway_sn: &str,
         command: StreamCommand,
-        sent: impl Future<Output = Result<(), ControlError>>,
+        sent: impl Future<Output = Result<(), ControlError>> + Send + 'static,
     ) -> Result<StreamState, AppError> {
-        self.observe(Observation::CommandIssued {
-            gateway_sn: gateway_sn.into(),
-            command: command.clone(),
+        let this = self.clone();
+        let sn = gateway_sn.to_owned();
+        let result = tokio::spawn(async move {
+            this.observe(Observation::CommandIssued {
+                gateway_sn: sn.clone(),
+                command: command.clone(),
+            })
+            .await;
+            let result = sent.await;
+            this.observe(Observation::CommandFinished {
+                gateway_sn: sn,
+                command,
+                result: result.clone().map_err(|e| e.to_string()),
+            })
+            .await;
+            result
         })
-        .await;
-        let result = sent.await;
-        self.observe(Observation::CommandFinished {
-            gateway_sn: gateway_sn.into(),
-            command,
-            result: result.clone().map_err(|e| e.to_string()),
-        })
-        .await;
+        .await
+        .map_err(|e| AppError::Internal(format!("Livebild-Befehl abgebrochen: {e}")))?;
         result.map_err(|e| match e {
             ControlError::Refused(message) => AppError::Unprocessable(message),
             ControlError::Unreachable(message) => AppError::Unavailable(message),
@@ -158,34 +167,33 @@ impl StreamOrchestrator {
             .ok_or_else(|| AppError::Conflict("Fernsteuerung ist nicht gekoppelt".into()))?;
         let url = publish_url(&media, gateway_sn, &stream_key);
         let video_id = source.video_id.clone();
+        let (control, sn) = (self.control.clone(), gateway_sn.to_owned());
         self.run(
             gateway_sn,
             StreamCommand::Start {
                 video_id: video_id.clone(),
             },
-            self.control.start(gateway_sn, &video_id, &url),
+            async move { control.start(&sn, &video_id, &url).await },
         )
         .await
     }
 
     pub async fn stop(&self, gateway_sn: &str) -> Result<StreamState, AppError> {
         let video_id = self.live_video(gateway_sn).await?;
-        self.run(
-            gateway_sn,
-            StreamCommand::Stop,
-            self.control.stop(gateway_sn, &video_id),
-        )
+        let (control, sn) = (self.control.clone(), gateway_sn.to_owned());
+        self.run(gateway_sn, StreamCommand::Stop, async move {
+            control.stop(&sn, &video_id).await
+        })
         .await
     }
 
     /// Ein abgelehnter Wechsel lässt das Bild mit der bisherigen Linse weiterlaufen.
     pub async fn lens(&self, gateway_sn: &str, lens: Lens) -> Result<StreamState, AppError> {
         let video_id = self.live_video(gateway_sn).await?;
-        self.run(
-            gateway_sn,
-            StreamCommand::ChangeLens { lens },
-            self.control.change_lens(gateway_sn, &video_id, lens),
-        )
+        let (control, sn) = (self.control.clone(), gateway_sn.to_owned());
+        self.run(gateway_sn, StreamCommand::ChangeLens { lens }, async move {
+            control.change_lens(&sn, &video_id, lens).await
+        })
         .await
     }
 }
