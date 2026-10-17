@@ -2,7 +2,7 @@
 //! Kopplungscode – die Seite ist öffentlich erreichbar (Spec §6). Zwei Schritte, weil Pilot 2 die
 //! Seriennummer erst nach der Lizenzprüfung herausgibt.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub const INDEX_HTML: &str = include_str!("pilot/index.html");
 pub const PILOT_JS: &str = include_str!("pilot/pilot.js");
@@ -18,8 +18,9 @@ pub struct PilotLicense {
     pub rc_label: String,
 }
 
-/// Schritt 2 (`/pilot/api/connect`): Zugang dieser einen Fernsteuerung.
-#[derive(Debug, Serialize)]
+/// Schritt 2 (`/pilot/api/connect`): Zugang dieser einen Fernsteuerung. `suchlage-sim` liest
+/// dieselbe Antwort.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PilotConnection {
     pub mqtt_host: String,

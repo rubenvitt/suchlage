@@ -1,2 +1,3 @@
-//! Simulator-Bausteine: synthetischer Flug und (Task B16) eine Pilot-2-Attrappe.
+//! Simulator-Bausteine: synthetischer Flug und eine Pilot-2-Attrappe für `suchlage-sim`.
+pub mod fake_pilot;
 pub mod synth;
