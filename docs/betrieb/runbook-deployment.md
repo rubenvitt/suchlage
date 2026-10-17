@@ -95,8 +95,8 @@ Jeder Push auf `main` baut das Image in GitHub Actions (Workflow *Image*,
 - `ghcr.io/rubenvitt/suchlage:m1-<kurzer Commit>` bleibt für einen Rückweg liegen.
 - `ghcr.io/rubenvitt/suchlage:m1` zeigt auf den neuesten Stand von `main`.
 
-Gebaut wird `linux/amd64`. Für einen arm64-Host den Workflow unter *Actions → Image → Run workflow*
-mit `linux/amd64,linux/arm64` starten. Das läuft unter Emulation und dauert deutlich länger.
+Jeder Tag enthält `linux/amd64` und `linux/arm64`. `docker pull` holt am Host von selbst die
+passende Architektur. Von Hand neu bauen: *Actions → Image → Run workflow*.
 
 Den Commit zeigt der Lauf unter *Actions*, lokal auch `git rev-parse --short origin/main`:
 
