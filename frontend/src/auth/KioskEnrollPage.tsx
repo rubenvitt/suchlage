@@ -21,7 +21,8 @@ export default function KioskEnrollPage() {
     apiSend('POST', '/api/auth/kiosk', { token })
       .then(async () => {
         history.replaceState(null, '', '/kiosk'); // Token nicht in der Adresszeile stehen lassen
-        await client.invalidateQueries({ queryKey: queryKeys.me });
+        // Auch ohne Beobachter neu holen: Die Zielseite sähe sonst das alte `null` und leitete zurück zur Anmeldung.
+        await client.invalidateQueries({ queryKey: queryKeys.me, refetchType: 'all' });
         navigate('/', { replace: true });
       })
       .catch((e: unknown) => setServerError(e instanceof ApiError ? e.message : 'Server nicht erreichbar.'));

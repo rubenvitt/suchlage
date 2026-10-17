@@ -1,7 +1,9 @@
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { authOptionsDev, authOptionsSetup } from '../contract/fixtures.generated';
+import { Route, Routes } from 'react-router';
+import { RequireRole } from '../app/RequireRole';
+import { authOptionsDev, authOptionsSetup, meOperator } from '../contract/fixtures.generated';
 import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
 import LoginPage from './LoginPage';
@@ -30,6 +32,39 @@ test('im Dev-Modus gibt es die Entwicklungsanmeldung', async () => {
   renderWithApp(<LoginPage />, { route: '/anmelden' });
   await userEvent.click(await screen.findByRole('button', { name: 'Als Entwicklung anmelden' }));
   expect(called).toBe(true);
+});
+
+test('nach der Entwicklungsanmeldung führt ein Klick zur Lage, nicht zurück zur Anmeldung', async () => {
+  // Die Lage hat `me` schon als `null` (401) im Cache; die Anmeldung muss es neu holen, bevor sie weiterleitet.
+  let signedIn = false;
+  server.use(
+    http.get('/api/auth/options', () => HttpResponse.json(authOptionsDev)),
+    http.get('/api/me', () =>
+      signedIn
+        ? HttpResponse.json(meOperator)
+        : HttpResponse.json({ error: 'Nicht angemeldet' }, { status: 401 }),
+    ),
+    http.post('/api/auth/dev-login', () => {
+      signedIn = true;
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  renderWithApp(
+    <Routes>
+      <Route path="/anmelden" element={<LoginPage />} />
+      <Route
+        path="/"
+        element={
+          <RequireRole roles={['operator']}>
+            <p>Lage</p>
+          </RequireRole>
+        }
+      />
+    </Routes>,
+    { route: '/' },
+  );
+  await userEvent.click(await screen.findByRole('button', { name: 'Als Entwicklung anmelden' }));
+  expect(await screen.findByText('Lage')).toBeInTheDocument();
 });
 
 test('scheitert die Entwicklungsanmeldung, steht die Server-Meldung da', async () => {

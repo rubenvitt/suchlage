@@ -26,7 +26,8 @@ export default function LoginPage() {
       setDevError(e instanceof ApiError ? e.message : 'Server nicht erreichbar.');
       return;
     }
-    await client.invalidateQueries({ queryKey: queryKeys.me });
+    // Auch ohne Beobachter neu holen: Die Zielseite sähe sonst das alte `null` und leitete zurück zur Anmeldung.
+    await client.invalidateQueries({ queryKey: queryKeys.me, refetchType: 'all' });
     navigate(next, { replace: true });
   }
 

@@ -1,6 +1,9 @@
 import { screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { Route, Routes } from 'react-router';
+import userEvent from '@testing-library/user-event';
+import { Link, Route, Routes } from 'react-router';
+import { RequireRole } from '../app/RequireRole';
+import { meKiosk } from '../contract/fixtures.generated';
 import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
 import KioskEnrollPage from './KioskEnrollPage';
@@ -53,4 +56,38 @@ test('gültiger Zugangslink meldet das Gerät an und führt zur Lage, ohne Token
   expect(await screen.findByText('Lage')).toBeInTheDocument();
   expect(token).toBe('gueltig');
   expect(window.location.hash).toBe('');
+});
+
+test('war das Gerät vorher abgemeldet, führt die Kopplung trotzdem zur Lage', async () => {
+  window.location.hash = '#gueltig';
+  let enrolled = false;
+  server.use(
+    http.get('/api/me', () =>
+      enrolled
+        ? HttpResponse.json(meKiosk)
+        : HttpResponse.json({ error: 'Nicht angemeldet' }, { status: 401 }),
+    ),
+    http.post('/api/auth/kiosk', () => {
+      enrolled = true;
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  renderWithApp(
+    <Routes>
+      <Route path="/kiosk" element={<KioskEnrollPage />} />
+      <Route path="/anmelden" element={<Link to="/kiosk">Koppeln</Link>} />
+      <Route
+        path="/"
+        element={
+          <RequireRole roles={['kiosk']}>
+            <p>Lage</p>
+          </RequireRole>
+        }
+      />
+    </Routes>,
+    { route: '/' },
+  );
+  // Erst die Lage ohne Sitzung (`me` ist dann `null` im Cache), danach der Zugangslink.
+  await userEvent.click(await screen.findByRole('link', { name: 'Koppeln' }));
+  expect(await screen.findByText('Lage')).toBeInTheDocument();
 });
