@@ -108,7 +108,11 @@ fn unavailable() -> AppError {
 
 /// Nur lokale Pfade als Rücksprungziel, nie `//host` oder absolute URLs.
 pub fn safe_next(next: &str) -> String {
-    if next.starts_with('/') && !next.starts_with("//") && !next.contains('\\') {
+    // Browser entfernen Tab und Zeilenumbruch aus URLs: `/\t/evil` würde sonst zu `//evil`.
+    let plain = next
+        .chars()
+        .all(|c| !c.is_control() && !c.is_whitespace() && c != '\\');
+    if plain && next.starts_with('/') && !next.starts_with("//") {
         next.to_string()
     } else {
         "/".into()
@@ -280,9 +284,11 @@ impl OidcState {
 #[cfg(test)]
 pub mod test_idp {
     //! Minimaler OIDC-Anbieter für Tests: Discovery, JWKS, Token-Endpunkt mit RS256-ID-Token.
-    //! Er merkt sich jede Token-Anfrage, damit Tests PKCE und Redirect-URL prüfen können.
+    //! Er zählt Discovery-Abrufe und merkt sich jede Token-Anfrage, damit Tests PKCE und
+    //! Redirect-URL prüfen können.
 
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use axum::extract::{Form, State};
@@ -306,6 +312,7 @@ pub mod test_idp {
         pub issuer: String,
         /// Nonce, die der nächste ID-Token trägt. Der Test übernimmt sie aus der Autorisierungs-URL.
         pub nonce: Arc<Mutex<String>>,
+        discovery_requests: Arc<AtomicUsize>,
         token_requests: Arc<Mutex<Vec<HashMap<String, String>>>>,
         client_id: &'static str,
         key: Arc<CoreRsaPrivateSigningKey>,
@@ -320,6 +327,10 @@ pub mod test_idp {
                 .last()
                 .cloned()
                 .expect("Token-Endpunkt wurde aufgerufen")
+        }
+
+        pub fn discovery_count(&self) -> usize {
+            self.discovery_requests.load(Ordering::SeqCst)
         }
 
         pub fn token_request_count(&self) -> usize {
@@ -340,6 +351,7 @@ pub mod test_idp {
         let idp = TestIdp {
             issuer,
             nonce: Arc::new(Mutex::new(String::new())),
+            discovery_requests: Arc::new(AtomicUsize::new(0)),
             token_requests: Arc::new(Mutex::new(Vec::new())),
             client_id,
             key: Arc::new(key),
@@ -354,6 +366,7 @@ pub mod test_idp {
     }
 
     async fn discovery(State(idp): State<TestIdp>) -> Json<serde_json::Value> {
+        idp.discovery_requests.fetch_add(1, Ordering::SeqCst);
         let i = &idp.issuer;
         Json(serde_json::json!({
             "issuer": i, "authorization_endpoint": format!("{i}/authorize"), "token_endpoint": format!("{i}/token"),
@@ -514,5 +527,8 @@ mod tests {
         assert_eq!(safe_next("https://evil.example"), "/");
         assert_eq!(safe_next("/\\evil"), "/");
         assert_eq!(safe_next(""), "/");
+        assert_eq!(safe_next("/\t/evil.example"), "/");
+        assert_eq!(safe_next("/\n/evil.example"), "/");
+        assert_eq!(safe_next("/ /evil.example"), "/");
     }
 }

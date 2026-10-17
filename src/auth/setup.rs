@@ -46,25 +46,36 @@ pub async fn ensure_token(
     )))
 }
 
+/// Prüft den Token, ohne ihn zu verbrauchen.
+pub async fn verify(pool: &SqlitePool, presented: &str, now_ms: i64) -> Result<(), AppError> {
+    check(pool, presented, now_ms).await.map(|_| ())
+}
+
 /// Prüft und verbraucht den Token. Danach ist er ungültig.
 pub async fn consume(pool: &SqlitePool, presented: &str, now_ms: i64) -> Result<(), AppError> {
-    let rejected = || {
-        AppError::UnauthorizedWith(
-            "Einrichtungslink ungültig oder abgelaufen – Server neu starten für einen neuen Link"
-                .into(),
-        )
-    };
+    let stored = check(pool, presented, now_ms).await?;
+    // Nur löschen, wenn noch derselbe Token gilt: Von zwei gleichzeitigen Anfragen gewinnt eine.
+    if !store::settings::delete_if(pool, KEY, &stored).await? {
+        return Err(rejected());
+    }
+    Ok(())
+}
+
+fn rejected() -> AppError {
+    AppError::UnauthorizedWith(
+        "Einrichtungslink ungültig oder abgelaufen – Server neu starten für einen neuen Link"
+            .into(),
+    )
+}
+
+async fn check(pool: &SqlitePool, presented: &str, now_ms: i64) -> Result<Stored, AppError> {
     let stored: Stored = store::settings::get(pool, KEY)
         .await?
         .ok_or_else(rejected)?;
     if stored.expires_at_ms <= now_ms || stored.hash != token::hash(presented.trim()) {
         return Err(rejected());
     }
-    // Nur löschen, wenn noch derselbe Token gilt: Von zwei gleichzeitigen Anfragen gewinnt eine.
-    if !store::settings::delete_if(pool, KEY, &stored).await? {
-        return Err(rejected());
-    }
-    Ok(())
+    Ok(stored)
 }
 
 #[cfg(all(test, not(feature = "dev")))]
