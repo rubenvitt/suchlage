@@ -1,0 +1,198 @@
+/* Lage-Ansichten. Fugenraster: `linie` ist der Grund, die Haarlinie scheint durch `gap: 1px`.
+   Farben kommen aus `--lfh-*`, Schriftgrößen aus `--lfh-typo-*`. */
+.sl-work {
+  --sl-work-side: 480px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sl-work-side);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: 'main side' 'strip strip';
+  height: 100%;
+  gap: 1px;
+  background: var(--lfh-linie);
+}
+/* „Livebild groß“: die Spalten tauschen ihre Breite, die Karte bleibt links. */
+.sl-work[data-swap='true'] {
+  grid-template-columns: var(--sl-work-side) minmax(0, 1fr);
+}
+.sl-work-map {
+  grid-area: main;
+  position: relative;
+  min-height: 0;
+  background: var(--lfh-grund);
+}
+.sl-work-side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow: auto;
+  background: var(--lfh-linie);
+}
+.sl-work-side > * {
+  flex: none;
+  background: var(--lfh-paneel);
+}
+/* Das letzte Paneel füllt die Spalte, sonst schiene unten die Fugenfarbe als graue Fläche durch. */
+.sl-work-side > :last-child {
+  flex: 1 0 auto;
+}
+/* Groß bekommt das Livebild die Höhe, die neben Werkzeugen und Flug bleibt. In 16:9 über die volle
+   Breite wäre es höher als der Schirm, und Linsenwahl und Flug lägen außer Sicht. */
+.sl-work[data-swap='true'] .sl-work-video {
+  flex: 1 1 0;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+}
+.sl-work[data-swap='true'] .sl-work-video > * {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.sl-work[data-swap='true'] .sl-work-video .sl-video {
+  aspect-ratio: auto;
+  height: 100%;
+}
+.sl-work[data-swap='true'] .sl-work-side > :last-child {
+  flex: none;
+}
+.sl-work-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.sl-work-swap {
+  margin-left: auto;
+}
+.sl-work-strip {
+  grid-area: strip;
+}
+/* Hinweis über der Karte: links oben, rechts stehen die Kartenknöpfe. */
+.sl-view-notice {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: min(420px, calc(100% - 96px));
+}
+
+/* Großbild: Karte 60 %, Livebild 40 %, darunter die Leiste mit großen Ziffern. Der Mauszeiger ist
+   im Rahmen aus (`frame.css`). */
+.sl-kiosk {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: 'map video' 'strip strip';
+  height: 100%;
+  gap: 1px;
+  background: var(--lfh-linie);
+}
+.sl-kiosk-map {
+  grid-area: map;
+  position: relative;
+  min-height: 0;
+  background: var(--lfh-grund);
+}
+/* Das Livebild nimmt die ganze Spalte, das Bild steht unverzerrt darin. In 16:9 bei 40 % Breite
+   blieben über und unter dem Paneel leere Flächen. */
+.sl-kiosk-video {
+  grid-area: video;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--lfh-paneel);
+}
+.sl-kiosk-video > * {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.sl-kiosk-video .sl-video {
+  aspect-ratio: auto;
+  height: 100%;
+}
+.sl-kiosk-strip {
+  grid-area: strip;
+}
+/* Die acht Zellen des Großbilds (`KIOSK_VALUES` und das Alter). Schmaler als 1900 px in zwei Zeilen
+   zu fünf Spuren: oben die fünf Zahlen, unten Modus (2) · Flugzeit · Alter (2). So brechen weder
+   Ziffern noch Einheiten um, und „Rückkehr zum Startpunkt“ und „Verbindung verloren 14:31:02“
+   passen bei 1280 px in die zwei Wertzeilen, die die Leiste im Großbild ohnehin freihält. */
+.sl-kiosk-strip .sl-strip[data-size='large'] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.sl-kiosk-strip .sl-strip[data-size='large'] :is(.sl-strip-cell[data-key='mode'], .sl-strip-age) {
+  grid-column: span 2;
+}
+/* Ab 1900 px in einer Zeile. Der Modus braucht für „Rückkehr zum“ 13 Teile, das Alter für
+   „Verbindung verloren“ 20; darunter bräche der Modus in drei Zeilen (gemessen bei 1700 px). */
+@media (min-width: 1900px) {
+  .sl-kiosk-strip .sl-strip[data-size='large'] {
+    grid-template-columns: repeat(5, minmax(0, 8fr)) minmax(0, 13fr) minmax(0, 8fr) minmax(0, 20fr);
+  }
+  .sl-kiosk-strip .sl-strip[data-size='large'] :is(.sl-strip-cell[data-key='mode'], .sl-strip-age) {
+    grid-column: auto;
+  }
+}
+
+/* Mobil: eine Spalte, die Seite scrollt. Die Karte füllt den Rest, mindestens die halbe Bildschirmhöhe. */
+.sl-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 100%;
+  background: var(--lfh-linie);
+}
+.sl-mobile > * {
+  flex: none;
+  min-width: 0;
+  background: var(--lfh-paneel);
+}
+.sl-mobile > .sl-empty {
+  border: 0;
+}
+/* Die Karte füllt den Rest bis zum unteren Rand; mit einer Mindesthöhe scrollte die Seite und
+   „Folgen“ zentrierte das Fluggerät außerhalb des Sichtbaren. */
+.sl-mobile > .sl-mobile-map {
+  flex: 1 1 0;
+  min-height: 200px;
+  position: relative;
+}
+.sl-mobile-map > .sl-map {
+  min-height: 0;
+}
+
+.sl-empty {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  background: var(--lfh-paneel);
+  border: 1px solid var(--lfh-linie-stark);
+}
+.sl-empty h2 {
+  margin: 0;
+  /* Stufe des Seitentitels statt der Überschrift (30 px): Ein Hinweis soll die Karte nicht übertönen. */
+  font: var(--lfh-typo-seitentitel-gewicht) var(--lfh-typo-seitentitel-groesse) var(--lfh-schrift-display);
+  color: var(--lfh-text);
+}
+.sl-empty p {
+  margin: 0;
+  font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-groesse) var(--lfh-schrift-text);
+  line-height: 1.5;
+  color: var(--lfh-text-2);
+}
+
+.sl-context {
+  min-width: 0;
+  overflow: hidden;
+  font: var(--lfh-typo-text-klein-gewicht) var(--lfh-typo-text-klein-groesse) var(--lfh-schrift-text);
+  color: var(--lfh-rahmen-text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1199px) {
+  .sl-work {
+    --sl-work-side: 380px;
+  }
+}

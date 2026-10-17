@@ -1,0 +1,13 @@
+.git
+target
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+**/*.tsbuildinfo
+data
+records
+deploy/.env
+deploy/mosquitto/passwd
+deploy/mediamtx.yml
+deploy/pilot/config.js

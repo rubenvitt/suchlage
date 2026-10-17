@@ -1,0 +1,79 @@
+/* Verwaltung: Einstellungen, Einrichtung, System. `.sl-stack`, `.sl-ok`, `.sl-table` stehen in `app/frame.css`. */
+.sl-settings {
+  max-width: 960px;
+}
+.sl-system {
+  max-width: 1200px;
+}
+
+.sl-form {
+  max-width: 560px;
+}
+.sl-form-hint {
+  margin: 0 0 16px;
+  color: var(--lfh-text-2);
+  line-height: 1.5;
+}
+.sl-form-result {
+  margin-bottom: 16px;
+}
+.sl-code {
+  font: 500 var(--lfh-typo-text-klein-groesse) var(--lfh-schrift-zahl);
+  color: var(--lfh-text);
+  overflow-wrap: anywhere;
+}
+
+/* Anlegen unter der Liste: Bezeichnung und Knopf in einer Zeile, schmal untereinander. */
+.sl-create {
+  row-gap: 8px;
+}
+/* Schmal scrollt nur die Tabelle, nie die Seite. */
+.sl-table-scroll {
+  overflow-x: auto;
+}
+.sl-cell-action {
+  text-align: right;
+  white-space: nowrap;
+}
+.sl-col-count {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* Einmal sichtbarer Link: Bedienfläche, damit er sich vom Rest abhebt. */
+.sl-once {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--lfh-bedien);
+  background: var(--lfh-bedien-flaeche);
+}
+.sl-once svg {
+  display: block;
+}
+.sl-once-body {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.sl-once-url {
+  display: block;
+  font: 500 13px var(--lfh-schrift-zahl);
+  word-break: break-all;
+  color: var(--lfh-bedien-text);
+}
+.sl-once-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 767px) {
+  .sl-once {
+    grid-template-columns: 1fr;
+  }
+}

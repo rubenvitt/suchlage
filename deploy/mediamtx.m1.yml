@@ -1,0 +1,35 @@
+# M1: Zugriff entscheidet der Suchlage-Server (ADR 0003). Keine Geheimnisse in dieser Datei.
+logLevel: info
+rtsp: no
+srt: no
+moq: no
+api: no
+rtmp: yes
+rtmpAddress: :1935
+hls: yes
+hlsAddress: :8888
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+# webrtcAdditionalHosts setzt die Umgebung (MTX_WEBRTCADDITIONALHOSTS): Dev 127.0.0.1, Betrieb Tailscale-IP.
+playback: yes
+playbackAddress: :9996
+
+authMethod: http
+# Überschrieben per MTX_AUTHHTTPADDRESS (Dev: Server läuft auf dem Host).
+authHTTPAddress: http://server:8080/internal/media/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+
+pathDefaults:
+  record: yes
+  recordFormat: fmp4
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordSegmentDuration: 10m
+  # Vorgabe wäre 1d – Flugvideos müssen bleiben (Spec §4.4).
+  recordDeleteAfter: 0s
+
+paths:
+  all_others:

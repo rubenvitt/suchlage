@@ -1,0 +1,28 @@
+# Werkzeugversionen – die eine Quelle (wie Lifeline). Rust pinnt rust-toolchain.toml.
+[tools]
+node = "26.7.0"
+pnpm = "11.10.0"
+
+[tasks.check]
+description = "Qualitäts-Gate: Modulgrenzen, Rust, Vertrag, Frontend, Pilot-Seite"
+run = "scripts/check.sh"
+
+[tasks.ui]
+description = "Oberfläche ohne Backend ansehen: Beispieldaten und abgespielter Flug (Vorschau-Modus)"
+run = "pnpm -C frontend dev --mode demo --host 127.0.0.1"
+
+[tasks.dev]
+description = "Lokale Oberfläche mit Broker, MediaMTX, Server (Feature dev), Vite und Simulator"
+run = "scripts/dev.sh"
+
+[tasks."dev:smoke"]
+description = "Ende-zu-Ende-Prüfung gegen echte Container (ACL, update_topo, Flug, Aufnahme, RTMP-Auth)"
+run = "scripts/dev-smoke.sh"
+
+[tasks.e2e]
+description = "Playwright-Smoke: Arbeitsplatz, Großbild, mobil gegen Simulator"
+run = "scripts/e2e.sh"
+
+[tasks.image]
+description = "Betriebs-Image suchlage:m1 bauen (ohne Feature dev)"
+run = "docker build -f deploy/Dockerfile -t suchlage:m1 ."

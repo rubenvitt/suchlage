@@ -1,0 +1,44 @@
+.sl-map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  background: var(--lfh-grund);
+}
+.sl-map-canvas {
+  position: absolute;
+  inset: 0;
+}
+/* Ohne WebGL 2: der Hinweis steht, wo sonst die Karte wäre. */
+.sl-map-unavailable {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  padding: 16px;
+  text-align: center;
+  color: var(--lfh-gedaempft);
+  font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-groesse) var(--lfh-schrift-text);
+}
+.sl-map-unavailable b {
+  color: var(--lfh-alarm-text);
+  font-weight: 600;
+}
+/* Fugenraster: die Haarlinie zwischen den Knöpfen ist der Hintergrund, der durch `gap` scheint. */
+.sl-map-tools {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  gap: 1px;
+  background: var(--lfh-linie);
+}
+/* Die Quellenangabe von MapLibre ist sonst ein weißer Kasten, auch auf der dunklen Karte. */
+.sl-map .maplibregl-ctrl-attrib {
+  background: var(--lfh-paneel);
+  color: var(--lfh-gedaempft);
+}
+.sl-map .maplibregl-ctrl-attrib a {
+  color: var(--lfh-gedaempft);
+}

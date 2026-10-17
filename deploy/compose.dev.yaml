@@ -1,0 +1,36 @@
+# Lokale Entwicklung. Eigener Projektname: kollidiert weder mit dem M0-Spike (smoke.sh) noch mit dem Betrieb.
+name: suchlage-dev
+
+services:
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    entrypoint: ["/entrypoint.sh"]
+    environment: { DYNSEC_INIT_USER: suchlage-admin, DYNSEC_INIT_PASSWORD: dev-admin }
+    ports: ["127.0.0.1:1883:1883"]
+    volumes:
+      - ./mosquitto/mosquitto.m1.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/entrypoint.sh:ro
+      - mqtt-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-u", "suchlage-admin", "-P", "dev-admin", "-t", "$$SYS/broker/uptime", "-C", "1", "-W", "3"]
+      interval: 2s
+      retries: 15
+
+  media:
+    image: bluenviron/mediamtx:1.21.2
+    environment:
+      MTX_WEBRTCADDITIONALHOSTS: 127.0.0.1
+      MTX_AUTHHTTPADDRESS: http://host.docker.internal:8080/internal/media/auth
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports:
+      - "127.0.0.1:1935:1935"
+      - "127.0.0.1:8888:8888"
+      - "127.0.0.1:8889:8889"
+      - "127.0.0.1:8189:8189/udp"
+      - "127.0.0.1:9996:9996"
+    volumes:
+      - ./mediamtx.m1.yml:/mediamtx.yml:ro
+      - ../data/dev/video:/recordings
+
+volumes:
+  mqtt-data:
