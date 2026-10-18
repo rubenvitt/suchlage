@@ -325,8 +325,13 @@ ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d s
 ```
 
 Ab 0.4.0 läuft die Migration 0004 (Einsätze) beim Start des Servers von selbst. Alle vorhandenen
-Flüge, Kartenelemente und Fotos erscheinen danach unter „ohne Einsatz“; es geht nichts verloren und
-nichts muss von Hand angefasst werden. Vor dem Update trotzdem sichern (siehe „Rückweg“).
+Flüge, Kartenelemente und Fotos erscheinen danach unter „ohne Einsatz“; die Migration selbst
+verliert nichts (zum Aufräumen ohne Einsatz siehe die Warnung unten). Vor dem Update trotzdem sichern (siehe „Rückweg“).
+
+**Achtung ab dem Stand mit „Aufräumen ohne Einsatz“ (SUL-78):** Kurz nach dem Start löscht der Server
+alle Kartenelemente ohne Einsatz, die seit mehr als 24 h nicht geändert wurden, auch die aus 0.4.0
+übernommenen. Wer solche Zeichnungen behalten will, ordnet sie vor dem Update einem Einsatz zu (Lage,
+„Einsatz zuordnen“).
 
 Haben sich Dateien in `deploy/` geändert, zuerst das `rsync` aus Schritt 4 laufen lassen und dann
 `up -d` für alle Dienste. Die Daten bleiben in den Volumes.
@@ -360,8 +365,16 @@ Was in welchem Volume liegt:
 dort die Aufzeichnungen gelöschter Flüge. Dafür läuft MediaMTX als derselbe Nutzer wie der Server
 (UID 65532, `user:` in `compose.m1.yaml`). Vor jedem Start übergibt der Einmal-Dienst `video-init`
 die Ablage diesem Nutzer, auch ältere Aufzeichnungen, die MediaMTX noch als root geschrieben hat.
-Von Hand ist dafür nichts zu tun. Fehlt die Ablage am Server, scheitert das Löschen eines Flugs mit
-Video mit 503 „Videoablage nicht eingehängt“.
+Von Hand ist dafür nichts zu tun. Fehlt die Ablage am Server, scheitert das Löschen eines Flugs, seines
+Videos oder eines Einsatzes mit Video mit 503 „Videoablage nicht eingehängt“; gelöscht ist dann nichts,
+ein zweiter Versuch nach dem Einhängen räumt alles. Dasselbe gilt für Fotos, wenn der Fotospeicher
+(Garage) nicht erreichbar ist.
+
+**Aufräumen ohne Einsatz.** Alle 10 Minuten löscht der Server Kartenelemente ohne Einsatz, die seit
+mehr als 24 h nicht geändert wurden. Browser und Pilot 2 erfahren es sofort. Flüge und Fotos ohne
+Einsatz bleiben, damit man sie später einem Einsatz zuordnen kann; sie lassen sich im Flugdetail
+einzeln löschen (nur `admin`). Einsätze, Flüge, Videos und Fotos löscht nur ein Mensch, nie der Server
+von selbst.
 
 **Broker neu aufbauen.** Ist `mqtt-data` verloren, Schritt 5 wiederholen und das neue Passwort
 unter *Einstellungen → Broker* eintragen. Die Zugänge der Fernsteuerungen legt der Server beim

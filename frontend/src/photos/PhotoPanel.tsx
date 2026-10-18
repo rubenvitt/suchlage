@@ -1,5 +1,7 @@
 import { Button } from 'antd';
 import { useState } from 'react';
+import { useDeleteShot } from '../api/queries';
+import { DeleteButton } from '../components/DeleteButton';
 import { Segmentleiste } from '../components/instrument';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
 import { LENS_LABEL, shotTitle } from './photos';
@@ -9,12 +11,15 @@ interface Props {
   shot: PhotoShot;
   /** Original und Download nur für Konten; das Großbild zeigt nur das Vorschaubild. */
   canOpenOriginal: boolean;
+  /** „Foto löschen …“ nur für die Verwaltung und nur im Flugdetail. */
+  canDelete?: boolean;
   onClose: () => void;
 }
 
 /** Vorschaubild einer Auslösung mit Umschalter der Linsen (Wärme zuerst, wie der Server sortiert). */
-export function PhotoPanel({ shot, canOpenOriginal, onClose }: Props) {
+export function PhotoPanel({ shot, canOpenOriginal, canDelete = false, onClose }: Props) {
   const [chosenId, setChosenId] = useState<number | null>(null);
+  const remove = useDeleteShot();
   const photo = shot.photos.find((p) => p.id === chosenId) ?? shot.photos[0];
   if (!photo) return null;
   return (
@@ -50,6 +55,19 @@ export function PhotoPanel({ shot, canOpenOriginal, onClose }: Props) {
             Herunterladen
           </a>
         </p>
+      )}
+      {canDelete && (
+        <DeleteButton
+          label="Foto löschen …"
+          title={`Foto ${shotTitle(shot)} löschen?`}
+          pending={remove.isPending}
+          error={remove.error}
+          onConfirm={() => remove.mutateAsync(shot.id)}
+        >
+          {shot.photos.length > 1
+            ? `Gelöscht werden alle ${shot.photos.length} Linsen dieser Auslösung, Originale und Vorschaubilder.`
+            : 'Gelöscht werden Original und Vorschaubild.'}
+        </DeleteButton>
       )}
     </section>
   );

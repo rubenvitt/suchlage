@@ -138,5 +138,17 @@ curl -sf -b "$JAR" -o /dev/null "$URL/api/photos/$PHOTO/thumb"; check $? "Vorsch
 SIZE=$(curl -sf -b "$JAR" "$URL/api/photos/$PHOTO/original?download=1" | wc -c)
 [ "$SIZE" -gt 1000 ]; check $? "Original herunterladbar ($SIZE Bytes)"
 
+# Einsatz abschließen und mit allem löschen (Spec Einsatz-Bedienung §4); dev-login ist Verwaltung.
+ORIGINAL=$(printf '%s' "$SHOT" | jq -r '.photos[0].original_url')
+api -X POST "$URL/api/missions/$MISSION/close" | jq -e '.state == "closed"' >/dev/null
+check $? "Einsatz abgeschlossen"
+api "$URL/api/missions/$MISSION/contents" | jq -e '.flights >= 1 and .photos >= 1 and .video_segments >= 1' >/dev/null
+check $? "Inhalt des Einsatzes gezählt (Flüge, Fotos, Videosegmente)"
+api -X DELETE "$URL/api/missions/$MISSION" >/dev/null; check $? "Einsatz gelöscht"
+status() { curl -s -o /dev/null -w '%{http_code}' -b "$JAR" "$1"; }
+[ "$(status "$URL/api/flights/$ID")" = 404 ]; check $? "Flug ist weg"
+[ "$(status "$URL$ORIGINAL")" = 404 ]; check $? "Foto-Original ist weg"
+! ls "$SL_VIDEO_DIR"/live/RCA/*.mp4 >/dev/null 2>&1; check $? "Videosegmente des Flugs sind weg"
+
 [ $FAIL = 0 ] && echo ok || { echo "--- Server-Log (Ende)"; tail -40 "$TMP/server.log"; echo "--- Simulator-Log"; tail -20 "$TMP/sim.log"; }
 exit $FAIL

@@ -160,3 +160,35 @@ export const useMissionContents = (id: number) =>
     queryKey: [...queryKeys.missions, id, 'contents'],
     queryFn: () => apiGet<MissionContents>(`/api/missions/${id}/contents`),
   });
+
+/**
+ * Flug samt Spur, Video und Fotos löschen (nur Verwaltung); 422 laufend, 503 Ablage fehlt.
+ * `onDeleted` verlässt das Detail vor dem Neuladen, sonst liefe dessen 404-Umleitung dagegen.
+ */
+export function useDeleteFlight(onDeleted: () => void) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<void>('DELETE', `/api/flights/${id}`),
+    onSuccess: () => {
+      onDeleted();
+      for (const queryKey of [queryKeys.missions, queryKeys.flights, queryKeys.photos])
+        void client.invalidateQueries({ queryKey });
+    },
+  });
+}
+/** Nur die Aufzeichnung eines Flugs löschen; danach zeigt das Detail „Kein Video“. */
+export function useDeleteFlightVideo() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<void>('DELETE', `/api/flights/${id}/video`),
+    onSuccess: (_, id) => client.invalidateQueries({ queryKey: queryKeys.flight(id) }),
+  });
+}
+/** Eine Auslösung mit allen Linsen löschen. Die Kennung enthält `/` und geht darum kodiert. */
+export function useDeleteShot() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (shotId: string) => apiSend<void>('DELETE', `/api/photos/shots/${encodeURIComponent(shotId)}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.photos }),
+  });
+}

@@ -142,6 +142,10 @@ export const handlersFor = (me: Me) => {
     }),
     http.get('/api/flights/:id', () => HttpResponse.json(fx.flightDetail)),
     http.get('/api/flights/:id/photos', () => HttpResponse.json(fx.photoShots)),
+    // Löschen (nur Verwaltung): Die Vorschau bestätigt nur, ihre Beispieldaten bleiben.
+    http.delete('/api/flights/:id', noContent),
+    http.delete('/api/flights/:id/video', noContent),
+    http.delete('/api/photos/shots/:shot', noContent),
     http.get('/api/photos', ({ request }) =>
       HttpResponse.json(demoPhotos.filter((s) => matchesMission(request.url, s.mission_id))),
     ),

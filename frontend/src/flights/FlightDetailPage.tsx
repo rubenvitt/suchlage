@@ -1,6 +1,7 @@
+import { Space } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import {
   Datenfeld,
   Datenraster,
@@ -11,7 +12,8 @@ import {
   StatusChip,
 } from '../components/instrument';
 import { ApiError } from '../api/client';
-import { useFlight, useFlightPhotos, useMe } from '../api/queries';
+import { useDeleteFlight, useDeleteFlightVideo, useFlight, useFlightPhotos, useMe } from '../api/queries';
+import { DeleteButton } from '../components/DeleteButton';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import { useLive, useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
@@ -43,6 +45,8 @@ export function FlightDetailPage() {
   const id = flightIdOf(raw);
   const { data, isPending, isError, error, refetch } = useFlight(id);
 
+  // Anderswo gelöscht: Das Neuladen (`missions_changed`) findet den Flug nicht mehr, die Seite geht zur Liste.
+  if (data && error instanceof ApiError && error.status === 404) return <Navigate to="/flights" replace />;
   if (id == null || (error instanceof ApiError && error.status === 404)) {
     return (
       <Page>
@@ -85,7 +89,16 @@ function Detail({ data }: { data: FlightDetail }) {
   const { data: listed } = useFlightPhotos(f.id);
   const photos = useMemo(() => mergeShots(listed, NO_LIVE_SHOTS), [listed]);
   const { data: me } = useMe();
-  const photo = usePhotoSelection(photos, me != null && me.role !== 'kiosk');
+  const admin = me?.role === 'admin';
+  const photo = usePhotoSelection(photos, me != null && me.role !== 'kiosk', admin);
+  const navigate = useNavigate();
+  const removeFlight = useDeleteFlight(() => navigate('/flights'));
+  const removeVideo = useDeleteFlightVideo();
+  const goes = new Intl.ListFormat('de').format([
+    'Spur',
+    ...(data.video ? ['Video'] : []),
+    ...(photos.length ? [`${photos.length} ${photos.length === 1 ? 'Auslösung' : 'Auslösungen'} mit allen Linsen`] : []),
+  ]);
   const r = flightRow(f, nowMs);
   const [distance, distanceUnit] = fmt.distance(f.distance_m);
   const height = fmt.meters(f.max_elevation_m);
@@ -112,9 +125,22 @@ function Detail({ data }: { data: FlightDetail }) {
             titel={`Flug ${f.id}`}
             meta={r.date}
             aktion={
-              <Link className="sl-panel-link" to="/flights">
-                Alle Flüge
-              </Link>
+              <Space size={12}>
+                {admin && (
+                  <DeleteButton
+                    label="Flug löschen …"
+                    title={`Flug ${f.id} löschen?`}
+                    pending={removeFlight.isPending}
+                    error={removeFlight.error}
+                    onConfirm={() => removeFlight.mutateAsync(f.id)}
+                  >
+                    Mit dem Flug gelöscht: {goes}.
+                  </DeleteButton>
+                )}
+                <Link className="sl-panel-link" to="/flights">
+                  Alle Flüge
+                </Link>
+              </Space>
             }
           >
             <Kennzahlenband spalten={3} beschriftung="Kennzahlen">
@@ -183,6 +209,17 @@ function Detail({ data }: { data: FlightDetail }) {
                 <a className="sl-panel-link" href={data.video.download_url} download>
                   Video herunterladen
                 </a>
+                {admin && (
+                  <DeleteButton
+                    label="Video löschen …"
+                    title={`Video von Flug ${f.id} löschen?`}
+                    pending={removeVideo.isPending}
+                    error={removeVideo.error}
+                    onConfirm={() => removeVideo.mutateAsync(f.id)}
+                  >
+                    Gelöscht wird nur die Aufzeichnung; Spur und Fotos bleiben.
+                  </DeleteButton>
+                )}
                 <p className="sl-muted">Das Video beginnt mit dem Livebild, meist kurz nach dem Abheben.</p>
               </div>
             ) : (

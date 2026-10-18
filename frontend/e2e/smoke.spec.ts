@@ -11,6 +11,9 @@ async function devLogin(page: Page) {
   await page.goto('/anmelden');
   await page.getByRole('button', { name: 'Als Entwicklung anmelden' }).click();
   await expect(page.getByText('SYNC')).toBeVisible({ timeout: 15_000 });
+  // Ohne laufenden Einsatz kommt die Startseite. Die Tests fliegen ohne Einsatz: Keiner startet einen,
+  // damit der Simulator-Flug der anderen Projekte unberührt bleibt.
+  await page.getByRole('button', { name: 'Überspringen' }).click();
 }
 
 /** Karte und Livebild stehen; erst dann zeigt ein Bildschirmfoto die Ansicht, wie sie im Einsatz aussieht. */
