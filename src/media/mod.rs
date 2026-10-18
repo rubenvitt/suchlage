@@ -2,6 +2,7 @@
 
 pub mod hook;
 pub mod proxy;
+pub mod recordings;
 
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()

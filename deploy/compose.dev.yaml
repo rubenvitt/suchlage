@@ -37,7 +37,8 @@ services:
       - "127.0.0.1:${SL_PLAYBACK_PORT:-9996}:${SL_PLAYBACK_PORT:-9996}"
     volumes:
       - ./mediamtx.m1.yml:/mediamtx.yml:ro
-      - ../data/dev/video:/recordings
+      # Dieselbe Ablage sieht der Server unter SUCHLAGE_DATA_DIR/video; dev-smoke und e2e setzen SL_VIDEO_DIR.
+      - ${SL_VIDEO_DIR:-../data/dev/video}:/recordings
 
   # Fotospeicher (M3). Ein Knoten; Layout, Bucket und Server-Schlüssel legt Garage beim Start selbst an.
   # Die Werte stehen auch in src/auth/dev.rs.

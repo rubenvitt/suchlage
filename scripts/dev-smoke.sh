@@ -9,6 +9,10 @@ pick_ports
 URL=http://127.0.0.1:$SL_SERVER_PORT
 TMP=$(mktemp -d)
 export SUCHLAGE_DATA_DIR="$TMP/data" SUCHLAGE_BIND=127.0.0.1:$SL_SERVER_PORT SUCHLAGE_PUBLIC_URL=$URL
+# MediaMTX zeichnet in die Videoablage des Servers auf (compose.dev.yaml).
+export SL_VIDEO_DIR="$SUCHLAGE_DATA_DIR/video"
+# Vorher anlegen: Fehlt die Quelle, legt Docker sie (unter Linux als root) samt data/ selbst an.
+mkdir -p "$SL_VIDEO_DIR"
 # Eigenes Compose-Projekt: `down -v` darf nie den laufenden Dev-Stack (suchlage-dev) samt Broker-Volume treffen.
 DC="docker compose -p suchlage-smoke -f deploy/compose.dev.yaml"
 pids=""
@@ -121,6 +125,7 @@ api "$URL/api/flights/$ID" | jq -e '.segments | length >= 1' >/dev/null; check $
 api "$URL/api/flights/$ID" | jq -e '.video != null' >/dev/null; check $? "Flugvideo aufgezeichnet"
 SIZE=$(curl -sf -b "$JAR" "$URL/api/flights/$ID/video?download=1" | wc -c)
 [ "$SIZE" -gt 1000 ]; check $? "Flugvideo herunterladbar ($SIZE Bytes)"
+ls "$SL_VIDEO_DIR"/live/RCA/*.mp4 >/dev/null 2>&1; check $? "Aufzeichnung in der Videoablage des Servers"
 
 # M3: Der Simulator lädt nach der Landung eine Auslösung (Wärme und Weit) über Garage hoch.
 SHOT=$(api $URL/api/photos | jq '.[-1]')

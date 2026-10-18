@@ -12,6 +12,10 @@ URL=http://127.0.0.1:$SL_SERVER_PORT
 TMP=$(mktemp -d)
 # E2E_BASE_URL liest nur playwright.config.ts.
 export SUCHLAGE_DATA_DIR="$TMP/data" SUCHLAGE_BIND=127.0.0.1:$SL_SERVER_PORT SUCHLAGE_PUBLIC_URL=$URL E2E_BASE_URL=$URL
+# MediaMTX zeichnet in die Videoablage des Servers auf (compose.dev.yaml).
+export SL_VIDEO_DIR="$SUCHLAGE_DATA_DIR/video"
+# Vorher anlegen: Fehlt die Quelle, legt Docker sie (unter Linux als root) samt data/ selbst an.
+mkdir -p "$SL_VIDEO_DIR"
 # Eigenes Compose-Projekt wie dev-smoke: `down -v` trifft nie den Dev-Stack.
 DC="docker compose -p suchlage-e2e -f deploy/compose.dev.yaml"
 pids=""

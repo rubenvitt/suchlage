@@ -356,6 +356,13 @@ Was in welchem Volume liegt:
 
 `docker compose … down -v` löscht alle drei.
 
+**Videoablage gemeinsam.** Der Server hängt `suchlage-m1_video` unter `/data/video` ein und löscht
+dort die Aufzeichnungen gelöschter Flüge. Dafür läuft MediaMTX als derselbe Nutzer wie der Server
+(UID 65532, `user:` in `compose.m1.yaml`). Vor jedem Start übergibt der Einmal-Dienst `video-init`
+die Ablage diesem Nutzer, auch ältere Aufzeichnungen, die MediaMTX noch als root geschrieben hat.
+Von Hand ist dafür nichts zu tun. Fehlt die Ablage am Server, scheitert das Löschen eines Flugs mit
+Video mit 503 „Videoablage nicht eingehängt“.
+
 **Broker neu aufbauen.** Ist `mqtt-data` verloren, Schritt 5 wiederholen und das neue Passwort
 unter *Einstellungen → Broker* eintragen. Die Zugänge der Fernsteuerungen legt der Server beim
 nächsten Koppeln wieder an.

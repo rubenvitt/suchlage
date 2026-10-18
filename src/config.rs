@@ -64,6 +64,11 @@ impl BootConfig {
     pub fn thumbs_dir(&self) -> PathBuf {
         self.data_dir.join("thumbs")
     }
+
+    /// Aufzeichnungen von MediaMTX (`live/<RC-SN>/…`), dasselbe Volume wie `/recordings` dort.
+    pub fn video_dir(&self) -> PathBuf {
+        self.data_dir.join("video")
+    }
 }
 
 #[cfg(test)]
