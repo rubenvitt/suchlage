@@ -28,7 +28,18 @@ export const missionFixtures = (): Mission[] => [
     created_at_ms: 1792150000000,
     started_at_ms: 1792150600000,
     closed_at_ms: null,
-    sections: [{ id: 1, label: 'Nord', location: null, created_at_ms: 1792150700000 }],
+    sections: [
+      {
+        id: 1,
+        label: 'Nord',
+        location: null,
+        created_at_ms: 1792150700000,
+        has_map_photo: false,
+        map_photo_at_ms: null,
+      },
+    ],
+    origin: 'web',
+    flugmappe: null,
   },
   {
     id: 2,
@@ -40,6 +51,8 @@ export const missionFixtures = (): Mission[] => [
     started_at_ms: null,
     closed_at_ms: null,
     sections: [],
+    origin: 'web',
+    flugmappe: null,
   },
 ];
 
@@ -61,6 +74,8 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         started_at_ms: null,
         closed_at_ms: null,
         sections: [],
+        origin: 'web',
+        flugmappe: null,
       };
       missions.push(created);
       return HttpResponse.json(created);
@@ -89,13 +104,21 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
     }),
     // Feste Mengen: Die Vorschau zählt keine echten Flüge und Fotos.
     http.get('/api/missions/:id/contents', () =>
-      HttpResponse.json({ flights: 3, photos: 41, map_elements: 4, video_segments: 2 } satisfies MissionContents),
+      HttpResponse.json({
+        flights: 3,
+        photos: 41,
+        map_elements: 4,
+        video_segments: 2,
+      } satisfies MissionContents),
     ),
     http.delete('/api/missions/:id', ({ params }) => {
       const m = find(params.id);
       if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
       if (m.state === 'running')
-        return HttpResponse.json({ error: 'Ein laufender Einsatz lässt sich nicht löschen' }, { status: 422 });
+        return HttpResponse.json(
+          { error: 'Ein laufender Einsatz lässt sich nicht löschen' },
+          { status: 422 },
+        );
       missions.splice(missions.indexOf(m), 1);
       return new HttpResponse(null, { status: 204 });
     }),
@@ -108,6 +131,8 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         label: input.label,
         location: input.location,
         created_at_ms: Date.now(),
+        has_map_photo: false,
+        map_photo_at_ms: null,
       });
       return HttpResponse.json(m);
     }),

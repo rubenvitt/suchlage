@@ -436,6 +436,53 @@ pub fn photo_shots() -> Vec<PhotoShot> {
     ]
 }
 
+/// Ein laufender Einsatz aus der Flugmappe mit Kartenfoto im zweiten Abschnitt und ein
+/// vorbereiteter aus dem Browser.
+pub fn missions() -> Vec<Mission> {
+    let section = |id: i64, label: &str, at: i64, photo: Option<i64>| MissionSection {
+        id,
+        label: label.into(),
+        location: None,
+        created_at_ms: at,
+        has_map_photo: photo.is_some(),
+        map_photo_at_ms: photo,
+    };
+    vec![
+        Mission {
+            id: 3,
+            name: "Vermisste Person Waldweg".into(),
+            location: Some("Forst Nord".into()),
+            state: MissionState::Running,
+            created_by: "Gruppenführer I&K".into(),
+            created_at_ms: T0 - 3_600_000,
+            started_at_ms: Some(T0 - 3_600_000),
+            closed_at_ms: None,
+            sections: vec![
+                section(4, "Abschnitt 1", T0 - 3_600_000, None),
+                section(5, "Verlegung Waldrand", T0 - 1_200_000, Some(T0 - 900_000)),
+            ],
+            origin: MissionOrigin::Flugmappe,
+            flugmappe: Some(FlugmappeLink {
+                linked_by: "Gruppenführer I&K".into(),
+                linked_at_ms: T0 - 3_600_000,
+            }),
+        },
+        Mission {
+            id: 4,
+            name: "Übung Kiesgrube".into(),
+            location: None,
+            state: MissionState::Prepared,
+            created_by: "Erika Mustermann".into(),
+            created_at_ms: T0 - 600_000,
+            started_at_ms: None,
+            closed_at_ms: None,
+            sections: vec![section(6, "Abschnitt 1", T0 - 600_000, None)],
+            origin: MissionOrigin::Web,
+            flugmappe: None,
+        },
+    ]
+}
+
 pub fn settings_view() -> SettingsView {
     SettingsView {
         oidc: Some(OidcSettingsView {
@@ -573,6 +620,7 @@ pub fn all() -> Vec<Fixture> {
         fx("kioskTokens", "KioskTokenView[]", &kiosk_tokens()),
         fx("mapElements", "MapElement[]", &map_elements()),
         fx("photoShots", "PhotoShot[]", &photo_shots()),
+        fx("missionList", "Mission[]", &missions()),
         fx(
             "meAdmin",
             "Me",
@@ -630,5 +678,6 @@ pub fn assert_roundtrips() {
     roundtrip(remote_controllers());
     roundtrip(map_elements());
     roundtrip(photo_shots());
+    roundtrip(missions());
     roundtrip(health());
 }

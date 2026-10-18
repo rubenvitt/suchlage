@@ -3,4 +3,12 @@
 /**
  * Ein Abschnitt eines Einsatzes (z. B. ein Suchgebiet).
  */
-export type MissionSection = { id: number, label: string, location: string | null, created_at_ms: number, };
+export type MissionSection = { id: number, label: string, location: string | null, created_at_ms: number, 
+/**
+ * Ein Foto der Papierkarte liegt (aus der Flugmappe).
+ */
+has_map_photo: boolean, 
+/**
+ * Zeitpunkt des letzten Kartenfotos; taugt als Versionszeichen für die Bild-URL.
+ */
+map_photo_at_ms: number | null, };

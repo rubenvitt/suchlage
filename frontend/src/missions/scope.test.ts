@@ -11,6 +11,8 @@ const mission = (id: number, state: Mission['state']): Mission => ({
   started_at_ms: null,
   closed_at_ms: null,
   sections: [],
+  origin: 'web',
+  flugmappe: null,
 });
 const m7 = mission(7, 'prepared');
 const running = mission(3, 'running');

@@ -1,9 +1,11 @@
-//! Einsätze und ihre Abschnitte. Zuordnung von Flügen, Fotos und Kartenelementen.
+//! Einsätze und ihre Abschnitte. Zuordnung von Flügen, Fotos und Kartenelementen, Verknüpfung
+//! mit der Flugmappe.
 
 use sqlx::{Row, SqlitePool};
 
 use crate::contract::{
-    Mission, MissionCreate, MissionSection, MissionState, MissionUpdate, SectionCreate,
+    FlugmappeLink, Mission, MissionCreate, MissionOrigin, MissionSection, MissionState,
+    MissionUpdate, SectionCreate,
 };
 
 fn state_str(s: MissionState) -> &'static str {
@@ -16,24 +18,33 @@ fn state_str(s: MissionState) -> &'static str {
 
 async fn sections(pool: &SqlitePool, mission_id: i64) -> Result<Vec<MissionSection>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, label, location, created_at_ms FROM mission_sections WHERE mission_id = ? ORDER BY id",
+        "SELECT id, label, location, created_at_ms, map_photo_at_ms FROM mission_sections \
+         WHERE mission_id = ? ORDER BY id",
     )
     .bind(mission_id)
     .fetch_all(pool)
     .await?;
     Ok(rows
         .iter()
-        .map(|r| MissionSection {
-            id: r.get("id"),
-            label: r.get("label"),
-            location: r.get("location"),
-            created_at_ms: r.get("created_at_ms"),
+        .map(|r| {
+            let map_photo_at_ms: Option<i64> = r.get("map_photo_at_ms");
+            MissionSection {
+                id: r.get("id"),
+                label: r.get("label"),
+                location: r.get("location"),
+                created_at_ms: r.get("created_at_ms"),
+                has_map_photo: map_photo_at_ms.is_some(),
+                map_photo_at_ms,
+            }
         })
         .collect())
 }
 
 async fn mission(pool: &SqlitePool, r: &sqlx::sqlite::SqliteRow) -> Result<Mission, sqlx::Error> {
     let id: i64 = r.get("id");
+    let linked_by: Option<String> = r.get("flugmappe_linked_by");
+    let linked_at_ms: Option<i64> = r.get("flugmappe_linked_at_ms");
+    let linked = r.get::<Option<String>, _>("flugmappe_mission_id").is_some();
     Ok(Mission {
         id,
         name: r.get("name"),
@@ -48,6 +59,17 @@ async fn mission(pool: &SqlitePool, r: &sqlx::sqlite::SqliteRow) -> Result<Missi
         started_at_ms: r.get("started_at_ms"),
         closed_at_ms: r.get("closed_at_ms"),
         sections: sections(pool, id).await?,
+        origin: match r.get::<&str, _>("origin") {
+            "flugmappe" => MissionOrigin::Flugmappe,
+            _ => MissionOrigin::Web,
+        },
+        flugmappe: match (linked, linked_by, linked_at_ms) {
+            (true, Some(linked_by), Some(linked_at_ms)) => Some(FlugmappeLink {
+                linked_by,
+                linked_at_ms,
+            }),
+            _ => None,
+        },
     })
 }
 
@@ -55,7 +77,8 @@ async fn mission(pool: &SqlitePool, r: &sqlx::sqlite::SqliteRow) -> Result<Missi
 macro_rules! select_missions {
     ($tail:literal) => {
         concat!(
-            "SELECT id, name, location, state, created_by, created_at_ms, started_at_ms, closed_at_ms FROM missions ",
+            "SELECT id, name, location, state, created_by, created_at_ms, started_at_ms, closed_at_ms, \
+             origin, flugmappe_mission_id, flugmappe_linked_by, flugmappe_linked_at_ms FROM missions ",
             $tail
         )
     };
@@ -278,6 +301,224 @@ pub async fn delete_rows(
         .await?;
     tx.commit().await?;
     Ok((done.rows_affected() == 1).then_some(elements))
+}
+
+/// Was nur die Schnittstelle der Flugmappe braucht und der Browser nie sieht.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FlugmappeIds {
+    /// Einsatz-ID der verknüpften Flugmappe.
+    pub mission: Option<String>,
+    pub map_imported_at_ms: Option<i64>,
+    /// (Abschnitts-ID in Suchlage, Abschnitts-ID der Flugmappe), nur verknüpfte Abschnitte.
+    pub sections: Vec<(i64, String)>,
+}
+
+impl FlugmappeIds {
+    pub fn section(&self, flugmappe_section_id: &str) -> Option<i64> {
+        self.sections
+            .iter()
+            .find(|(_, fm)| fm == flugmappe_section_id)
+            .map(|(id, _)| *id)
+    }
+
+    pub fn of_section(&self, section_id: i64) -> Option<&str> {
+        self.sections
+            .iter()
+            .find(|(id, _)| *id == section_id)
+            .map(|(_, fm)| fm.as_str())
+    }
+}
+
+/// Ein Einsatz, den die Flugmappe anlegt: läuft sofort, erster Abschnitt mit ihrer ID.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlugmappeStart {
+    pub name: String,
+    pub location: Option<String>,
+    pub created_by: String,
+    pub flugmappe_mission_id: String,
+    pub flugmappe_section_id: String,
+    pub section_label: String,
+    pub section_location: Option<String>,
+}
+
+pub async fn flugmappe_ids(pool: &SqlitePool, id: i64) -> Result<FlugmappeIds, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT flugmappe_mission_id, flugmappe_map_imported_at_ms FROM missions WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(FlugmappeIds::default());
+    };
+    let sections = sqlx::query_as(
+        "SELECT id, flugmappe_section_id FROM mission_sections \
+         WHERE mission_id = ? AND flugmappe_section_id IS NOT NULL ORDER BY id",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    Ok(FlugmappeIds {
+        mission: row.get("flugmappe_mission_id"),
+        map_imported_at_ms: row.get("flugmappe_map_imported_at_ms"),
+        sections,
+    })
+}
+
+/// Der Einsatz, mit dem diese Flugmappe verknüpft ist, egal in welchem Zustand.
+pub async fn find_by_flugmappe(
+    pool: &SqlitePool,
+    flugmappe_mission_id: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM missions WHERE flugmappe_mission_id = ?")
+        .bind(flugmappe_mission_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Legt einen laufenden, verknüpften Einsatz mit seinem ersten Abschnitt an. Läuft schon einer
+/// oder ist die Flugmappe schon verknüpft, scheitert es an einem Teilindex (409).
+pub async fn create_from_flugmappe(
+    pool: &SqlitePool,
+    start: &FlugmappeStart,
+    now_ms: i64,
+) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO missions (name, location, state, created_by, created_at_ms, started_at_ms, \
+         origin, flugmappe_mission_id, flugmappe_linked_by, flugmappe_linked_at_ms) \
+         VALUES (?1, ?2, 'running', ?3, ?4, ?4, 'flugmappe', ?5, ?3, ?4) RETURNING id",
+    )
+    .bind(&start.name)
+    .bind(&start.location)
+    .bind(&start.created_by)
+    .bind(now_ms)
+    .bind(&start.flugmappe_mission_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO mission_sections (mission_id, label, location, created_at_ms, flugmappe_section_id) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(&start.section_label)
+    .bind(&start.section_location)
+    .bind(now_ms)
+    .bind(&start.flugmappe_section_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(id)
+}
+
+/// Verknüpft (oder übernimmt) den Einsatz für diese Flugmappe. `false`, wenn es ihn nicht gibt.
+pub async fn link(
+    pool: &SqlitePool,
+    id: i64,
+    flugmappe_mission_id: &str,
+    linked_by: &str,
+    now_ms: i64,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE missions SET flugmappe_mission_id = ?, flugmappe_linked_by = ?, \
+         flugmappe_linked_at_ms = ? WHERE id = ?",
+    )
+    .bind(flugmappe_mission_id)
+    .bind(linked_by)
+    .bind(now_ms)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Gibt einem vorhandenen Abschnitt die ID der Flugmappe und deren Bezeichnung; der Ort bleibt,
+/// wenn die Flugmappe keinen nennt.
+pub async fn bind_section(
+    pool: &SqlitePool,
+    section_id: i64,
+    flugmappe_section_id: &str,
+    label: &str,
+    location: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE mission_sections SET flugmappe_section_id = ?, label = ?, \
+         location = COALESCE(?, location) WHERE id = ?",
+    )
+    .bind(flugmappe_section_id)
+    .bind(label)
+    .bind(location)
+    .bind(section_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Neuer (und damit aktiver) Abschnitt aus der Flugmappe; liefert seine ID.
+pub async fn add_section_from_flugmappe(
+    pool: &SqlitePool,
+    mission_id: i64,
+    flugmappe_section_id: &str,
+    input: &SectionCreate,
+    now_ms: i64,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO mission_sections (mission_id, label, location, created_at_ms, flugmappe_section_id) \
+         VALUES (?, ?, ?, ?, ?) RETURNING id",
+    )
+    .bind(mission_id)
+    .bind(&input.label)
+    .bind(&input.location)
+    .bind(now_ms)
+    .bind(flugmappe_section_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// Setzt den Ort eines Abschnitts, falls er noch keinen hat.
+pub async fn set_section_location_if_empty(
+    pool: &SqlitePool,
+    section_id: i64,
+    location: &str,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE mission_sections SET location = ? WHERE id = ? AND (location IS NULL OR location = '')",
+    )
+    .bind(location)
+    .bind(section_id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+pub async fn set_map_photo(
+    pool: &SqlitePool,
+    section_id: i64,
+    at_ms: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE mission_sections SET map_photo_at_ms = ? WHERE id = ?")
+        .bind(at_ms)
+        .bind(section_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Merkt die Übernahme der Kartenelemente. `false`, wenn sie schon erledigt war.
+pub async fn mark_map_imported(
+    pool: &SqlitePool,
+    id: i64,
+    now_ms: i64,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE missions SET flugmappe_map_imported_at_ms = ? \
+         WHERE id = ? AND flugmappe_map_imported_at_ms IS NULL",
+    )
+    .bind(now_ms)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() == 1)
 }
 
 #[cfg(test)]
@@ -721,5 +962,178 @@ mod tests {
         let g = get(&pool, m.id).await.unwrap().unwrap();
         assert_eq!((g.name.as_str(), g.location), ("Neu", None));
         assert!(!update(&pool, 999, &u).await.unwrap());
+    }
+
+    fn fm_start(fm: &str) -> FlugmappeStart {
+        FlugmappeStart {
+            name: "Vermisste Person".into(),
+            location: Some("Wald".into()),
+            created_by: "Testpilot".into(),
+            flugmappe_mission_id: fm.into(),
+            flugmappe_section_id: format!("{fm}-s1"),
+            section_label: "Abschnitt 1".into(),
+            section_location: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_keeps_existing_missions_from_the_browser_and_unlinked() {
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .in_memory(true)
+            .foreign_keys(true);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        for sql in [
+            include_str!("../../migrations/0001_init.sql"),
+            include_str!("../../migrations/0002_map_elements.sql"),
+            include_str!("../../migrations/0003_photos.sql"),
+            include_str!("../../migrations/0004_missions.sql"),
+        ] {
+            sqlx::raw_sql(sql).execute(&pool).await.unwrap();
+        }
+        sqlx::raw_sql(
+            "INSERT INTO missions (id, name, state, created_by, created_at_ms) VALUES (1, 'Alt', 'running', 'u', 1); \
+             INSERT INTO mission_sections (mission_id, label, created_at_ms) VALUES (1, 'Abschnitt 1', 1);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(include_str!("../../migrations/0005_flugmappe.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let m = get(&pool, 1).await.unwrap().unwrap();
+        assert_eq!((m.origin, m.flugmappe), (MissionOrigin::Web, None));
+        assert_eq!(m.state, MissionState::Running);
+        assert!(!m.sections[0].has_map_photo);
+        assert_eq!(
+            flugmappe_ids(&pool, 1).await.unwrap(),
+            FlugmappeIds::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn flugmappe_start_runs_at_once_and_is_linked() {
+        let pool = test_pool().await;
+        let id = create_from_flugmappe(&pool, &fm_start("fm-a"), 7)
+            .await
+            .unwrap();
+        let m = get(&pool, id).await.unwrap().unwrap();
+        assert_eq!(m.state, MissionState::Running);
+        assert_eq!(
+            (m.started_at_ms, m.origin),
+            (Some(7), MissionOrigin::Flugmappe)
+        );
+        assert_eq!(
+            m.flugmappe,
+            Some(FlugmappeLink {
+                linked_by: "Testpilot".into(),
+                linked_at_ms: 7
+            })
+        );
+        assert_eq!(find_by_flugmappe(&pool, "fm-a").await.unwrap(), Some(id));
+        let ids = flugmappe_ids(&pool, id).await.unwrap();
+        assert_eq!(ids.mission.as_deref(), Some("fm-a"));
+        assert_eq!(ids.section("fm-a-s1"), Some(m.sections[0].id));
+        assert_eq!(ids.of_section(m.sections[0].id), Some("fm-a-s1"));
+
+        // Ein zweiter laufender Einsatz scheitert am Teilindex (409).
+        let err: AppError = create_from_flugmappe(&pool, &fm_start("fm-b"), 8)
+            .await
+            .unwrap_err()
+            .into();
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+        assert!(close(&pool, id, 9).await.unwrap());
+        // Dieselbe Flugmappe gehört zu höchstens einem Einsatz.
+        let err: AppError = create_from_flugmappe(&pool, &fm_start("fm-a"), 10)
+            .await
+            .unwrap_err()
+            .into();
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+        let other = create(&pool, &mc("B"), "u", 11).await.unwrap();
+        let err: AppError = link(&pool, other.id, "fm-a", "x", 12)
+            .await
+            .unwrap_err()
+            .into();
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn sections_from_the_flugmappe_are_unique_per_mission() {
+        let pool = test_pool().await;
+        let a = create(&pool, &mc("A"), "u", 1).await.unwrap();
+        let b = create(&pool, &mc("B"), "u", 1).await.unwrap();
+        let input = SectionCreate {
+            label: "Nord".into(),
+            location: None,
+        };
+        let s = add_section_from_flugmappe(&pool, a.id, "s2", &input, 2)
+            .await
+            .unwrap();
+        add_section_from_flugmappe(&pool, b.id, "s2", &input, 2)
+            .await
+            .unwrap();
+        let err: AppError = add_section_from_flugmappe(&pool, a.id, "s2", &input, 3)
+            .await
+            .unwrap_err()
+            .into();
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+
+        bind_section(&pool, a.sections[0].id, "s1", "Erster", None)
+            .await
+            .unwrap();
+        let m = get(&pool, a.id).await.unwrap().unwrap();
+        assert_eq!(
+            (
+                m.sections[0].label.as_str(),
+                m.sections[0].location.as_deref()
+            ),
+            ("Erster", Some("Wald")),
+            "ohne Ort der Flugmappe bleibt der vorhandene"
+        );
+        assert!(
+            !set_section_location_if_empty(&pool, a.sections[0].id, "52.4, 10.0")
+                .await
+                .unwrap()
+        );
+        assert!(
+            set_section_location_if_empty(&pool, s, "52.4, 10.0")
+                .await
+                .unwrap()
+        );
+
+        set_map_photo(&pool, s, 42).await.unwrap();
+        let m = get(&pool, a.id).await.unwrap().unwrap();
+        let last = m.sections.last().unwrap();
+        assert_eq!((last.has_map_photo, last.map_photo_at_ms), (true, Some(42)));
+        assert_eq!(last.location.as_deref(), Some("52.4, 10.0"));
+        assert_eq!(
+            flugmappe_ids(&pool, a.id).await.unwrap().sections,
+            vec![(a.sections[0].id, "s1".to_string()), (s, "s2".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_map_is_imported_once() {
+        let pool = test_pool().await;
+        let a = create(&pool, &mc("A"), "u", 1).await.unwrap();
+        assert!(mark_map_imported(&pool, a.id, 5).await.unwrap());
+        assert!(!mark_map_imported(&pool, a.id, 6).await.unwrap());
+        assert_eq!(
+            flugmappe_ids(&pool, a.id).await.unwrap().map_imported_at_ms,
+            Some(5)
+        );
+        assert!(link(&pool, a.id, "fm", "Pilot", 7).await.unwrap());
+        assert!(!link(&pool, 999, "fm2", "Pilot", 7).await.unwrap());
+        let m = get(&pool, a.id).await.unwrap().unwrap();
+        assert_eq!(
+            m.origin,
+            MissionOrigin::Web,
+            "verknüpft, aber im Browser angelegt"
+        );
+        assert_eq!(m.flugmappe.unwrap().linked_by, "Pilot");
     }
 }

@@ -8,6 +8,7 @@ import type { KioskTokenView } from './generated/KioskTokenView';
 import type { LiveEvent } from './generated/LiveEvent';
 import type { MapElement } from './generated/MapElement';
 import type { Me } from './generated/Me';
+import type { Mission } from './generated/Mission';
 import type { PhotoShot } from './generated/PhotoShot';
 import type { RemoteControllerView } from './generated/RemoteControllerView';
 import type { SettingsView } from './generated/SettingsView';
@@ -978,6 +979,64 @@ export const photoShots: PhotoShot[] = [
     "position": null,
     "relative_altitude_m": null,
     "taken_at_ms": 1792142990000
+  }
+];
+
+export const missionList: Mission[] = [
+  {
+    "closed_at_ms": null,
+    "created_at_ms": 1792146400000,
+    "created_by": "Gruppenführer I&K",
+    "flugmappe": {
+      "linked_at_ms": 1792146400000,
+      "linked_by": "Gruppenführer I&K"
+    },
+    "id": 3,
+    "location": "Forst Nord",
+    "name": "Vermisste Person Waldweg",
+    "origin": "flugmappe",
+    "sections": [
+      {
+        "created_at_ms": 1792146400000,
+        "has_map_photo": false,
+        "id": 4,
+        "label": "Abschnitt 1",
+        "location": null,
+        "map_photo_at_ms": null
+      },
+      {
+        "created_at_ms": 1792148800000,
+        "has_map_photo": true,
+        "id": 5,
+        "label": "Verlegung Waldrand",
+        "location": null,
+        "map_photo_at_ms": 1792149100000
+      }
+    ],
+    "started_at_ms": 1792146400000,
+    "state": "running"
+  },
+  {
+    "closed_at_ms": null,
+    "created_at_ms": 1792149400000,
+    "created_by": "Erika Mustermann",
+    "flugmappe": null,
+    "id": 4,
+    "location": null,
+    "name": "Übung Kiesgrube",
+    "origin": "web",
+    "sections": [
+      {
+        "created_at_ms": 1792149400000,
+        "has_map_photo": false,
+        "id": 6,
+        "label": "Abschnitt 1",
+        "location": null,
+        "map_photo_at_ms": null
+      }
+    ],
+    "started_at_ms": null,
+    "state": "prepared"
   }
 ];
 
