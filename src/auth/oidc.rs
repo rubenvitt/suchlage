@@ -6,7 +6,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
-use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
+use openidconnect::core::{
+    CoreAuthenticationFlow, CoreClient, CoreJsonWebKeySet, CoreProviderMetadata,
+};
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
     EndpointSet, HttpRequest, HttpResponse, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
@@ -21,6 +23,8 @@ pub const STATE_COOKIE: &str = "suchlage_oidc";
 pub const PENDING_TTL: Duration = Duration::from_secs(600);
 const PENDING_MAX: usize = 200;
 const DISCOVERY_TTL: Duration = Duration::from_secs(3600);
+/// Kennt der JWKS einen `kid` nicht, wird er neu geladen – aber nicht öfter als so.
+const JWKS_MIN_REFRESH: Duration = Duration::from_secs(60);
 
 type Client = CoreClient<
     EndpointSet,
@@ -45,9 +49,18 @@ struct Pending {
     created: Instant,
 }
 
+struct CachedJwks {
+    issuer: String,
+    keys: CoreJsonWebKeySet,
+    fetched: Instant,
+}
+
 pub struct OidcState {
     pending: Mutex<HashMap<String, Pending>>,
     discovery: tokio::sync::Mutex<Option<(String, CoreProviderMetadata, Instant)>>,
+    /// Schlüssel für die Zugriffstokens der Flugmappe (`auth::bearer`).
+    jwks: tokio::sync::Mutex<Option<CachedJwks>>,
+    jwks_min_refresh: Duration,
     https: Http,
     loopback: Http,
 }
@@ -130,6 +143,8 @@ impl OidcState {
         Self {
             pending: Mutex::new(HashMap::new()),
             discovery: tokio::sync::Mutex::new(None),
+            jwks: tokio::sync::Mutex::new(None),
+            jwks_min_refresh: JWKS_MIN_REFRESH,
             https: Http::new(true),
             loopback: Http::new(false),
         }
@@ -169,6 +184,45 @@ impl OidcState {
             })?;
         *cache = Some((issuer.to_string(), meta.clone(), Instant::now()));
         Ok(meta)
+    }
+
+    /// Tests laden den JWKS ohne Wartezeit neu.
+    #[cfg(test)]
+    pub fn with_jwks_min_refresh(mut self, every: Duration) -> Self {
+        self.jwks_min_refresh = every;
+        self
+    }
+
+    /// JWKS des Ausstellers mit Cache je Aussteller. `refresh` (unbekannter `kid`) lädt neu, aber
+    /// höchstens alle 60 s; sonst gilt der Cache so lange wie die Discovery.
+    pub async fn jwks(&self, issuer: &str, refresh: bool) -> Result<CoreJsonWebKeySet, AppError> {
+        let issuer = issuer.trim_end_matches('/');
+        let mut cache = self.jwks.lock().await;
+        if let Some(c) = cache.as_ref()
+            && c.issuer == issuer
+            && c.fetched.elapsed() < DISCOVERY_TTL
+            && (!refresh || c.fetched.elapsed() < self.jwks_min_refresh)
+        {
+            return Ok(c.keys.clone());
+        }
+        let meta = self.metadata(issuer).await?;
+        // Die Discovery bringt den JWKS schon mit; erst ein unbekannter `kid` lädt ihn eigens.
+        let keys = if refresh {
+            CoreJsonWebKeySet::fetch_async(meta.jwks_uri(), self.http(issuer))
+                .await
+                .map_err(|e| {
+                    tracing::warn!(error = %e, issuer, "JWKS nicht abrufbar");
+                    AppError::Unavailable("Schlüssel des Anmeldedienstes nicht abrufbar".into())
+                })?
+        } else {
+            meta.jwks().clone()
+        };
+        *cache = Some(CachedJwks {
+            issuer: issuer.to_string(),
+            keys: keys.clone(),
+            fetched: Instant::now(),
+        });
+        Ok(keys)
     }
 
     pub async fn check_discovery(&self, issuer: &str) -> Result<(), AppError> {
@@ -284,8 +338,8 @@ impl OidcState {
 #[cfg(test)]
 pub mod test_idp {
     //! Minimaler OIDC-Anbieter für Tests: Discovery, JWKS, Token-Endpunkt mit RS256-ID-Token.
-    //! Er zählt Discovery-Abrufe und merkt sich jede Token-Anfrage, damit Tests PKCE und
-    //! Redirect-URL prüfen können.
+    //! Er zählt Discovery- und JWKS-Abrufe und merkt sich jede Token-Anfrage, damit Tests PKCE und
+    //! Redirect-URL prüfen können. Zugriffstokens wie Pocket ID (RFC 9068) stellt er direkt aus.
 
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -294,6 +348,8 @@ pub mod test_idp {
     use axum::extract::{Form, State};
     use axum::routing::{get, post};
     use axum::{Json, Router};
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use openidconnect::core::{
         CoreIdToken, CoreIdTokenClaims, CoreJsonWebKeySet, CoreJwsSigningAlgorithm,
         CoreRsaPrivateSigningKey,
@@ -306,6 +362,62 @@ pub mod test_idp {
     /// Erfundenes Konto des Test-IdP.
     pub const SUBJECT: &str = "sub-1";
     pub const USERNAME: &str = "testpilot";
+    /// `kid` des einzigen Schlüssels.
+    pub const KEY_ID: &str = "test";
+
+    /// Der RSA-Schlüssel des Test-IdP (synthetisch, `tests/fixtures/oidc/test-rsa.pem`).
+    pub fn signing_key() -> CoreRsaPrivateSigningKey {
+        let pem = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/oidc/test-rsa.pem"
+        ))
+        .unwrap();
+        CoreRsaPrivateSigningKey::from_pem(&pem, Some(JsonWebKeyId::new(KEY_ID.into()))).unwrap()
+    }
+
+    /// JWT mit beliebigem Kopf, immer mit RS256 und dem Testschlüssel signiert. So lassen sich auch
+    /// Köpfe bauen, die lügen (`alg: HS256`).
+    pub fn sign(header: &serde_json::Value, claims: &serde_json::Value) -> String {
+        let input = format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(header.to_string()),
+            URL_SAFE_NO_PAD.encode(claims.to_string())
+        );
+        let signature = signing_key()
+            .sign(
+                &CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
+                input.as_bytes(),
+            )
+            .unwrap();
+        format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature))
+    }
+
+    /// Zugriffstoken wie von Pocket ID; jedes Feld lässt sich für Fehlerfälle verbiegen.
+    #[derive(Debug, Clone)]
+    pub struct AccessToken {
+        pub sub: String,
+        /// Pocket ID: `[client_id, issuer]`; hier nur die Client-ID, den Aussteller ergänzt
+        /// `access_token`.
+        pub aud: serde_json::Value,
+        pub ttl_s: i64,
+        pub typ: String,
+        pub kid: String,
+        /// Zusätzliche oder ersetzte Claims (`null` entfernt einen).
+        pub extra: serde_json::Value,
+    }
+
+    impl AccessToken {
+        pub fn new(sub: &str, client_id: &str) -> Self {
+            Self {
+                sub: sub.into(),
+                aud: serde_json::json!(client_id),
+                ttl_s: 3600,
+                typ: "at+jwt".into(),
+                kid: KEY_ID.into(),
+                extra: serde_json::json!({ "client_id": client_id }),
+            }
+        }
+    }
 
     #[derive(Clone)]
     pub struct TestIdp {
@@ -313,6 +425,7 @@ pub mod test_idp {
         /// Nonce, die der nächste ID-Token trägt. Der Test übernimmt sie aus der Autorisierungs-URL.
         pub nonce: Arc<Mutex<String>>,
         discovery_requests: Arc<AtomicUsize>,
+        jwks_requests: Arc<AtomicUsize>,
         token_requests: Arc<Mutex<Vec<HashMap<String, String>>>>,
         client_id: &'static str,
         key: Arc<CoreRsaPrivateSigningKey>,
@@ -336,22 +449,53 @@ pub mod test_idp {
         pub fn token_request_count(&self) -> usize {
             self.token_requests.lock().unwrap().len()
         }
+
+        pub fn jwks_count(&self) -> usize {
+            self.jwks_requests.load(Ordering::SeqCst)
+        }
+
+        /// Zugriffstoken (RS256, `typ: at+jwt`) mit den Claims von Pocket ID.
+        pub fn access_token(&self, t: AccessToken) -> String {
+            let now = chrono::Utc::now().timestamp();
+            let aud = match t.aud {
+                serde_json::Value::String(client) => serde_json::json!([client, self.issuer]),
+                other => other,
+            };
+            let mut claims = serde_json::json!({
+                "iss": self.issuer, "sub": t.sub, "aud": aud, "exp": now + t.ttl_s, "iat": now,
+                "jti": uuid::Uuid::new_v4().to_string(), "scope": "openid profile",
+                "scp": ["openid", "profile"],
+            });
+            for (k, v) in t.extra.as_object().into_iter().flatten() {
+                if v.is_null() {
+                    claims.as_object_mut().unwrap().remove(k);
+                } else {
+                    claims[k] = v.clone();
+                }
+            }
+            sign(
+                &serde_json::json!({"alg": "RS256", "typ": t.typ, "kid": t.kid}),
+                &claims,
+            )
+        }
+
+        pub fn access_token_for(&self, sub: &str, client_id: &str, ttl_s: i64) -> String {
+            self.access_token(AccessToken {
+                ttl_s,
+                ..AccessToken::new(sub, client_id)
+            })
+        }
     }
 
     pub async fn start(client_id: &'static str) -> TestIdp {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let issuer = format!("http://{}", listener.local_addr().unwrap());
-        let pem = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/oidc/test-rsa.pem"
-        ))
-        .unwrap();
-        let key = CoreRsaPrivateSigningKey::from_pem(&pem, Some(JsonWebKeyId::new("test".into())))
-            .unwrap();
+        let key = signing_key();
         let idp = TestIdp {
             issuer,
             nonce: Arc::new(Mutex::new(String::new())),
             discovery_requests: Arc::new(AtomicUsize::new(0)),
+            jwks_requests: Arc::new(AtomicUsize::new(0)),
             token_requests: Arc::new(Mutex::new(Vec::new())),
             client_id,
             key: Arc::new(key),
@@ -376,6 +520,7 @@ pub mod test_idp {
     }
 
     async fn jwks(State(idp): State<TestIdp>) -> Json<CoreJsonWebKeySet> {
+        idp.jwks_requests.fetch_add(1, Ordering::SeqCst);
         Json(CoreJsonWebKeySet::new(vec![idp.key.as_verification_key()]))
     }
 
