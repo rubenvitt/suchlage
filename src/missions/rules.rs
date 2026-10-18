@@ -79,11 +79,36 @@ pub fn location(raw: Option<String>) -> Option<String> {
 
 /// Nur die verknüpfte Flugmappe darf an einem Einsatz lesen und schreiben. Nach „Übernehmen“
 /// bekommt die abgelöste nichts mehr.
+///
+/// Die Bindung schützt vor veralteten Geräten (eine abgelöste Flugmappe schreibt nicht weiter),
+/// nicht vor böswilligen Konten: Die UUID ist kein Geheimnis, und jedes Konto ist `operator` oder
+/// `admin` und darf dasselbe ohnehin im Browser.
 pub fn binding(linked: Option<&str>, caller: &str) -> Result<(), Refusal> {
     match linked {
         Some(l) if l == caller => Ok(()),
         Some(_) => Err(Refusal::Conflict(OTHER_FLUGMAPPE)),
         None => Err(Refusal::Conflict(NOT_LINKED)),
+    }
+}
+
+/// Ein Einsatz, an den die UUID beim Anlegen schon gebunden ist.
+#[derive(Debug, Clone, Copy)]
+pub struct Existing {
+    pub state: MissionState,
+    /// Diese Flugmappe hat ihn mit dieser UUID angelegt: Herkunft Flugmappe und Verknüpfung seit
+    /// der Anlage unverändert (Verknüpfen und Übernehmen setzen eine spätere Zeit).
+    pub created_by_caller: bool,
+}
+
+/// Anlegen mit einer UUID, die schon gebunden ist. Hat diese Flugmappe den Einsatz selbst angelegt
+/// und ist er offen, war es eine Wiederholung (Antwort verloren): Ergebnis ist der vorhandene
+/// (200). Ist er abgeschlossen, ist das ein Übergang, den es nicht mehr gibt (422) – kein Konflikt
+/// mit jemand anderem. Ist die UUID an einen fremden oder übernommenen Einsatz gebunden, 409.
+pub fn create_again(e: Existing) -> Result<(), Refusal> {
+    match (e.created_by_caller, e.state) {
+        (true, MissionState::Closed) => Err(Refusal::Unprocessable(CLOSED)),
+        (true, _) => Ok(()),
+        (false, _) => Err(Refusal::Conflict(FLUGMAPPE_TAKEN)),
     }
 }
 
@@ -332,6 +357,28 @@ mod tests {
                 ..facts(Running, None)
             }),
             Err(Refusal::Conflict(FLUGMAPPE_TAKEN))
+        );
+    }
+
+    #[test]
+    fn creating_again_returns_only_an_open_mission_of_the_caller() {
+        let mine = |state| Existing {
+            state,
+            created_by_caller: true,
+        };
+        assert_eq!(create_again(mine(Running)), Ok(()));
+        assert_eq!(create_again(mine(Prepared)), Ok(()));
+        assert_eq!(
+            create_again(mine(Closed)),
+            Err(Refusal::Unprocessable(CLOSED))
+        );
+        assert_eq!(
+            create_again(Existing {
+                state: Running,
+                created_by_caller: false,
+            }),
+            Err(Refusal::Conflict(FLUGMAPPE_TAKEN)),
+            "verknüpft oder übernommen, nicht angelegt"
         );
     }
 

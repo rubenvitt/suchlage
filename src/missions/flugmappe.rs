@@ -7,13 +7,13 @@ use std::collections::HashMap;
 use crate::contract::{
     FmFeatureCollection, FmFlight, FmLinkInfo, FmMapImport, FmMapImportResult, FmMission,
     FmMissionCreate, FmMissionLink, FmSection, FmSectionCreate, MapElementOrigin, Mission,
-    MissionState, SectionCreate,
+    MissionOrigin, MissionState, SectionCreate,
 };
 use crate::error::AppError;
-use crate::map::NewElement;
 use crate::map::geojson::{self, Track};
-use crate::store::missions::{FlugmappeIds, FlugmappeStart};
-use crate::store::{flights, missions as store, photos, remote_controllers};
+use crate::map::{self, MapChange, NewElement};
+use crate::store::missions::{FlugmappeIds, FlugmappeStart, LinkWrite};
+use crate::store::{flights, map_elements, missions as store, photos, remote_controllers};
 
 use super::{MissionHub, rules};
 
@@ -89,7 +89,8 @@ impl MissionHub {
         Ok(out)
     }
 
-    /// Neuer laufender Einsatz aus der Flugmappe mit ihrem ersten Abschnitt.
+    /// Neuer laufender Einsatz aus der Flugmappe mit ihrem ersten Abschnitt. Wiederholt (Antwort
+    /// verloren) liefert es den schon angelegten, solange er offen ist (`rules::create_again`).
     pub async fn create_from_flugmappe(
         &self,
         input: FmMissionCreate,
@@ -108,11 +109,19 @@ impl MissionHub {
             section_location: rules::location(input.section_location),
         };
         let _serial = self.writes.lock().await;
-        if store::find_by_flugmappe(&self.pool, &start.flugmappe_mission_id)
-            .await?
-            .is_some()
+        if let Some(existing) =
+            store::find_by_flugmappe(&self.pool, &start.flugmappe_mission_id).await?
         {
-            return Err(AppError::Conflict(rules::FLUGMAPPE_TAKEN.into()));
+            let mission = self.get(existing).await?;
+            rules::create_again(rules::Existing {
+                state: mission.state,
+                created_by_caller: mission.origin == MissionOrigin::Flugmappe
+                    && mission
+                        .flugmappe
+                        .as_ref()
+                        .is_some_and(|l| l.linked_at_ms == mission.created_at_ms),
+            })?;
+            return self.fm_view(mission).await;
         }
         if store::running_id(&self.pool).await?.is_some() {
             return Err(AppError::Conflict(rules::OTHER_RUNNING.into()));
@@ -152,28 +161,31 @@ impl MissionHub {
                 .await?
                 .is_some_and(|other| other != id),
         })?;
-        if plan.start {
-            // Ein gleichzeitiger Start im Browser scheitert am Teilindex (409).
-            self.change_state_locked(id, MissionState::Running, now_ms)
-                .await?;
-        }
-        if plan.write_link {
-            store::link(&self.pool, id, &caller, linked_by, now_ms).await?;
-        }
         let sections: Vec<(i64, Option<&str>)> = mission
             .sections
             .iter()
             .map(|s| (s.id, ids.of_section(s.id)))
             .collect();
-        if let rules::SectionStep::Bind(section_id) = rules::section_for_link(&sections, &section) {
-            store::bind_section(
-                &self.pool,
+        let bind_section = match rules::section_for_link(&sections, &section) {
+            rules::SectionStep::Bind(section_id) => Some((
                 section_id,
-                &section,
-                &label,
+                section.as_str(),
+                label.as_str(),
                 location.as_deref(),
-            )
-            .await?;
+            )),
+            rules::SectionStep::Known(_) => None,
+        };
+        // Starten, Verknüpfen und Abschnitt binden in einer Transaktion. Ein zweiter laufender
+        // Einsatz scheitert am Teilindex (409), dann bleibt auch die Verknüpfung ungeschrieben.
+        let write = LinkWrite {
+            start: plan.start,
+            link: plan.write_link.then_some((caller.as_str(), linked_by)),
+            bind_section,
+        };
+        store::link_flugmappe(&self.pool, id, &write, now_ms).await?;
+        if plan.start {
+            self.map
+                .set_pilot_scope(store::running_id(&self.pool).await?);
         }
         self.changed();
         self.fm_view(self.get(id).await?).await
@@ -281,32 +293,44 @@ impl MissionHub {
             return Ok(FmMapImportResult { imported: 0 });
         }
         let author = format!("{author} (Flugmappe)");
-        let mut imported = 0;
-        for d in drawings {
-            let new = NewElement {
-                id: None,
-                name: d.name,
-                kind: d.kind,
-                points: d.points,
-                color: d.color.into(),
-                // Ohne Höhe: Pilot 2 legt das Element auf das Gelände.
-                clamp_to_ground: true,
-                author: author.clone(),
-                origin: MapElementOrigin::Web,
-                mission_id: Some(id),
-            };
-            self.map.create(new, now_ms).await?;
-            imported += 1;
+        let elements = drawings
+            .into_iter()
+            .map(|d| {
+                let new = NewElement {
+                    id: None,
+                    name: d.name,
+                    kind: d.kind,
+                    points: d.points,
+                    color: d.color.into(),
+                    // Ohne Höhe: Pilot 2 legt das Element auf das Gelände.
+                    clamp_to_ground: true,
+                    author: author.clone(),
+                    origin: MapElementOrigin::Web,
+                    mission_id: Some(id),
+                };
+                map::element(new, now_ms)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Markieren, anlegen und den Ort setzen in einer Transaktion: Scheitert etwas, bleibt
+        // nichts, und eine Wiederholung legt nichts doppelt an. Verteilt wird erst danach.
+        let map_serial = self.map.serial().await;
+        let mut tx = self.pool.begin().await?;
+        if !store::mark_map_imported(&mut *tx, id, now_ms).await? {
+            return Ok(FmMapImportResult { imported: 0 });
+        }
+        for e in &elements {
+            map_elements::insert(&mut *tx, e).await?;
         }
         if let (Some(p), Some(active)) = (input.standort, mission.sections.last()) {
-            store::set_section_location_if_empty(
-                &self.pool,
-                active.id,
-                &rules::standort_location(p),
-            )
-            .await?;
+            store::set_section_location_if_empty(&mut *tx, active.id, &rules::standort_location(p))
+                .await?;
         }
-        store::mark_map_imported(&self.pool, id, now_ms).await?;
+        tx.commit().await?;
+        let imported = elements.len() as u32;
+        for e in elements {
+            self.map.publish(MapChange::Created(e));
+        }
+        drop(map_serial);
         self.changed();
         Ok(FmMapImportResult { imported })
     }
@@ -471,13 +495,124 @@ mod tests {
             .create_from_flugmappe(create_input(FM_A), "Testpilot", 13)
             .await
             .unwrap_err();
-        assert_eq!(err.to_string(), rules::FLUGMAPPE_TAKEN);
+        assert!(
+            matches!(&err, AppError::Unprocessable(m) if m == rules::CLOSED),
+            "abgeschlossen: 422, {err:?}"
+        );
         let mut bad = create_input(FM_B);
         bad.flugmappe_mission_id = "keine-uuid".into();
         assert!(matches!(
             f.hub.create_from_flugmappe(bad, "x", 14).await,
             Err(AppError::Validation(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn creating_again_returns_the_open_mission_of_this_flugmappe() {
+        let f = hub().await;
+        let m = f
+            .hub
+            .create_from_flugmappe(create_input(FM_A), "Testpilot", 10)
+            .await
+            .unwrap();
+        let mut changes = f.hub.subscribe();
+        let again = f
+            .hub
+            .create_from_flugmappe(create_input(FM_A), "Testpilot", 11)
+            .await
+            .unwrap();
+        assert_eq!(again, m, "Antwort verloren, Wiederholung");
+        assert!(changes.try_recv().is_err(), "nichts geändert");
+        assert_eq!(f.hub.list().await.unwrap().len(), 1);
+
+        // Übernommen: Die UUID der neuen Flugmappe gehört zu einem Einsatz, den sie nicht angelegt hat.
+        f.hub
+            .link(m.id, link_input(FM_B, "t1", true), "Zweite", 20)
+            .await
+            .unwrap();
+        let mut by_b = create_input(FM_B);
+        by_b.flugmappe_section_id = "t1".into();
+        let err = f
+            .hub
+            .create_from_flugmappe(by_b, "Zweite", 21)
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), rules::FLUGMAPPE_TAKEN);
+    }
+
+    #[tokio::test]
+    async fn creating_with_the_uuid_of_a_linked_browser_mission_is_409() {
+        let f = hub().await;
+        let id = prepared(&f.hub, "Aus dem Browser").await;
+        f.hub
+            .link(id, link_input(FM_A, "s1", false), "Testpilot", 5)
+            .await
+            .unwrap();
+        let err = f
+            .hub
+            .create_from_flugmappe(create_input(FM_A), "Testpilot", 6)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_link_leaves_no_running_mission_without_its_link() {
+        let f = hub().await;
+        let id = prepared(&f.hub, "Vorbereitet").await;
+        sqlx::query(
+            "CREATE TRIGGER fail_bind BEFORE UPDATE ON mission_sections \
+             BEGIN SELECT RAISE(ABORT, 'Testfehler'); END",
+        )
+        .execute(&f.hub.pool)
+        .await
+        .unwrap();
+        assert!(
+            f.hub
+                .link(id, link_input(FM_A, "s1", false), "Testpilot", 20)
+                .await
+                .is_err()
+        );
+        let m = f.hub.get(id).await.unwrap();
+        assert_eq!(
+            (m.state, m.flugmappe),
+            (MissionState::Prepared, None),
+            "ganz oder gar nicht"
+        );
+        assert_eq!(f.hub.map.pilot_scope(), None);
+
+        sqlx::query("DROP TRIGGER fail_bind")
+            .execute(&f.hub.pool)
+            .await
+            .unwrap();
+        let linked = f
+            .hub
+            .link(id, link_input(FM_A, "s1", false), "Testpilot", 21)
+            .await
+            .unwrap();
+        assert_eq!(linked.state, MissionState::Running);
+        assert_eq!(f.hub.map.pilot_scope(), Some(id));
+    }
+
+    #[tokio::test]
+    async fn a_second_running_mission_fails_the_whole_link_on_the_partial_index() {
+        let f = hub().await;
+        let a = prepared(&f.hub, "A").await;
+        let b = prepared(&f.hub, "B").await;
+        f.hub.start(a, 2).await.unwrap();
+        // Am Hub vorbei, wie ein Start, der die Prüfung überholt hätte.
+        let write = LinkWrite {
+            start: true,
+            link: Some((FM_A, "Testpilot")),
+            bind_section: None,
+        };
+        let err: AppError = store::link_flugmappe(&f.hub.pool, b, &write, 3)
+            .await
+            .unwrap_err()
+            .into();
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+        let m = f.hub.get(b).await.unwrap();
+        assert_eq!((m.state, m.flugmappe), (MissionState::Prepared, None));
     }
 
     #[tokio::test]
@@ -837,6 +972,65 @@ mod tests {
             .unwrap();
         assert_eq!(again.imported, 0);
         assert_eq!(f.hub.map.list_in(Some(m.id)).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_failed_import_leaves_nothing_and_can_be_repeated() {
+        let f = hub().await;
+        let m = f
+            .hub
+            .create_from_flugmappe(create_input(FM_A), "Testpilot", 10)
+            .await
+            .unwrap();
+        let point = |name: &str| FmImportFeature {
+            name: Some(name.into()),
+            kind: MapElementKind::Point,
+            points: vec![GeoPoint {
+                lat: 52.43,
+                lon: 10.01,
+            }],
+        };
+        let input = FmMapImport {
+            features: vec![point("Erster"), point("Kaputt")],
+            standort: Some(GeoPoint {
+                lat: 52.43,
+                lon: 10.01,
+            }),
+        };
+        sqlx::query(
+            "CREATE TRIGGER fail_insert BEFORE INSERT ON map_elements \
+             WHEN NEW.name = 'Kaputt' BEGIN SELECT RAISE(ABORT, 'Testfehler'); END",
+        )
+        .execute(&f.hub.pool)
+        .await
+        .unwrap();
+        let mut map_changes = f.hub.map.subscribe();
+        assert!(
+            f.hub
+                .import_map(m.id, FM_A, input.clone(), "Testpilot", 11)
+                .await
+                .is_err()
+        );
+        assert!(f.hub.map.list_in(Some(m.id)).await.unwrap().is_empty());
+        assert!(map_changes.try_recv().is_err(), "nichts verteilt");
+        let ids = store::flugmappe_ids(&f.hub.pool, m.id).await.unwrap();
+        assert_eq!(
+            ids.map_imported_at_ms, None,
+            "nicht als übernommen markiert"
+        );
+        assert_eq!(f.hub.get(m.id).await.unwrap().sections[0].location, None);
+
+        sqlx::query("DROP TRIGGER fail_insert")
+            .execute(&f.hub.pool)
+            .await
+            .unwrap();
+        let done = f
+            .hub
+            .import_map(m.id, FM_A, input, "Testpilot", 12)
+            .await
+            .unwrap();
+        assert_eq!(done.imported, 3);
+        assert_eq!(f.hub.map.list_in(Some(m.id)).await.unwrap().len(), 3);
     }
 
     #[tokio::test]

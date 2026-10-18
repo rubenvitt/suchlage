@@ -146,8 +146,8 @@ pub async fn running_id(pool: &SqlitePool) -> Result<Option<i64>, sqlx::Error> {
 
 /// Setzt den Zustand und die passende Zeit. Ein zweiter laufender Einsatz scheitert am Teilindex
 /// (Unique-Fehler, im `AppError` ein Konflikt).
-pub async fn set_state(
-    pool: &SqlitePool,
+pub async fn set_state<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
     id: i64,
     state: MissionState,
     now_ms: i64,
@@ -160,7 +160,7 @@ pub async fn set_state(
     .bind(state_str(state))
     .bind(now_ms)
     .bind(id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(())
 }
@@ -412,8 +412,8 @@ pub async fn create_from_flugmappe(
 }
 
 /// Verknüpft (oder übernimmt) den Einsatz für diese Flugmappe. `false`, wenn es ihn nicht gibt.
-pub async fn link(
-    pool: &SqlitePool,
+pub async fn link<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
     id: i64,
     flugmappe_mission_id: &str,
     linked_by: &str,
@@ -427,15 +427,15 @@ pub async fn link(
     .bind(linked_by)
     .bind(now_ms)
     .bind(id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(done.rows_affected() == 1)
 }
 
 /// Gibt einem vorhandenen Abschnitt die ID der Flugmappe und deren Bezeichnung; der Ort bleibt,
 /// wenn die Flugmappe keinen nennt.
-pub async fn bind_section(
-    pool: &SqlitePool,
+pub async fn bind_section<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
     section_id: i64,
     flugmappe_section_id: &str,
     label: &str,
@@ -449,9 +449,42 @@ pub async fn bind_section(
     .bind(label)
     .bind(location)
     .bind(section_id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(())
+}
+
+/// Was beim Verknüpfen geschrieben wird.
+#[derive(Debug, Clone, Copy)]
+pub struct LinkWrite<'a> {
+    /// vorbereitet → laufend
+    pub start: bool,
+    /// (Einsatz-ID der Flugmappe, Anzeigename des Kontos), wenn die Verknüpfung neu ist.
+    pub link: Option<(&'a str, &'a str)>,
+    /// (Abschnitt in Suchlage, Abschnitts-ID der Flugmappe, Bezeichnung, Ort).
+    pub bind_section: Option<(i64, &'a str, &'a str, Option<&'a str>)>,
+}
+
+/// Verknüpfen in einer Transaktion: starten, Verknüpfung schreiben, Abschnitt binden – ganz oder
+/// gar nicht. So bleibt kein laufender Einsatz ohne Verknüpfung zurück. Ein zweiter laufender
+/// Einsatz scheitert am Teilindex (409).
+pub async fn link_flugmappe(
+    pool: &SqlitePool,
+    id: i64,
+    w: &LinkWrite<'_>,
+    now_ms: i64,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    if w.start {
+        set_state(&mut *tx, id, MissionState::Running, now_ms).await?;
+    }
+    if let Some((caller, linked_by)) = w.link {
+        link(&mut *tx, id, caller, linked_by, now_ms).await?;
+    }
+    if let Some((section, fm_section, label, location)) = w.bind_section {
+        bind_section(&mut *tx, section, fm_section, label, location).await?;
+    }
+    tx.commit().await
 }
 
 /// Neuer (und damit aktiver) Abschnitt aus der Flugmappe; liefert seine ID.
@@ -476,8 +509,8 @@ pub async fn add_section_from_flugmappe(
 }
 
 /// Setzt den Ort eines Abschnitts, falls er noch keinen hat.
-pub async fn set_section_location_if_empty(
-    pool: &SqlitePool,
+pub async fn set_section_location_if_empty<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
     section_id: i64,
     location: &str,
 ) -> Result<bool, sqlx::Error> {
@@ -486,7 +519,7 @@ pub async fn set_section_location_if_empty(
     )
     .bind(location)
     .bind(section_id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(done.rows_affected() == 1)
 }
@@ -505,8 +538,8 @@ pub async fn set_map_photo(
 }
 
 /// Merkt die Übernahme der Kartenelemente. `false`, wenn sie schon erledigt war.
-pub async fn mark_map_imported(
-    pool: &SqlitePool,
+pub async fn mark_map_imported<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
     id: i64,
     now_ms: i64,
 ) -> Result<bool, sqlx::Error> {
@@ -516,7 +549,7 @@ pub async fn mark_map_imported(
     )
     .bind(now_ms)
     .bind(id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(done.rows_affected() == 1)
 }

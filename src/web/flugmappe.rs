@@ -589,15 +589,75 @@ mod tests {
             "Der Einsatz ist mit einer anderen Flugmappe verknüpft"
         );
         let section = json!({"flugmappe_section_id": "t2", "label": "Verlegung", "location": null});
-        let (status, _) = s
-            .call(
-                "POST",
-                &format!("/missions/{id}/sections"),
-                Some(FM_B),
-                Some(section),
-            )
+        let import = json!({"features": [], "standort": null});
+        for (method, uri, body) in [
+            ("POST", format!("/missions/{id}/sections"), Some(section)),
+            ("GET", format!("/missions/{id}"), None),
+            ("GET", format!("/missions/{id}/map"), None),
+            ("POST", format!("/missions/{id}/map/import"), Some(import)),
+            ("POST", format!("/missions/{id}/close"), None),
+        ] {
+            let (status, body) = s.call(method, &uri, Some(FM_B), body).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{method} {uri}: {body}");
+            assert_eq!(
+                body["error"],
+                "Der Einsatz ist mit einer anderen Flugmappe verknüpft"
+            );
+        }
+        let (_, m) = s
+            .call("GET", &format!("/missions/{id}"), Some(FM_A), None)
             .await;
-        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(m["state"], "running", "die fremde schließt nichts");
+    }
+
+    #[tokio::test]
+    async fn a_browser_mission_without_flugmappe_is_not_linked() {
+        let s = setup().await;
+        let m = s
+            .app
+            .state
+            .missions
+            .create(
+                crate::contract::MissionCreate {
+                    name: "Aus dem Browser".into(),
+                    location: None,
+                },
+                "Browser",
+                1,
+            )
+            .await
+            .unwrap();
+        for uri in [
+            format!("/missions/{}", m.id),
+            format!("/missions/{}/flights", m.id),
+        ] {
+            let (status, body) = s.call("GET", &uri, Some(FM_A), None).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{uri}");
+            assert_eq!(
+                body["error"],
+                "Der Einsatz ist nicht mit dieser Flugmappe verknüpft"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn creating_again_after_a_lost_answer_returns_the_same_mission() {
+        let s = setup().await;
+        let (status, first) = s.create(FM_A).await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        let (status, again) = s.create(FM_A).await;
+        assert_eq!((status, &again), (StatusCode::OK, &first));
+        let (_, list) = s.call("GET", "/missions", None, None).await;
+        assert_eq!(list.as_array().unwrap().len(), 1);
+
+        let id = first["id"].as_i64().unwrap();
+        let (status, _) = s
+            .call("POST", &format!("/missions/{id}/close"), Some(FM_A), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, body) = s.create(FM_A).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"], "Der Einsatz ist abgeschlossen");
     }
 
     #[tokio::test]
