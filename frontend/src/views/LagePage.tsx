@@ -1,4 +1,5 @@
 import { useViewMode } from '../app/viewMode';
+import { MissionHeader } from '../missions/MissionHeader';
 import { Frame } from '../shell/Frame';
 import { SyncCell } from '../shell/SyncCell';
 import { KioskView } from './KioskView';
@@ -25,6 +26,8 @@ export function LagePage() {
   const mode = useViewMode();
   return (
     <Frame
+      // Mobil steht der Einsatz über der Ansicht (`MobileView`), im Kopf ist dafür kein Platz.
+      mission={mode !== 'mobile' && <MissionHeader />}
       status={
         <>
           <SyncCell />

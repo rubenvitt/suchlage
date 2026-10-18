@@ -6,7 +6,9 @@ import type { MapElementInput } from '../contract/generated/MapElementInput';
 import type { MapElementUpdate } from '../contract/generated/MapElementUpdate';
 import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
+import type { MissionContents } from '../contract/generated/MissionContents';
 import type { MissionCreate } from '../contract/generated/MissionCreate';
+import type { MissionUpdate } from '../contract/generated/MissionUpdate';
 import type { SectionCreate } from '../contract/generated/SectionCreate';
 import type { RemoteControllerCreate } from '../contract/generated/RemoteControllerCreate';
 import type { RemoteControllerCreated } from '../contract/generated/RemoteControllerCreated';
@@ -41,7 +43,7 @@ export const missionFixtures = (): Mission[] => [
   },
 ];
 
-/** Zustandsbehaftete Einsatz-Routen mit den Regeln des Servers (ein laufender Einsatz, 409 beim Starten). */
+/** Zustandsbehaftete Einsatz-Routen mit den Regeln des Servers (ein laufender Einsatz, 409 beim Starten, 422 beim Löschen eines laufenden). */
 export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
   const missions = initial.map((m) => ({ ...m }));
   const find = (id: unknown) => missions.find((m) => m.id === Number(id));
@@ -78,6 +80,24 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
       m.state = 'closed';
       m.closed_at_ms = Date.now();
       return HttpResponse.json(m);
+    }),
+    http.put('/api/missions/:id', async ({ params, request }) => {
+      const m = find(params.id);
+      if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      Object.assign(m, (await request.json()) as MissionUpdate);
+      return HttpResponse.json(m);
+    }),
+    // Feste Mengen: Die Vorschau zählt keine echten Flüge und Fotos.
+    http.get('/api/missions/:id/contents', () =>
+      HttpResponse.json({ flights: 3, photos: 41, map_elements: 4, video_segments: 2 } satisfies MissionContents),
+    ),
+    http.delete('/api/missions/:id', ({ params }) => {
+      const m = find(params.id);
+      if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      if (m.state === 'running')
+        return HttpResponse.json({ error: 'Ein laufender Einsatz lässt sich nicht löschen' }, { status: 422 });
+      missions.splice(missions.indexOf(m), 1);
+      return new HttpResponse(null, { status: 204 });
     }),
     http.post('/api/missions/:id/sections', async ({ params, request }) => {
       const m = find(params.id);

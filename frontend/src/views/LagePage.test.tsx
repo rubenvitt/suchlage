@@ -34,6 +34,9 @@ test('der Kopf nennt die Fernsteuerung mit Fluggerät und den Live-Strom', async
   expect(await head.findByText('RC Plus 1 · M350')).toBeInTheDocument();
   expect(head.getByText('SYNC')).toBeInTheDocument();
   expect(await screen.findByRole('region', { name: 'Telemetrie' })).toBeInTheDocument();
+  // Der laufende Einsatz steht im Kopf, nicht mehr über der Karte.
+  expect(await head.findByText('Übung Wietze', { selector: 'strong' })).toBeInTheDocument();
+  expect(screen.queryByRole('combobox', { name: 'Einsatz wählen' })).not.toBeInTheDocument();
 });
 
 test('Kopf und Ansicht folgen derselben Wahl aus der Adresse', async () => {
@@ -50,6 +53,8 @@ test('die Großbild-Rolle sieht das Großbild ohne Bereichsleiste und Benutzerme
     expect(screen.getByRole('region', { name: 'Telemetrie' })).toHaveAttribute('data-size', 'large'),
   );
   expect(head.getByText('RC Plus 1 · M350')).toBeInTheDocument();
+  // Im Kopf nur der Name des laufenden Einsatzes.
+  expect(await head.findByText('Übung Wietze')).toBeInTheDocument();
   expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
   expect(screen.queryAllByRole('button')).toHaveLength(0);
 });

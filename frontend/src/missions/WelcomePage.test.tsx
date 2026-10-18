@@ -43,7 +43,7 @@ function show(missions = [prepared!], route = '/') {
 
 const welcome = () => screen.findByRole('heading', { name: 'Kein Einsatz läuft' });
 /** Der Einsatz in der Leiste der Lage. */
-const lageOf = (name: string) => screen.findByText(name, { selector: '.sl-mission-bar strong' });
+const lageOf = (name: string) => screen.findByText(name, { selector: '.sl-mission-status strong' });
 
 test('läuft ein Einsatz, öffnet sich direkt seine Lage', async () => {
   show([running!, prepared!]);
@@ -58,7 +58,7 @@ test('„Einsatz starten“ legt an, startet in einem Schritt und zeigt die Lage
   await userEvent.type(screen.getByLabelText('Ort (optional)'), 'Hanstedt');
   await userEvent.click(screen.getByRole('button', { name: 'Einsatz starten' }));
   expect(await lageOf('Vermisste Person Ebstorf')).toBeInTheDocument();
-  expect(screen.getByText('Laufend')).toBeInTheDocument();
+  expect(screen.getByText(/^Laufend · /)).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Kein Einsatz läuft' })).not.toBeInTheDocument();
 });
 
@@ -134,7 +134,7 @@ test('„Nur vorbereiten“ öffnet die Lage des neuen Einsatzes über die Adres
   await userEvent.click(screen.getByRole('button', { name: 'Nur vorbereiten' }));
   expect(await lageOf('Vermisste Person Ebstorf')).toBeInTheDocument();
   expect(screen.getByLabelText('Adresse')).toHaveTextContent('?einsatz=3');
-  expect(screen.getByText('Vorbereitet')).toBeInTheDocument();
+  expect(screen.getByText('Vorbereitung:')).toBeInTheDocument();
 });
 
 test('vorbereitete Einsätze: Name öffnet die Lage, „Starten“ startet, dazu der Weg ins Archiv', async () => {
@@ -146,7 +146,7 @@ test('vorbereitete Einsätze: Name öffnet die Lage, „Starten“ startet, dazu
   expect(screen.getByRole('link', { name: 'Archiv öffnen (1)' })).toHaveAttribute('href', '/einsaetze');
   await userEvent.click(list.getByRole('button', { name: 'Starten: Hochwasser Aller' }));
   expect(await lageOf('Hochwasser Aller')).toBeInTheDocument();
-  expect(screen.getByText('Laufend')).toBeInTheDocument();
+  expect(screen.getByText(/^Laufend · /)).toBeInTheDocument();
 });
 
 test('„Überspringen“ zeigt die Lage ohne Einsatz; startet anderswo einer, folgt sie ihm', async () => {
@@ -154,7 +154,7 @@ test('„Überspringen“ zeigt die Lage ohne Einsatz; startet anderswo einer, f
   await welcome();
   expect(screen.getByText('Zeichnungen ohne Einsatz werden nach 24 Stunden gelöscht.')).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Überspringen' }));
-  expect(await lageOf('ohne Einsatz')).toBeInTheDocument();
+  expect(await screen.findByText('Ohne Einsatz')).toBeInTheDocument();
   expect(screen.getByLabelText('Adresse')).toHaveTextContent('');
 
   await fetch('/api/missions/2/start', { method: 'POST' });
@@ -167,7 +167,7 @@ test('„Überspringen“ zeigt die Lage ohne Einsatz; startet anderswo einer, f
 test('übersprungen bleibt übersprungen, auch nach dem Neuladen', async () => {
   sessionStorage.setItem('suchlage:ohne-einsatz', '1');
   show();
-  expect(await lageOf('ohne Einsatz')).toBeInTheDocument();
+  expect(await screen.findByText('Ohne Einsatz')).toBeInTheDocument();
 });
 
 test('eine Adresse mit Einsatz öffnet die Lage, auch ohne laufenden', async () => {

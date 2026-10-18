@@ -13,7 +13,15 @@ import { flightRow } from './flightRow';
 import { FlightsPage } from './FlightsPage';
 import { FlightTable } from './FlightTable';
 
-vi.mock('../shell/Frame', () => ({ Frame: (p: { children: ReactNode }) => <>{p.children}</> }));
+// Die Kopfleiste mit dem Einsatz bleibt, der übrige Rahmen nicht.
+vi.mock('../shell/Frame', () => ({
+  Frame: (p: { mission?: ReactNode; children: ReactNode }) => (
+    <>
+      {p.mission}
+      {p.children}
+    </>
+  ),
+}));
 
 const [running, landed] = flightList as [(typeof flightList)[0], (typeof flightList)[0]];
 const now = running.started_at_ms + 65_000;

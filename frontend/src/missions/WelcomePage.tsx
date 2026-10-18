@@ -149,7 +149,7 @@ function WelcomePage({ onConflict }: { onConflict: (text: string) => void }) {
 
 /**
  * Route `/`: Lage oder Startseite nach `entryFor`. Das Großbild wartet nicht auf die Einsätze.
- * Scheitert ihr erster Abruf, bleibt die Lage erreichbar; ihre Einsatzleiste sagt, dass sie fehlen.
+ * Scheitert ihr erster Abruf, bleibt die Lage erreichbar; ihre Kopfleiste sagt, dass sie fehlen.
  */
 export function EntryPage() {
   const { data: me } = useMe();

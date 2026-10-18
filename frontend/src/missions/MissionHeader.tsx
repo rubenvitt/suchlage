@@ -1,0 +1,257 @@
+import { Alert, Button, Dropdown, Form, Input, Modal, message, type MenuProps } from 'antd';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { ApiError } from '../api/client';
+import {
+  useAddSection,
+  useCloseMission,
+  useMe,
+  useMissions,
+  useStartMission,
+  useUpdateMission,
+} from '../api/queries';
+import { StatusChip, useRollen } from '../components/instrument';
+import { statusFlaeche } from '../components/instrument/statusFlaeche';
+import type { Mission } from '../contract/generated/Mission';
+import { useServerNow } from '../live/LiveProvider';
+import { DeleteMissionDialog } from './DeleteMissionDialog';
+import { useSkip } from './entry';
+import './missions.css';
+import { useMissionScope } from './useMissionScope';
+
+const errorText = (e: unknown) => (e instanceof ApiError ? e.message : 'Server nicht erreichbar.');
+const pad = (n: number) => String(n).padStart(2, '0');
+/** Dauer seit dem Start als „01:12 h“. */
+const since = (startMs: number | null, nowMs: number) => {
+  const min = Math.max(0, Math.floor((nowMs - (startMs ?? nowMs)) / 60_000));
+  return `${pad(Math.floor(min / 60))}:${pad(min % 60)} h`;
+};
+
+/**
+ * Der Einsatz in der Kopfleiste: laufend mit Menü, ohne Einsatz mit Weg zur Startseite, Vorbereitung,
+ * Archiv (nur lesen). Das Großbild zeigt nur den Namen des laufenden. Solange die Einsätze nicht
+ * bekannt sind, steht hier nichts, was „ohne Einsatz“ behaupten würde.
+ */
+export function MissionHeader() {
+  const { data: me } = useMe();
+  const missions = useMissions();
+  const { scope, ready } = useMissionScope();
+  if (!me) return null;
+  if (me.role === 'kiosk')
+    return scope.kind === 'mission' ? (
+      <div className="sl-mission-status">
+        <strong>{scope.mission.name}</strong>
+      </div>
+    ) : null;
+  if (!ready)
+    return (
+      <div className="sl-mission-status">
+        <span>{missions.isError ? 'Einsätze nicht geladen' : 'Einsätze werden geladen …'}</span>
+      </div>
+    );
+  if (scope.kind === 'none') return <Without />;
+  const { mission } = scope;
+  if (mission.state === 'running') return <Running mission={mission} />;
+  if (mission.state === 'prepared') return <Prepared mission={mission} />;
+  return <Archived mission={mission} admin={me.role === 'admin'} />;
+}
+
+/** Deutlich (Spec §2, Skizze 3): Niemand soll ohne Einsatz fliegen, ohne es zu merken. */
+function Without() {
+  const { reset } = useSkip();
+  const navigate = useNavigate();
+  // Die Statusfläche trägt ihren Text in beiden Darstellungen, auch auf dem immer dunklen Kopf.
+  const tint = statusFlaeche(useRollen().rollen, 'achtung');
+  return (
+    <div className="sl-mission-status" data-state="ohne" style={{ background: tint.grund, color: tint.text }}>
+      <strong>Ohne Einsatz</strong>
+      <span>Zeichnungen werden nach 24 h gelöscht</span>
+      <Button
+        type="primary"
+        size="small"
+        onClick={() => {
+          reset();
+          navigate('/');
+        }}
+      >
+        Einsatz starten
+      </Button>
+    </div>
+  );
+}
+
+function Prepared({ mission }: { mission: Mission }) {
+  const start = useStartMission();
+  const navigate = useNavigate();
+  const [notice, holder] = message.useMessage();
+  // Nach dem Start wechselt die Kopfleiste in „laufend“ und diese Komponente ist weg: darum das Promise.
+  const run = () =>
+    start.mutateAsync(mission.id).then(
+      () => navigate('/'),
+      (e: unknown) =>
+        void notice.error(
+          e instanceof ApiError && e.status === 409 ? 'Es läuft schon ein Einsatz' : errorText(e),
+        ),
+    );
+  return (
+    <div className="sl-mission-status" data-state="vorbereitung">
+      {holder}
+      <span>Vorbereitung:</span> <strong>{mission.name}</strong>
+      <Button type="primary" size="small" loading={start.isPending} onClick={() => void run()}>
+        Einsatz starten
+      </Button>
+      <Link to="/">Zurück</Link>
+    </div>
+  );
+}
+
+function Archived({ mission, admin }: { mission: Mission; admin: boolean }) {
+  const [deleting, setDeleting] = useState(false);
+  return (
+    <div className="sl-mission-status" data-state="archiv">
+      <span>Archiv:</span> <strong>{mission.name}</strong> <span>· abgeschlossen</span>
+      <Link to={`/flights?einsatz=${mission.id}`}>Flüge</Link>
+      {admin && (
+        <Button size="small" danger onClick={() => setDeleting(true)}>
+          Löschen …
+        </Button>
+      )}
+      <Link to="/einsaetze">Zurück</Link>
+      {deleting && <DeleteMissionDialog mission={mission} onClose={() => setDeleting(false)} />}
+    </div>
+  );
+}
+
+type Dialog = 'section' | 'edit' | 'close';
+
+function Running({ mission }: { mission: Mission }) {
+  const now = useServerNow(15_000);
+  const navigate = useNavigate();
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const section = mission.sections.at(-1);
+  const items: MenuProps['items'] = [
+    {
+      type: 'group',
+      key: 'einsatz',
+      label: 'Einsatz',
+      children: [
+        { key: 'section', label: 'Neuer Abschnitt …' },
+        { key: 'edit', label: 'Einsatz bearbeiten' },
+        { key: 'flights', label: 'Flüge dieses Einsatzes' },
+        { key: 'close', label: 'Einsatz abschließen …', danger: true },
+      ],
+    },
+  ];
+  const onClick: MenuProps['onClick'] = ({ key }) =>
+    key === 'flights' ? void navigate(`/flights?einsatz=${mission.id}`) : setDialog(key as Dialog);
+  const close = () => setDialog(null);
+  return (
+    <div className="sl-mission-status" data-state="laufend">
+      <Dropdown menu={{ items, onClick }} trigger={['click']}>
+        <button type="button" className="sl-mission-trigger">
+          <strong>{mission.name}</strong>
+          <StatusChip ton="normal" wort={`Laufend · ${since(mission.started_at_ms, now)}`} />
+          {section && <span className="sl-mission-note">· Abschnitt {section.label}</span>}
+          <span aria-hidden="true">▾</span>
+        </button>
+      </Dropdown>
+      {dialog === 'section' && <SectionDialog mission={mission} onClose={close} />}
+      {dialog === 'edit' && <EditDialog mission={mission} onClose={close} />}
+      {dialog === 'close' && <CloseDialog mission={mission} onClose={close} />}
+    </div>
+  );
+}
+
+function SectionDialog({ mission, onClose }: { mission: Mission; onClose: () => void }) {
+  const add = useAddSection();
+  const [form] = Form.useForm<{ label: string }>();
+  return (
+    <Modal
+      open
+      title="Neuer Abschnitt"
+      okText="Anlegen"
+      cancelText="Abbrechen"
+      confirmLoading={add.isPending}
+      onOk={() => form.submit()}
+      onCancel={onClose}
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        requiredMark={false}
+        onFinish={(v) =>
+          void add.mutateAsync({ id: mission.id, label: v.label, location: null }).then(onClose, () => {})
+        }
+      >
+        <Form.Item label="Abschnitt" name="label" rules={[{ required: true, message: 'Name fehlt' }]}>
+          <Input autoFocus placeholder="z. B. Süd" />
+        </Form.Item>
+      </Form>
+      {add.isError && <Alert type="error" title={errorText(add.error)} />}
+    </Modal>
+  );
+}
+
+function EditDialog({ mission, onClose }: { mission: Mission; onClose: () => void }) {
+  const update = useUpdateMission();
+  const [form] = Form.useForm<{ name: string; location?: string | null }>();
+  return (
+    <Modal
+      open
+      title="Einsatz bearbeiten"
+      okText="Speichern"
+      cancelText="Abbrechen"
+      confirmLoading={update.isPending}
+      onOk={() => form.submit()}
+      onCancel={onClose}
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        requiredMark={false}
+        initialValues={{ name: mission.name, location: mission.location }}
+        onFinish={(v) =>
+          void update
+            .mutateAsync({ id: mission.id, name: v.name, location: v.location || null })
+            .then(onClose, () => {})
+        }
+      >
+        <Form.Item label="Name" name="name" rules={[{ required: true, message: 'Name fehlt' }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item label="Ort" name="location">
+          <Input />
+        </Form.Item>
+      </Form>
+      {update.isError && <Alert type="error" title={errorText(update.error)} />}
+    </Modal>
+  );
+}
+
+function CloseDialog({ mission, onClose }: { mission: Mission; onClose: () => void }) {
+  const close = useCloseMission();
+  const { reset } = useSkip();
+  const navigate = useNavigate();
+  return (
+    <Modal
+      open
+      title={`Einsatz „${mission.name}“ abschließen?`}
+      okText="Abschließen"
+      cancelText="Abbrechen"
+      okButtonProps={{ danger: true }}
+      confirmLoading={close.isPending}
+      // Danach ist die Kopfleiste schon „Archiv“ und dieser Dialog weg: darum das Promise. Ein früheres
+      // „Überspringen“ gilt nicht mehr, nach dem Abschluss kommt die Startseite.
+      onOk={() =>
+        void close.mutateAsync(mission.id).then(() => {
+          reset();
+          navigate('/');
+        }, () => {})
+      }
+      onCancel={onClose}
+    >
+      <p>Abgeschlossene Einsätze sind nur noch lesbar.</p>
+      {close.isError && <Alert type="error" title={errorText(close.error)} />}
+    </Modal>
+  );
+}

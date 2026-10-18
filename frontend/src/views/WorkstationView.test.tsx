@@ -19,6 +19,7 @@ import type { MapElement } from '../contract/generated/MapElement';
 import type { SituationSnapshot } from '../contract/generated/SituationSnapshot';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
+import { MissionHeader } from '../missions/MissionHeader';
 import { SyncCell } from '../shell/SyncCell';
 import { renderWithApp } from '../test/render';
 import { WorkstationView } from './WorkstationView';
@@ -58,7 +59,9 @@ function show(
   store.setStatus(status);
   return renderWithApp(
     <LiveProvider store={store}>
+      {/* Wie im Kopf der Lage: Live-Strom und Einsatz. */}
       <SyncCell />
+      <MissionHeader />
       <WorkstationView />
     </LiveProvider>,
     { route },
@@ -301,7 +304,7 @@ test('unter „ohne Einsatz“ stehen nur die Elemente ohne Einsatz', async () =
     'open',
     '/?einsatz=ohne',
   );
-  await screen.findByRole('combobox', { name: 'Einsatz wählen' });
+  await screen.findByText('Ohne Einsatz');
   expect(karte.props!.elements!.map((e) => e.id)).toEqual(['frei']);
 });
 
@@ -329,7 +332,7 @@ test('bei abgeschlossenem Einsatz sind die Zeichenwerkzeuge aus', async () => {
   const closed: Mission[] = missionFixtures().map((m) => (m.id === 1 ? { ...m, state: 'closed' } : m));
   server.use(...missionHandlers(closed));
   show(snapshotFlying, [], 'open', '/?einsatz=1');
-  expect(await screen.findByText('Abgeschlossen')).toBeInTheDocument();
+  expect(await screen.findByText(/^Archiv:/)).toBeInTheDocument();
   expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
 });
 
@@ -343,7 +346,7 @@ test('ein Element ohne Einsatz lässt sich einem Einsatz zuordnen', async () => 
     }),
   );
   show(snapshotFlying, [elementsEvent(elementOf('frei', null))], 'open', '/?einsatz=ohne');
-  await screen.findByRole('combobox', { name: 'Einsatz wählen' });
+  await screen.findByText('Ohne Einsatz');
   await screen.findByRole('toolbar', { name: 'Zeichnen' });
   await vi.waitFor(() => expect(karte.props!.elements).toHaveLength(1));
   klick(52.4, 10.0, 'frei');

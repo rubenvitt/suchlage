@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Popconfirm } from 'antd';
+import { Alert, Button, Form, Input } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ApiError, apiSend } from '../api/client';
@@ -11,11 +11,12 @@ import type { SectionCreate } from '../contract/generated/SectionCreate';
 import { Frame } from '../shell/Frame';
 import './missions.css';
 
+// Der laufende Einsatz steht in der Kopfleiste; das Archiv zeigt die zuletzt abgeschlossenen zuerst.
 const GROUPS: { state: MissionState; title: string }[] = [
-  { state: 'running', title: 'Laufend' },
   { state: 'prepared', title: 'Vorbereitet' },
-  { state: 'closed', title: 'Abgeschlossen' },
+  { state: 'closed', title: 'Archiv' },
 ];
+const newestClosedFirst = (a: Mission, b: Mission) => (b.closed_at_ms ?? 0) - (a.closed_at_ms ?? 0);
 
 type Act = (method: 'POST', path: string, body?: unknown, onOk?: () => void) => void;
 
@@ -63,19 +64,6 @@ function MissionRow({ mission, act }: { mission: Mission; act: Act }) {
             >
               Starten
             </Button>
-          )}
-          {mission.state === 'running' && (
-            <Popconfirm
-              title={`Einsatz „${mission.name}“ wirklich abschließen?`}
-              description="Abgeschlossene Einsätze sind nur noch lesbar."
-              okText="Abschließen"
-              cancelText="Abbrechen"
-              onConfirm={() => act('POST', `/api/missions/${mission.id}/close`)}
-            >
-              <Button size="small" danger aria-label={`Abschließen: ${mission.name}`}>
-                Abschließen
-              </Button>
-            </Popconfirm>
           )}
           <Link to={`/?einsatz=${mission.id}`} aria-label={`Auf der Lage öffnen: ${mission.name}`}>
             Auf der Lage öffnen
@@ -154,6 +142,7 @@ export function MissionsPage() {
             <ul className="sl-mission-list">
               {data
                 .filter((m) => m.state === g.state)
+                .sort(newestClosedFirst)
                 .map((m) => (
                   <MissionRow key={m.id} mission={m} act={act} />
                 ))}

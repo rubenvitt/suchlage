@@ -6,8 +6,11 @@ import type { Health } from '../contract/generated/Health';
 import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
+import type { MissionContents } from '../contract/generated/MissionContents';
 import type { MissionCreate } from '../contract/generated/MissionCreate';
+import type { MissionUpdate } from '../contract/generated/MissionUpdate';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
+import type { SectionCreate } from '../contract/generated/SectionCreate';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
 import type { SettingsView } from '../contract/generated/SettingsView';
 import { scopeQuery, type MissionScope } from '../missions/scope';
@@ -102,20 +105,50 @@ export const useFlightPhotos = (id: number | null) =>
     queryFn: id == null ? skipToken : () => apiGet<PhotoShot[]>(`/api/flights/${id}/photos`),
   });
 
-/** Einsatz anlegen (vorbereitet); danach laden die Einsätze neu. */
-export function useCreateMission() {
+/** Schreibt am Einsatz; danach laden die Einsätze neu (auch nach einem Fehler: der Stand kann sich geändert haben). */
+function useMissionWrite<V, R>(send: (v: V) => Promise<R>) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: MissionCreate) => apiSend<Mission>('POST', '/api/missions', input),
+    mutationFn: send,
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
   });
 }
 
+/** Einsatz anlegen (vorbereitet). */
+export const useCreateMission = () =>
+  useMissionWrite((input: MissionCreate) => apiSend<Mission>('POST', '/api/missions', input));
 /** Vorbereiteten Einsatz starten; 409, wenn schon einer läuft. */
-export function useStartMission() {
+export const useStartMission = () =>
+  useMissionWrite((id: number) => apiSend<Mission>('POST', `/api/missions/${id}/start`));
+/** Laufenden Einsatz abschließen; 422 während eines Flugs. */
+export const useCloseMission = () =>
+  useMissionWrite((id: number) => apiSend<Mission>('POST', `/api/missions/${id}/close`));
+export const useUpdateMission = () =>
+  useMissionWrite(({ id, ...body }: MissionUpdate & { id: number }) =>
+    apiSend<Mission>('PUT', `/api/missions/${id}`, body),
+  );
+export const useAddSection = () =>
+  useMissionWrite(({ id, ...body }: SectionCreate & { id: number }) =>
+    apiSend<Mission>('POST', `/api/missions/${id}/sections`, body),
+  );
+/**
+ * Einsatz mit allem, was dazugehört, löschen (nur Verwaltung); 422 laufend, 503 Ablage fehlt.
+ * `onDeleted` läuft vor dem Neuladen: Die offene Ansicht des Einsatzes fiele sonst kurz auf den laufenden.
+ */
+export function useDeleteMission(onDeleted: () => void) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => apiSend<Mission>('POST', `/api/missions/${id}/start`),
-    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
+    mutationFn: (id: number) => apiSend<void>('DELETE', `/api/missions/${id}`),
+    onSuccess: () => {
+      onDeleted();
+      for (const queryKey of [queryKeys.missions, queryKeys.flights, queryKeys.photos])
+        void client.invalidateQueries({ queryKey });
+    },
   });
 }
+/** Mengen für die Lösch-Rückfrage. */
+export const useMissionContents = (id: number) =>
+  useQuery({
+    queryKey: [...queryKeys.missions, id, 'contents'],
+    queryFn: () => apiGet<MissionContents>(`/api/missions/${id}/contents`),
+  });

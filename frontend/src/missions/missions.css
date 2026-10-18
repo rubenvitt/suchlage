@@ -1,10 +1,4 @@
-/* Einsatzseite und Einsatzleiste. */
-.sl-mission-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
+/* Einsatzseite und Einsatz in der Kopfleiste. */
 .sl-mission-select {
   min-width: 200px;
 }
@@ -104,4 +98,51 @@
 }
 .sl-welcome-skip small {
   display: block;
+}
+
+/* Einsatz in der Kopfleiste (Skizzen „Lage laufend“ und „ohne Einsatz“): eigene Zelle vor dem Status. */
+/* Die Zelle füllt der Einsatz selbst, damit „ohne Einsatz“ sie ganz tönen kann. */
+.sl-head .sl-mission-cell {
+  padding: 0;
+  align-items: stretch;
+  background: var(--lfh-rahmen-aktiv);
+  min-width: 0;
+}
+.sl-head .sl-mission-status {
+  padding: 0 16px;
+}
+.sl-mission-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.sl-mission-status strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sl-mission-status a {
+  color: inherit;
+  text-decoration: underline;
+}
+.sl-mission-note {
+  color: var(--lfh-rahmen-gedaempft);
+}
+.sl-mission-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sl-confirm-name {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
 }

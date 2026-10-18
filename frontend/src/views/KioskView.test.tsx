@@ -11,6 +11,7 @@ import type { SituationSnapshot } from '../contract/generated/SituationSnapshot'
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
 import type { MapElement } from '../contract/generated/MapElement';
+import { missionFixtures, missionHandlers } from '../test/handlers';
 import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
 import { useDichte } from '../theme/ThemeModeProvider';
@@ -90,12 +91,19 @@ test('Fernsteuerung ohne Fluggerät', async () => {
   expect(screen.getByText(/RC Plus 1 ist verbunden/)).toBeInTheDocument();
 });
 
-test('Großbild zeigt Name und Elemente des laufenden Einsatzes und ignoriert ?einsatz=', async () => {
+test('Großbild zeigt die Elemente des laufenden Einsatzes und ignoriert ?einsatz=', async () => {
   server.use(http.get('/api/me', () => HttpResponse.json(meKiosk)));
   const base = liveEvents.find((e) => e.type === 'map_elements')!.elements[0]!;
   const of = (id: string, mission_id: number | null): MapElement => ({ ...base, id, mission_id });
   show(snapshotFlying, [of('laufend', 1), of('vorbereitet', 2), of('frei', null)], '/?einsatz=2');
-  expect(await screen.findByText('Übung Wietze')).toBeInTheDocument();
-  expect(screen.queryByText('Hochwasser Aller')).not.toBeInTheDocument();
-  expect(screen.getByTestId('karte')).toHaveAttribute('data-elements', 'laufend');
+  await vi.waitFor(() => expect(screen.getByTestId('karte')).toHaveAttribute('data-elements', 'laufend'));
+  expect(screen.queryByText('Kein Einsatz läuft')).not.toBeInTheDocument();
+});
+
+test('ohne laufenden Einsatz: „Kein Einsatz läuft“ über der Karte ohne Elemente', async () => {
+  server.use(http.get('/api/me', () => HttpResponse.json(meKiosk)), ...missionHandlers([missionFixtures()[1]!]));
+  const base = liveEvents.find((e) => e.type === 'map_elements')!.elements[0]!;
+  show(snapshotFlying, [{ ...base, id: 'frei', mission_id: null }]);
+  expect(await screen.findByText('Kein Einsatz läuft')).toBeInTheDocument();
+  expect(screen.getByTestId('karte')).toHaveAttribute('data-elements', '');
 });

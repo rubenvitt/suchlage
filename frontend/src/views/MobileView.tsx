@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMe } from '../api/queries';
-import { MissionBar } from '../missions/MissionBar';
+import { MissionHeader } from '../missions/MissionHeader';
 import { useMissionScope } from '../missions/useMissionScope';
 import { useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
@@ -29,7 +29,7 @@ export function MobileView() {
   return (
     <div className="sl-mobile">
       <div className="sl-mobile-mission">
-        <MissionBar />
+        <MissionHeader />
       </div>
       {notice}
       {focus.gateway && <VideoSlot focus={focus} ready={state.ready} canControl={false} />}

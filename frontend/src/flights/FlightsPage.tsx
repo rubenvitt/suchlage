@@ -1,7 +1,7 @@
 import { Paneel, PaneelZustand, type PaneelDatenzustand } from '../components/instrument';
 import { useFlights, useMissions } from '../api/queries';
 import { useViewMode } from '../app/viewMode';
-import { MissionBar } from '../missions/MissionBar';
+import { MissionHeader } from '../missions/MissionHeader';
 import { useMissionScope } from '../missions/useMissionScope';
 import { useServerNow } from '../live/LiveProvider';
 import { Frame } from '../shell/Frame';
@@ -33,9 +33,13 @@ export function FlightsPage() {
         ? 'Noch kein Flug aufgezeichnet. Jeder Flug erscheint hier automatisch nach dem Abheben.'
         : 'Keine Flüge in diesem Einsatz.';
   return (
-    <Frame>
+    <Frame mission={!mobile && <MissionHeader />}>
       <div className="sl-page">
-        <MissionBar />
+        {mobile && (
+          <div className="sl-mobile-mission">
+            <MissionHeader />
+          </div>
+        )}
         <Paneel titel="Flüge" meta={data ? `${scopeName} · ${data.length} aufgezeichnet` : undefined}>
           {/* Ohne Aktion: Flüge entstehen von selbst, ein Knopf führte ins Leere. */}
           <PaneelZustand

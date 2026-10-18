@@ -21,16 +21,26 @@ export function KioskView() {
   useEffect(() => setDichte('komfortabel'), [setDichte]);
   const { state, focus } = useFocus();
   const serverNow = useServerNow();
-  // Das Großbild folgt immer dem laufenden Einsatz (`useMissionScope` ignoriert `?einsatz=`).
+  // Das Großbild folgt immer dem laufenden Einsatz (`useMissionScope` ignoriert `?einsatz=`); den Namen nennt der Kopf.
   const { scope, ready } = useMissionScope();
   const map = useLiveMapData(state, focus, scope, ready);
+  // Ohne laufenden Einsatz zeigt das Großbild keine Zeichnungen und Fotos „ohne Einsatz“.
+  const idle = ready && scope.kind === 'none';
   const notice = viewerNoticeOf(state, focus);
 
   return (
     <div className="sl-kiosk">
       <div className="sl-kiosk-map">
-        <SituationMap {...map} serverNow={serverNow} thresholds={state.thresholds} follow showTools={false} />
-        {scope.kind === 'mission' && <div className="sl-kiosk-mission">{scope.mission.name}</div>}
+        <SituationMap
+          {...map}
+          elements={idle ? [] : map.elements}
+          photos={idle ? [] : map.photos}
+          serverNow={serverNow}
+          thresholds={state.thresholds}
+          follow
+          showTools={false}
+        />
+        {idle && <div className="sl-kiosk-idle">Kein Einsatz läuft</div>}
         {notice && <div className="sl-view-notice">{notice}</div>}
       </div>
       <div className="sl-kiosk-video">
