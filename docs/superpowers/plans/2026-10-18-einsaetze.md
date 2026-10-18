@@ -41,6 +41,7 @@
 **Files:**
 - Create: `migrations/0004_missions.sql`, `src/contract/missions.rs`, `src/store/missions.rs`
 - Modify: `src/contract/mod.rs`, `src/contract/map.rs`, `src/contract/photos.rs`, `src/contract/examples.rs`, `src/store/mod.rs`, `src/store/flights.rs`, `src/store/map_elements.rs`, `src/store/photos.rs`
+- Modify (neues Pflichtfeld nachziehen): `src/map/mod.rs` (`MapElement { … }` in `create`), `src/photos/rules.rs` (`PhotoShot { … }`), `src/dji/map.rs` (Test), `frontend/src/map/useMapEditor.tsx`, `frontend/src/test/handlers.ts`, `frontend/src/live/reducer.test.ts`, `frontend/src/views/WorkstationView.test.tsx`, `frontend/src/photos/PhotoPanel.tsx`, `frontend/src/video/VideoPanel.test.tsx`, `frontend/src/flights/FlightDetailPage.tsx` – nur die, die der Compiler bzw. `tsc` meldet
 
 **Interfaces:**
 - Produces (Vertrag):
@@ -69,14 +70,15 @@
   - `existing_rows_are_unassigned_after_migration` – vor `create` angelegter Flug, Element und Foto erscheinen in `list_in(None)` / `since_unassigned`
   - `assign_flight_moves_its_photos_and_only_from_unassigned` – Zuordnen setzt Flug und Fotos um; zweiter Aufruf → `false`
 - [ ] **Step 3: Implementieren.** `flights::insert` setzt `mission_id = (SELECT id FROM missions WHERE state = 'running')` und `section_id = (SELECT MAX(id) FROM mission_sections WHERE mission_id = <dieselbe>)` im `INSERT`. `photos::upsert` setzt `mission_id = COALESCE((SELECT mission_id FROM flights WHERE id = ?flight_id), (SELECT id FROM missions WHERE state = 'running'))`, auch im `ON CONFLICT`-Zweig. `map_elements::insert` speichert `mission_id` aus dem Element. Vertragsbeispiele in `examples.rs` um `mission_id` ergänzen.
-- [ ] **Step 4:** `cargo test store` und `cargo test contract` grün; erzeugte TS-Dateien prüfen.
-- [ ] **Step 5:** `scripts/check.sh`, Commit `SUL-65: Einsätze in Schema, Vertrag und Speicher`.
+- [ ] **Step 4: Neues Feld überall nachziehen.** Rust: `mission_id: None` an jeder Stelle, die `MapElement`/`PhotoShot` vollständig aufbaut (in `photos::rules` aus der Zeile übernehmen). Browser: `mission_id: null` in Fixtures, MSW-Handlern und dem `MapElementInput` aus `useMapEditor` (vorerst `null`; Task 6 setzt den gewählten Einsatz). Kein Verhalten ändert sich.
+- [ ] **Step 5:** `cargo test store` und `cargo test contract` grün; erzeugte TS-Dateien prüfen.
+- [ ] **Step 6:** `scripts/check.sh` (vollständig, weil der Vertrag das Frontend berührt), Commit `SUL-65: Einsätze in Schema, Vertrag und Speicher`.
 
 ### Task 2: MissionHub, Browser-API und SSE
 
 **Files:**
 - Create: `src/missions/mod.rs`, `src/missions/rules.rs`, `src/web/missions.rs`
-- Modify: `src/lib.rs`, `src/app.rs` (`AppState.missions`, Routen), `src/testing.rs`, `src/contract/live.rs`, `src/web/live.rs`
+- Modify: `src/lib.rs`, `src/app.rs` (`AppState.missions`, Routen), `src/testing.rs`, `src/contract/live.rs`, `src/web/live.rs`, `src/map/mod.rs` (leere `set_pilot_scope`), `frontend/src/live/reducer.ts` (`case 'missions_changed': return s;`), `frontend/src/live/LiveProvider.tsx` (invalidiert `['missions']`), `frontend/src/api/queries.ts` (`queryKeys.missions`)
 
 **Interfaces:**
 - Consumes: `store::missions::*` aus Task 1.
@@ -99,7 +101,7 @@
   - `web::live::tests::mission_changes_reach_the_browser` – nach `start` erscheint `{"type":"missions_changed"}` im Strom
 - [ ] **Step 2: Implementieren.** `MissionHub` prüft Übergänge mit `rules::transition` (→ 422), Name/Label mit `map::rules::name`-Art (1–120 Zeichen, getrimmt → 400), schließt nicht bei `has_open_flight` (→ 422). `start`/`close` setzen zusätzlich `map.set_pilot_scope(...)` (Task 4; bis dahin als leere Methode im `MapHub` anlegen). `web::live` nimmt `missions.subscribe()` als dritten Strom neben Karte und Fotos (`stream::select`).
 - [ ] **Step 3:** `cargo test missions` und `cargo test web::live` grün.
-- [ ] **Step 4:** `scripts/check.sh`, Commit `SUL-65: Einsätze anlegen, starten, abschließen`.
+- [ ] **Step 4:** `scripts/check.sh` (vollständig), Commit `SUL-65: Einsätze anlegen, starten, abschließen`.
 
 ### Task 3: Bereich in Flug-, Foto- und Karten-API
 
@@ -127,7 +129,7 @@
 ### Task 4: Pilot 2 sieht den laufenden Einsatz
 
 **Files:**
-- Modify: `src/map/mod.rs`, `src/web/pilot_map.rs`, `src/app.rs`
+- Modify: `src/map/mod.rs`, `src/web/pilot_map.rs`, `src/web/live.rs` (`MapChange::Refresh` überspringen), `src/missions/mod.rs`, `src/app.rs`
 
 **Interfaces:**
 - Consumes: `MissionHub::start_up` ruft `map.set_pilot_scope(running_id)`; `start`/`close` rufen es erneut.
@@ -142,7 +144,7 @@
   - `prepared_mission_elements_are_not_pushed_to_pilot` – Browser legt Element in vorbereitetem B an, A läuft → WebSocket bekommt keine `map_element_create`; Element in A → wird gepusht
   - `starting_a_mission_sends_group_refresh` – WebSocket bekommt `map_group_refresh` nach `start`
   - `pilot_scope_survives_restart` – Einsatz laufen lassen, neuen `MapHub` + `MissionHub::start_up` auf demselben Pool → `pilot_scope() == Some(A)`
-- [ ] **Step 2: Implementieren.** `groups` und Pilot-`create` nutzen `pilot_scope()`. `push_to_pilot` filtert `Created`/`Updated` mit `element.mission_id != pilot_scope()` heraus; ein `Updated`, das ein bisher sichtbares Element aus dem Bereich nimmt (Zuordnen), löst `push_group_refresh` statt des Updates aus. `Deleted` geht immer raus.
+- [ ] **Step 2: Implementieren.** `groups` und Pilot-`create` nutzen `pilot_scope()`. `push_to_pilot` filtert `Created`/`Updated` mit `element.mission_id != pilot_scope()` heraus. `MapHub::assign` (Task 3) veröffentlicht nach dem `Updated` zusätzlich `MapChange::Refresh`, damit ein zugeordnetes Element aus der Sicht des Piloten verschwindet; Test `assigning_an_element_refreshes_the_pilot`. `Deleted` geht immer raus.
 - [ ] **Step 3:** `cargo test pilot_map` grün.
 - [ ] **Step 4:** `scripts/check.sh`, Commit `SUL-65: Pilot 2 sieht die Elemente des laufenden Einsatzes`.
 
@@ -150,7 +152,7 @@
 
 **Files:**
 - Create: `frontend/src/missions/scope.ts`, `frontend/src/missions/scope.test.ts`, `frontend/src/missions/useMissionScope.ts`, `frontend/src/missions/MissionsPage.tsx`, `frontend/src/missions/MissionsPage.test.tsx`, `frontend/src/missions/MissionBar.tsx`, `frontend/src/missions/missions.css`
-- Modify: `frontend/src/api/queries.ts`, `frontend/src/live/LiveProvider.tsx`, `frontend/src/app/router.tsx`, `frontend/src/shell/Rail.tsx`, `frontend/src/test/handlers.ts`
+- Modify: `frontend/src/api/queries.ts`, `frontend/src/app/router.tsx`, `frontend/src/shell/Rail.tsx`, `frontend/src/test/handlers.ts`
 
 **Interfaces:**
 - Consumes: Vertragstypen aus Task 1, Routen aus Task 2.
@@ -160,7 +162,7 @@
   - `scopeQuery(scope: MissionScope): string` → `'<id>'` oder `'none'`
   - `inScope(missionId: number | null, scope: MissionScope): boolean`
   - `useMissionScope(): { scope: MissionScope; setScope(param: string): void }` – liest/schreibt `?einsatz=`; im Kiosk immer der laufende
-  - `useMissions()` mit `queryKeys.missions = ['missions']`; `LiveProvider` invalidiert bei `missions_changed`
+  - `useMissions()` mit `queryKeys.missions` (aus Task 2)
   - Route `/einsaetze` (admin, operator), Rail-Eintrag „Einsätze“ zwischen „Lage“ und „Flüge“
 
 - [ ] **Step 1: Tests schreiben (rot):**
@@ -204,3 +206,4 @@
 2. **Bereich des Lage-Kerns:** Der Lage-Kern kennt keine Einsätze; `FlightStarted` im SSE-Strom trägt keinen Einsatz. Die Flugliste lädt ohnehin per REST mit Filter neu. Statt den laufenden Einsatz in den `SituationSnapshot` zu legen (Spec §4, letzter Absatz), meldet `missions_changed` jede Änderung und die Ansichten laden `/api/missions` neu; das hält `src/situation/` rein und erreicht dasselbe Umschalten.
 3. **Löschen von Einsätzen** gibt es nicht; ein vorbereiteter Einsatz wird abgeschlossen (verworfen).
 4. **Kartenfoto (Papierkarte)** und alle Flugmappe-Felder kommen mit SUL-66.
+5. **Abschnitt der Kartenelemente:** Elemente bekommen hier nur `mission_id`. Die Karte je Abschnitt (Spec §6, Bericht der Flugmappe) und „Kartenelemente übernehmen“ in den aktiven Abschnitt brauchen `map_elements.section_id`; diese Migration bringt SUL-66 mit.
