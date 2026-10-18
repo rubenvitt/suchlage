@@ -1,4 +1,5 @@
 import { Alert, Button, Form, Input, message } from 'antd';
+import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import { useCreateMission, useMe, useMissions, useStartMission } from '../api/queries';
@@ -34,18 +35,29 @@ function WelcomePage({ onConflict }: { onConflict: (text: string) => void }) {
   const [form] = Form.useForm<{ name: string; location?: string }>();
   const prepared = missions.filter((m) => m.state === 'prepared');
   const closed = missions.filter((m) => m.state === 'closed').length;
-  const error = [create.error, start.error].find((e) => e && !isConflict(e));
+  // Name des eben angelegten Einsatzes, den die Seite gleich startet; `null` beim Start aus der Liste.
+  const [fresh, setFresh] = useState<string | null>(null);
+  const error = create.error
+    ? errorText(create.error)
+    : start.error && !isConflict(start.error)
+      ? (fresh ? `„${fresh}“ ist angelegt, aber nicht gestartet – unter ‚Vorbereitet‘ starten. ` : '') +
+        errorText(start.error)
+      : null;
 
   // Die Seite ist nach einem 409 schon weg: Die Meldung geht an den Einstieg, der bleibt. Eigener
   // Text, weil der Server hier nur den allgemeinen Konfliktsatz der Datenbank schickt.
   const conflict = (name: string) => (e: unknown) => {
     if (isConflict(e)) onConflict(`Es läuft schon ein Einsatz. „${name}“ ist vorbereitet, nicht gestartet.`);
   };
-  const send = (v: { name: string; location?: string }, run: boolean) =>
-    create
-      .mutateAsync({ input: { name: v.name, location: v.location || null }, start: run })
-      .then((m) => !run && navigate(`/?einsatz=${m.id}`))
-      .catch(conflict(v.name));
+  // Nach dem Anlegen ist das Formular leer: Scheitert der Start, legt ein zweiter Klick keinen zweiten an.
+  const send = async (v: { name: string; location?: string }, run: boolean) => {
+    const m = await create.mutateAsync({ name: v.name, location: v.location || null }).catch(() => null);
+    if (!m) return; // `create.error` steht im Hinweis
+    form.resetFields();
+    if (!run) return void navigate(`/?einsatz=${m.id}`);
+    setFresh(m.name);
+    await start.mutateAsync(m.id).catch(conflict(m.name));
+  };
 
   return (
     <Frame status={<SyncCell />}>
@@ -53,7 +65,7 @@ function WelcomePage({ onConflict }: { onConflict: (text: string) => void }) {
         <section className="sl-welcome-new">
           <h1>Kein Einsatz läuft</h1>
           <p>Starte einen Einsatz, damit Flüge, Fotos und Suchgebiete zusammenbleiben.</p>
-          {error && <Alert type="error" title={errorText(error)} />}
+          {error && <Alert type="error" title={error} />}
           <Paneel titel="Neuer Einsatz" koerperPolster>
             <Form
               form={form}
@@ -67,7 +79,7 @@ function WelcomePage({ onConflict }: { onConflict: (text: string) => void }) {
               <Form.Item label="Ort (optional)" name="location">
                 <Input size="large" placeholder="z. B. Waldgebiet Hanstedt" />
               </Form.Item>
-              <Button type="primary" size="large" block htmlType="submit" loading={create.isPending}>
+              <Button type="primary" size="large" block htmlType="submit" loading={create.isPending || (fresh !== null && start.isPending)}>
                 Einsatz starten
               </Button>
               <Button
@@ -104,7 +116,10 @@ function WelcomePage({ onConflict }: { onConflict: (text: string) => void }) {
                       <Button
                         aria-label={`Starten: ${m.name}`}
                         loading={start.isPending && start.variables === m.id}
-                        onClick={() => void start.mutateAsync(m.id).catch(conflict(m.name))}
+                        onClick={() => {
+                          setFresh(null);
+                          void start.mutateAsync(m.id).catch(conflict(m.name));
+                        }}
                       >
                         Starten
                       </Button>

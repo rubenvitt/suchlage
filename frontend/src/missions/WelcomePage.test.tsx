@@ -92,6 +92,41 @@ test('ein anderer Fehler bleibt auf der Startseite stehen', async () => {
   expect(screen.getByRole('heading', { name: 'Kein Einsatz läuft' })).toBeInTheDocument();
 });
 
+test('scheitert nur der Start, steht der Einsatz unter „Vorbereitet“ und ein zweiter Klick legt keinen an', async () => {
+  show();
+  server.use(
+    http.post('/api/missions/:id/start', () =>
+      HttpResponse.json({ error: 'Datenbank ist gerade beschäftigt' }, { status: 503 }),
+    ),
+  );
+  const creates: string[] = [];
+  const count = ({ request }: { request: Request }) => {
+    if (request.method === 'POST' && new URL(request.url).pathname === '/api/missions') creates.push(request.url);
+  };
+  server.events.on('request:start', count);
+  try {
+    await welcome();
+    await userEvent.type(screen.getByLabelText('Einsatzname'), 'Vermisste Person Ebstorf');
+    await userEvent.click(screen.getByRole('button', { name: 'Einsatz starten' }));
+    expect(
+      await screen.findByText(
+        '„Vermisste Person Ebstorf“ ist angelegt, aber nicht gestartet – unter ‚Vorbereitet‘ starten. Datenbank ist gerade beschäftigt',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Einsatzname')).toHaveValue('');
+    expect(
+      await within(screen.getByRole('region', { name: 'Vorbereitet' })).findByRole('link', {
+        name: 'Vermisste Person Ebstorf',
+      }),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Einsatz starten' }));
+    expect(await screen.findByText('Name fehlt')).toBeInTheDocument();
+    expect(creates).toHaveLength(1);
+  } finally {
+    server.events.removeListener('request:start', count);
+  }
+});
+
 test('„Nur vorbereiten“ öffnet die Lage des neuen Einsatzes über die Adresse', async () => {
   show();
   await welcome();

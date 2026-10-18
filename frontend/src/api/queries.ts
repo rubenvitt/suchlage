@@ -102,17 +102,11 @@ export const useFlightPhotos = (id: number | null) =>
     queryFn: id == null ? skipToken : () => apiGet<PhotoShot[]>(`/api/flights/${id}/photos`),
   });
 
-/**
- * Einsatz anlegen, mit `start` gleich starten. Danach laden die Einsätze neu, auch nach einem
- * Fehler: Ein angelegter Einsatz, dessen Start scheitert, steht dann unter „Vorbereitet“.
- */
+/** Einsatz anlegen (vorbereitet); danach laden die Einsätze neu. */
 export function useCreateMission() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async ({ input, start }: { input: MissionCreate; start: boolean }) => {
-      const created = await apiSend<Mission>('POST', '/api/missions', input);
-      return start ? apiSend<Mission>('POST', `/api/missions/${created.id}/start`) : created;
-    },
+    mutationFn: (input: MissionCreate) => apiSend<Mission>('POST', '/api/missions', input),
     onSettled: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
   });
 }
