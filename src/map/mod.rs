@@ -8,9 +8,10 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use tokio::sync::{Mutex, broadcast, watch};
 
-use crate::contract::{MapElement, MapElementKind, MapElementOrigin, MapPoint};
+use crate::contract::{MapElement, MapElementKind, MapElementOrigin, MapPoint, MissionState};
 use crate::error::AppError;
 use crate::store::map_elements as store;
+use crate::store::missions;
 
 /// Puffer je Empfänger. Wer mehr verpasst, bekommt die ganze Liste neu.
 const CHANGES_BUFFERED: usize = 256;
@@ -34,6 +35,7 @@ pub struct NewElement {
     pub clamp_to_ground: bool,
     pub author: String,
     pub origin: MapElementOrigin,
+    pub mission_id: Option<i64>,
 }
 
 /// Änderung. Was `None` ist, bleibt.
@@ -84,6 +86,11 @@ impl MapHub {
         Ok(store::list(&self.pool).await?)
     }
 
+    /// Elemente eines Einsatzes, mit `None` die ohne Einsatz.
+    pub async fn list_in(&self, mission: Option<i64>) -> Result<Vec<MapElement>, AppError> {
+        Ok(store::list_in(&self.pool, mission).await?)
+    }
+
     pub async fn get(&self, id: &str) -> Result<Option<MapElement>, AppError> {
         Ok(store::get(&self.pool, id).await?)
     }
@@ -91,6 +98,14 @@ impl MapHub {
     /// Legt an. Gibt es die ID schon (Pilot 2 wiederholt eine Anfrage), wird der Stand überschrieben.
     pub async fn create(&self, new: NewElement, now_ms: i64) -> Result<MapElement, AppError> {
         let _serial = self.writes.lock().await;
+        if let Some(mission) = new.mission_id {
+            // Ein unbekannter Einsatz ist hier ein Zusammenhangsfehler, kein 404.
+            match missions::get(&self.pool, mission).await? {
+                Some(m) if m.state != MissionState::Closed => {}
+                Some(_) => return Err(closed()),
+                None => return Err(AppError::Unprocessable("Einsatz unbekannt".into())),
+            }
+        }
         let id = match new.id {
             Some(id) => valid_id(id)?,
             None => uuid::Uuid::new_v4().to_string(),
@@ -106,7 +121,7 @@ impl MapHub {
             origin: new.origin,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
-            mission_id: None,
+            mission_id: new.mission_id,
         };
         if store::insert(&self.pool, &element).await? {
             self.publish(MapChange::Created(element.clone()));
@@ -141,6 +156,7 @@ impl MapHub {
         let mut element = store::get(&self.pool, id)
             .await?
             .ok_or(AppError::NotFound)?;
+        self.ensure_open(&element).await?;
         if let Some(name) = patch.name {
             element.name = rules::name(&name).map_err(AppError::Validation)?;
         }
@@ -165,6 +181,10 @@ impl MapHub {
 
     pub async fn delete(&self, id: &str) -> Result<(), AppError> {
         let _serial = self.writes.lock().await;
+        let element = store::get(&self.pool, id)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        self.ensure_open(&element).await?;
         if !store::delete(&self.pool, id).await? {
             return Err(AppError::NotFound);
         }
@@ -172,10 +192,44 @@ impl MapHub {
         Ok(())
     }
 
+    /// Ordnet ein Element „ohne Einsatz“ nachträglich zu, auch einem abgeschlossenen Einsatz.
+    pub async fn assign(&self, id: &str, mission_id: i64) -> Result<MapElement, AppError> {
+        let _serial = self.writes.lock().await;
+        let mut element = store::get(&self.pool, id)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        missions::get(&self.pool, mission_id)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if !missions::assign_element(&self.pool, id, mission_id).await? {
+            return Err(AppError::Unprocessable(
+                "Das Element gehört schon zu einem Einsatz".into(),
+            ));
+        }
+        element.mission_id = Some(mission_id);
+        self.publish(MapChange::Updated(element.clone()));
+        Ok(element)
+    }
+
+    /// Elemente eines abgeschlossenen Einsatzes sind nur lesbar.
+    async fn ensure_open(&self, element: &MapElement) -> Result<(), AppError> {
+        let Some(mission) = element.mission_id else {
+            return Ok(());
+        };
+        match missions::get(&self.pool, mission).await? {
+            Some(m) if m.state == MissionState::Closed => Err(closed()),
+            _ => Ok(()),
+        }
+    }
+
     fn publish(&self, change: MapChange) {
         // Ohne Empfänger (kein Browser, kein Pilot) geht die Änderung nur in die Datenbank.
         let _ = self.changes.send(change);
     }
+}
+
+fn closed() -> AppError {
+    AppError::Unprocessable("Einsatz ist abgeschlossen".into())
 }
 
 /// IDs aus Pilot 2 sind UUIDs; erlaubt ist, was ohne Escaping in Pfad und JSON passt.
@@ -209,6 +263,7 @@ mod tests {
             clamp_to_ground: e.clamp_to_ground,
             author: e.author,
             origin: e.origin,
+            mission_id: None,
         }
     }
 

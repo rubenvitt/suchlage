@@ -1,27 +1,52 @@
 //! Kartenelemente für den Browser (M2). Lesen darf jede Sitzung, auch das Großbild; ändern nur
 //! Operator und Admin. Änderungen erreichen Browser über `/api/live` und Pilots über `/pilot/ws`.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, put};
 use axum::{Json, Router};
 
 use crate::app::AppState;
 use crate::auth::session::{Operator, Viewer};
-use crate::contract::{MapElement, MapElementInput, MapElementOrigin, MapElementUpdate, MapPoint};
+use crate::contract::{
+    MapElement, MapElementInput, MapElementOrigin, MapElementUpdate, MapPoint, MissionAssign,
+};
 use crate::error::AppError;
 use crate::extract::JsonBody;
 use crate::map::{ElementPatch, NewElement, rules};
 use crate::time::now_ms;
+use crate::web::missions::parse_scope;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/map/elements", get(list).post(create))
         .route("/map/elements/{id}", put(update).delete(remove))
+        .route("/map/elements/{id}/mission", put(assign))
 }
 
-async fn list(_: Viewer, State(state): State<AppState>) -> Result<Json<Vec<MapElement>>, AppError> {
-    Ok(Json(state.map.list().await?))
+#[derive(serde::Deserialize)]
+struct ScopeQuery {
+    mission: Option<String>,
+}
+
+async fn list(
+    _: Viewer,
+    State(state): State<AppState>,
+    Query(q): Query<ScopeQuery>,
+) -> Result<Json<Vec<MapElement>>, AppError> {
+    Ok(Json(match parse_scope(q.mission.as_deref())? {
+        Some(mission) => state.map.list_in(mission).await?,
+        None => state.map.list().await?,
+    }))
+}
+
+async fn assign(
+    _: Operator,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    JsonBody(input): JsonBody<MissionAssign>,
+) -> Result<Json<MapElement>, AppError> {
+    Ok(Json(state.map.assign(&id, input.mission_id).await?))
 }
 
 async fn create(
@@ -49,6 +74,7 @@ async fn create(
         clamp_to_ground: true,
         author: user.display_name,
         origin: MapElementOrigin::Web,
+        mission_id: input.mission_id,
     };
     Ok(Json(state.map.create(new, now_ms()).await?))
 }
@@ -214,6 +240,7 @@ mod tests {
                     clamp_to_ground: false,
                     author: "RC Plus 1".into(),
                     origin: crate::contract::MapElementOrigin::Pilot,
+                    mission_id: None,
                 },
                 1,
             )
@@ -234,6 +261,109 @@ mod tests {
         );
         let (status, _) = send(&app.router, rename("#123456")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    async fn mission(app: &TestApp, cookie: &str, name: &str) -> i64 {
+        let (status, m) = send(
+            &app.router,
+            with_cookie(
+                post_json("/api/missions", json!({"name": name, "location": null})),
+                cookie,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{m}");
+        m["id"].as_i64().unwrap()
+    }
+
+    async fn draw(
+        app: &TestApp,
+        cookie: &str,
+        mission_id: Option<i64>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut body = area();
+        body["mission_id"] = json!(mission_id);
+        send(
+            &app.router,
+            with_cookie(post_json("/api/map/elements", body), cookie),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn browser_draws_into_the_selected_mission() {
+        let app = test_app().await;
+        let cookie = operator(&app).await;
+        let a = mission(&app, &cookie, "A").await;
+        let (status, created) = draw(&app, &cookie, Some(a)).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        assert_eq!(created["mission_id"], a);
+        draw(&app, &cookie, None).await;
+        let count = |uri: String| {
+            let router = app.router.clone();
+            let cookie = cookie.clone();
+            async move {
+                let (_, list) = send(&router, with_cookie(get(&uri), &cookie)).await;
+                list.as_array().unwrap().len()
+            }
+        };
+        assert_eq!(count(format!("/api/map/elements?mission={a}")).await, 1);
+        assert_eq!(count("/api/map/elements?mission=none".into()).await, 1);
+        assert_eq!(count("/api/map/elements".into()).await, 2);
+        let (status, _) = draw(&app, &cookie, Some(999)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn elements_of_a_closed_mission_are_read_only() {
+        let app = test_app().await;
+        let cookie = operator(&app).await;
+        let a = mission(&app, &cookie, "A").await;
+        let (_, created) = draw(&app, &cookie, Some(a)).await;
+        let uri = format!("/api/map/elements/{}", created["id"].as_str().unwrap());
+        let (status, _) = send(
+            &app.router,
+            with_cookie(
+                post_json(&format!("/api/missions/{a}/close"), json!({})),
+                &cookie,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = send(
+            &app.router,
+            with_cookie(
+                put_json(&uri, json!({"name": "x", "color": "#19BE6B"})),
+                &cookie,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let (status, _) = send(&app.router, with_cookie(delete(&uri), &cookie)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let (status, _) = draw(&app, &cookie, Some(a)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn unassigned_element_can_be_assigned_once() {
+        let app = test_app().await;
+        let cookie = operator(&app).await;
+        let a = mission(&app, &cookie, "A").await;
+        let (_, created) = draw(&app, &cookie, None).await;
+        let uri = format!(
+            "/api/map/elements/{}/mission",
+            created["id"].as_str().unwrap()
+        );
+        let assign =
+            |uri: &str, id: i64| with_cookie(put_json(uri, json!({"mission_id": id})), &cookie);
+        let (status, body) = send(&app.router, assign(&uri, a)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["mission_id"], a);
+        let (status, _) = send(&app.router, assign(&uri, a)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let (status, _) = send(&app.router, assign("/api/map/elements/fehlt/mission", a)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

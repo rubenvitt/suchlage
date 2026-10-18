@@ -22,6 +22,19 @@ pub fn routes() -> Router<AppState> {
         .route("/flights/{id}/mission", put(assign_flight))
 }
 
+/// `?mission=` der Listen: fehlt → `None` (alles), `none` → `Some(None)` (ohne Einsatz),
+/// Zahl → `Some(Some(n))`, sonst 400.
+pub(crate) fn parse_scope(raw: Option<&str>) -> Result<Option<Option<i64>>, AppError> {
+    match raw {
+        None => Ok(None),
+        Some("none") => Ok(Some(None)),
+        Some(n) => n
+            .parse()
+            .map(|n| Some(Some(n)))
+            .map_err(|_| AppError::Validation("Einsatz ungültig".into())),
+    }
+}
+
 async fn list(_: Viewer, State(state): State<AppState>) -> Result<Json<Vec<Mission>>, AppError> {
     Ok(Json(state.missions.list().await?))
 }

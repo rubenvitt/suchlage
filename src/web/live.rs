@@ -276,6 +276,7 @@ mod tests {
             clamp_to_ground: true,
             author: "RC Plus 1".into(),
             origin: crate::contract::MapElementOrigin::Pilot,
+            mission_id: None,
         }
     }
 

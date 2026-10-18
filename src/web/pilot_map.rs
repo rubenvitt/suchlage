@@ -171,6 +171,8 @@ async fn create(
         clamp_to_ground: shape.clamp_to_ground.unwrap_or(false),
         author,
         origin: MapElementOrigin::Pilot,
+        // Task 4 stellt auf den Einsatz um, den Pilot 2 sieht.
+        mission_id: None,
     };
     let element = state.map.create(new, now_ms()).await?;
     Ok(Json(dji::ok(json!({ "id": element.id }))))
@@ -605,6 +607,7 @@ mod tests {
             clamp_to_ground: true,
             author: "Gruppenführer".into(),
             origin: MapElementOrigin::Web,
+            mission_id: None,
         };
         let created = app.state.map.create(area, 1).await.unwrap();
         let push = tokio::time::timeout(std::time::Duration::from_secs(5), next_text(&mut socket))
