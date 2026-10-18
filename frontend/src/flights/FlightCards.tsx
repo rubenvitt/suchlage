@@ -1,11 +1,20 @@
 import { Link } from 'react-router';
 import { StatusChip } from '../components/instrument';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
+import { AssignFlight } from './AssignFlight';
 import { flightRow } from './flightRow';
 import './flights.css';
 
 /** Flugliste unter 768 px: Sieben Spalten passen nicht auf 360 px, je Flug eine Karte mit dem Wichtigsten. */
-export function FlightCards({ flights, nowMs }: { flights: FlightSummary[]; nowMs: number }) {
+export function FlightCards({
+  flights,
+  nowMs,
+  assignable = false,
+}: {
+  flights: FlightSummary[];
+  nowMs: number;
+  assignable?: boolean;
+}) {
   return (
     <ul className="sl-cards">
       {flights.map((f) => {
@@ -20,6 +29,7 @@ export function FlightCards({ flights, nowMs }: { flights: FlightSummary[]; nowM
             <Link className="sl-panel-link sl-card-link" to={`/flights/${f.id}`}>
               Flug {f.id} ansehen
             </Link>
+            {assignable && <AssignFlight flightId={f.id} />}
           </li>
         );
       })}

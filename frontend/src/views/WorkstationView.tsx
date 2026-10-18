@@ -1,6 +1,8 @@
 import { Button } from 'antd';
 import { useState } from 'react';
 import { useMe } from '../api/queries';
+import { MissionBar } from '../missions/MissionBar';
+import { useMissionScope } from '../missions/useMissionScope';
 import { Segmentleiste } from '../components/instrument';
 import { useServerNow } from '../live/LiveProvider';
 import type { LiveState } from '../live/reducer';
@@ -43,10 +45,15 @@ export function WorkstationView() {
   const { data: me } = useMe();
   const [follow, setFollow] = useState(true);
   const [swapped, setSwapped] = useState(false);
-  const map = useLiveMapData(state, focus);
+  const { scope, ready } = useMissionScope();
+  const map = useLiveMapData(state, focus, scope, ready);
   const { gateways } = map;
   const canControl = me?.role === 'admin' || me?.role === 'operator';
-  const editor = useMapEditor(map.elements, { enabled: canControl, onStartDrawing: () => setFollow(false) });
+  const editor = useMapEditor(map.elements, {
+    enabled: canControl && ready,
+    scope,
+    onStartDrawing: () => setFollow(false),
+  });
   const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
   const empty = emptyOf(state, focus);
 
@@ -62,6 +69,9 @@ export function WorkstationView() {
           {...editor.mapProps}
           {...photo.mapProps}
         />
+        <div className="sl-view-mission">
+          <MissionBar />
+        </div>
         {empty && <div className="sl-view-notice">{empty}</div>}
         {editor.overlay}
         {photo.overlay}

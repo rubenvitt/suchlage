@@ -72,6 +72,9 @@ pub async fn test_app() -> TestApp {
         crate::media::http_client(),
         thumbs.path().to_path_buf(),
     );
+    let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
+        .await
+        .unwrap();
     let state = AppState {
         boot: Arc::new(boot),
         pool,
@@ -82,6 +85,7 @@ pub async fn test_app() -> TestApp {
         mqtt,
         streams,
         map,
+        missions,
         http: crate::media::http_client(),
         devlog,
     };

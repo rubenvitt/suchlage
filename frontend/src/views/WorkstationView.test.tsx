@@ -9,10 +9,13 @@ import {
 import type { LiveEvent } from '../contract/generated/LiveEvent';
 import type { MapElementInput } from '../contract/generated/MapElementInput';
 import type { MapElementUpdate } from '../contract/generated/MapElementUpdate';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { ELEMENT_COLORS } from '../map/elementColors';
 import type { SituationMap } from '../map/SituationMap';
 import { server } from '../test/server';
+import { missionFixtures, missionHandlers } from '../test/handlers';
+import type { Mission } from '../contract/generated/Mission';
+import type { MapElement } from '../contract/generated/MapElement';
 import type { SituationSnapshot } from '../contract/generated/SituationSnapshot';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
@@ -47,6 +50,7 @@ function show(
   snapshot: SituationSnapshot | null,
   extra: LiveEvent[] = [],
   status: 'open' | 'reconnecting' = 'open',
+  route = '/',
 ) {
   const store = createLiveStore();
   if (snapshot) store.dispatch({ type: 'snapshot', snapshot });
@@ -57,8 +61,12 @@ function show(
       <SyncCell />
       <WorkstationView />
     </LiveProvider>,
+    { route },
   );
 }
+
+// Die Beispielelemente gehören keinem Einsatz: Ohne Einsätze liegt die Lage in „ohne Einsatz“.
+beforeEach(() => server.use(http.get('/api/missions', () => HttpResponse.json([]))));
 
 test('vor dem ersten Stand wird die Lage abgerufen, nicht als leer gemeldet', async () => {
   show(null);
@@ -189,6 +197,7 @@ test('Operator zeichnet eine Fläche, benennt sie und legt sie an', async () => 
       { lat: 52.44, lon: 10.01 },
     ],
     color: ELEMENT_COLORS.find((c) => c.label === 'Gelb')!.wert,
+    mission_id: null,
   });
   // Die Antwort steht sofort in der Lage, ausgewählt; der Live-Strom bestätigt sie später.
   expect(karte.props!.elements!.map((e) => e.id)).toContain('neu-1');
@@ -266,4 +275,123 @@ test('Fotos: Liste und Strom auf der Karte, ein Klick öffnet die Vorschau mit O
   expect(within(panel).getByRole('link', { name: 'Herunterladen' })).toBeInTheDocument();
   await userEvent.click(within(panel).getByRole('button', { name: 'Foto schließen' }));
   expect(screen.queryByRole('region', { name: /^Foto / })).toBeNull();
+});
+
+const elementOf = (id: string, mission_id: number | null): MapElement => ({
+  ...eventOf('map_elements').elements[0]!,
+  id,
+  name: id,
+  mission_id,
+});
+const elementsEvent = (...elements: MapElement[]): LiveEvent => ({ type: 'map_elements', elements });
+
+test('zeigt nur die Elemente des gewählten Einsatzes', async () => {
+  server.use(...missionHandlers());
+  show(snapshotFlying, [
+    elementsEvent(elementOf('im-einsatz', 1), elementOf('anderer', 2), elementOf('frei', null)),
+  ]);
+  await vi.waitFor(() => expect(karte.props!.elements!.map((e) => e.id)).toEqual(['im-einsatz']));
+});
+
+test('unter „ohne Einsatz“ stehen nur die Elemente ohne Einsatz', async () => {
+  server.use(...missionHandlers());
+  show(
+    snapshotFlying,
+    [elementsEvent(elementOf('im-einsatz', 1), elementOf('frei', null))],
+    'open',
+    '/?einsatz=ohne',
+  );
+  await screen.findByRole('combobox', { name: 'Einsatz wählen' });
+  expect(karte.props!.elements!.map((e) => e.id)).toEqual(['frei']);
+});
+
+test('Zeichnen schickt die Einsatznummer des gewählten Einsatzes', async () => {
+  server.use(...missionHandlers());
+  let sent: MapElementInput | null = null;
+  server.use(
+    http.post('/api/map/elements', async ({ request }) => {
+      sent = (await request.json()) as MapElementInput;
+      return HttpResponse.json({ ...elementOf('neu-2', sent.mission_id), name: sent.name });
+    }),
+  );
+  show(snapshotFlying);
+  await screen.findByText('Übung Wietze', { selector: 'strong' });
+  await userEvent.click(
+    within(await screen.findByRole('toolbar', { name: 'Zeichnen' })).getByRole('button', { name: 'Punkt' }),
+  );
+  klick(52.4, 10.0);
+  await userEvent.click(await screen.findByRole('button', { name: 'Anlegen' }));
+  await vi.waitFor(() => expect(sent).not.toBeNull());
+  expect(sent!.mission_id).toBe(1);
+});
+
+test('bei abgeschlossenem Einsatz sind die Zeichenwerkzeuge aus', async () => {
+  const closed: Mission[] = missionFixtures().map((m) => (m.id === 1 ? { ...m, state: 'closed' } : m));
+  server.use(...missionHandlers(closed));
+  show(snapshotFlying, [], 'open', '/?einsatz=1');
+  expect(await screen.findByText('Abgeschlossen')).toBeInTheDocument();
+  expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
+});
+
+test('ein Element ohne Einsatz lässt sich einem Einsatz zuordnen', async () => {
+  server.use(...missionHandlers());
+  let sent: unknown = null;
+  server.use(
+    http.put('/api/map/elements/:id/mission', async ({ request, params }) => {
+      sent = [params.id, await request.json()];
+      return HttpResponse.json({ ...elementOf('frei', 2) });
+    }),
+  );
+  show(snapshotFlying, [elementsEvent(elementOf('frei', null))], 'open', '/?einsatz=ohne');
+  await screen.findByRole('combobox', { name: 'Einsatz wählen' });
+  await screen.findByRole('toolbar', { name: 'Zeichnen' });
+  await vi.waitFor(() => expect(karte.props!.elements).toHaveLength(1));
+  klick(52.4, 10.0, 'frei');
+  await userEvent.click(await screen.findByRole('combobox', { name: 'Einsatz zuordnen' }));
+  await userEvent.click(await screen.findByTitle('Hochwasser Aller'));
+  await vi.waitFor(() => expect(sent).toEqual(['frei', { mission_id: 2 }]));
+  await vi.waitFor(() => expect(karte.props!.elements).toHaveLength(0));
+});
+
+test('solange die Einsätze laden, bleibt das Zeichnen aus und die Karte leer', async () => {
+  server.use(http.get('/api/missions', () => delay('infinite')));
+  const { client } = show(snapshotFlying, [elementsEvent(elementOf('frei', null))]);
+  expect(await screen.findByText('Einsätze werden geladen …')).toBeInTheDocument();
+  // Erst mit bekannter Rolle wäre das Zeichnen überhaupt möglich.
+  await vi.waitFor(() => expect(client.getQueryData(['me'])).toBeDefined());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
+  expect(karte.props!.elements).toEqual([]);
+});
+
+test('scheitern die Einsätze, bleibt das Zeichnen aus', async () => {
+  server.use(http.get('/api/missions', () => new HttpResponse(null, { status: 500 })));
+  const { client } = show(snapshotFlying);
+  expect(await screen.findByText('Einsätze nicht geladen')).toBeInTheDocument();
+  await vi.waitFor(() => expect(client.getQueryData(['me'])).toBeDefined());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
+});
+
+test('fragt die Fotos erst, wenn die Einsätze bekannt sind, nie „ohne Einsatz“', async () => {
+  const urls: string[] = [];
+  let release!: () => void;
+  const missionsKnown = new Promise<void>((r) => (release = r));
+  server.use(
+    http.get('/api/missions', async () => {
+      await missionsKnown;
+      return HttpResponse.json(missionFixtures());
+    }),
+    http.get('/api/photos', ({ request }) => {
+      urls.push(new URL(request.url).search);
+      return HttpResponse.json([]);
+    }),
+  );
+  show(snapshotFlying);
+  expect(await screen.findByText('Einsätze werden geladen …')).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 20));
+  expect(urls).toEqual([]);
+  release();
+  await screen.findByRole('toolbar', { name: 'Zeichnen' });
+  await vi.waitFor(() => expect(urls).toEqual(['?mission=1']));
 });

@@ -3,6 +3,8 @@ import type { Role } from '../contract/generated/Role';
 import {
   IconKarte,
   IconKarteGefuellt,
+  IconKlemmbrett,
+  IconKlemmbrettGefuellt,
   IconMonitor,
   IconPapierflieger,
   IconZahnrad,
@@ -15,6 +17,12 @@ const ENTRIES: { to: string; label: string; icon: IconPaar; roles: Role[] }[] = 
     to: '/',
     label: 'Lage',
     icon: { umriss: IconKarte, gefuellt: IconKarteGefuellt },
+    roles: ['admin', 'operator'],
+  },
+  {
+    to: '/einsaetze',
+    label: 'Einsätze',
+    icon: { umriss: IconKlemmbrett, gefuellt: IconKlemmbrettGefuellt },
     roles: ['admin', 'operator'],
   },
   // Lifelines Satz hat für Flug und System keinen gefüllten Zwilling: aktiv zeigt dasselbe Icon.

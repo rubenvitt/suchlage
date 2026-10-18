@@ -27,6 +27,10 @@ absolute_altitude_m: number | null,
  */
 relative_altitude_m: number | null, gimbal_yaw_deg: number | null, 
 /**
+ * `null`: ohne Einsatz.
+ */
+mission_id: number | null, 
+/**
  * Wärmebild zuerst, dann Weit, Zoom, sichtbar, unbekannt.
  */
 photos: Array<Photo>, };

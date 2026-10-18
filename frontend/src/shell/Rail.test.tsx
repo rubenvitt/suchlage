@@ -11,6 +11,7 @@ function iconIn(name: string): string | null {
 test('jeder Bereich zeigt sein Icon, der Name bleibt das Etikett', () => {
   renderWithApp(<Rail role="admin" />, { route: '/flights' });
   expect(iconIn('Lage')).toBe('karte');
+  expect(iconIn('Einsätze')).toBe('klemmbrett');
   expect(iconIn('Flüge')).toBe('papierflieger');
   expect(iconIn('System')).toBe('monitor');
   expect(iconIn('Einstellungen')).toBe('zahnrad');
@@ -23,8 +24,8 @@ test('der aktive Bereich zeigt das gefüllte Icon', () => {
   expect(iconIn('Lage')).toBe('karte');
 });
 
-test('Einsatzkräfte sehen nur Lage und Flüge', () => {
+test('Einsatzkräfte sehen nur Lage, Einsätze und Flüge', () => {
   renderWithApp(<Rail role="operator" />);
-  expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Lage', 'Flüge']);
+  expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Lage', 'Einsätze', 'Flüge']);
   expect(iconIn('Lage')).toBe('karte.gefuellt');
 });

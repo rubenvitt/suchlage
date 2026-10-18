@@ -45,6 +45,7 @@ async fn live(
     // ankommende sind harmlos, der Browser legt nach ID ab.
     let map_rx = state.map.subscribe();
     let photo_rx = state.photos.subscribe();
+    let mission_rx = state.missions.subscribe();
     let elements = state.map.list().await?;
     let first = stream::iter([
         sse(&LiveEvent::Snapshot { snapshot }),
@@ -62,7 +63,8 @@ async fn live(
     );
     let map = stream::unfold((map_rx, state.map.clone()), next_map_event);
     let photos = stream::unfold(photo_rx, next_photo_event);
-    let hubs = stream::select(map, photos).take_until(on_end);
+    let missions = stream::unfold(mission_rx, next_mission_event);
+    let hubs = stream::select(stream::select(map, photos), missions).take_until(on_end);
     Ok(Sse::new(first.chain(stream::select(situation, hubs)))
         .keep_alive(KeepAlive::new().interval(KEEP_ALIVE)))
 }
@@ -84,23 +86,37 @@ async fn next_event((mut rx, handle): Feed) -> Option<(Result<Event, Infallible>
 type MapFeed = (broadcast::Receiver<MapChange>, MapHub);
 
 async fn next_map_event((mut rx, hub): MapFeed) -> Option<(Result<Event, Infallible>, MapFeed)> {
-    let event = match rx.recv().await {
-        Ok(MapChange::Created(element) | MapChange::Updated(element)) => {
-            LiveEvent::MapElement { element }
+    let event = loop {
+        match rx.recv().await {
+            Ok(MapChange::Created(element) | MapChange::Updated(element)) => {
+                break LiveEvent::MapElement { element };
+            }
+            Ok(MapChange::Deleted { id }) => break LiveEvent::MapElementDeleted { id },
+            // Nur für Pilot 2; der Browser sieht alle Elemente.
+            Ok(MapChange::Refresh) => {}
+            Err(RecvError::Lagged(missed)) => {
+                tracing::debug!(missed, "Kartenstrom überholt – neue Liste");
+                let elements = hub
+                    .list()
+                    .await
+                    .inspect_err(|e| tracing::warn!(error = ?e, "Kartenelemente nicht lesbar"))
+                    .ok()?;
+                break LiveEvent::MapElements { elements };
+            }
+            Err(RecvError::Closed) => return None,
         }
-        Ok(MapChange::Deleted { id }) => LiveEvent::MapElementDeleted { id },
-        Err(RecvError::Lagged(missed)) => {
-            tracing::debug!(missed, "Kartenstrom überholt – neue Liste");
-            let elements = hub
-                .list()
-                .await
-                .inspect_err(|e| tracing::warn!(error = ?e, "Kartenelemente nicht lesbar"))
-                .ok()?;
-            LiveEvent::MapElements { elements }
-        }
-        Err(RecvError::Closed) => return None,
     };
     Some((sse(&event), (rx, hub)))
+}
+
+/// Jede Änderung (auch ein verpasstes Signal) heißt: Liste neu laden.
+async fn next_mission_event(
+    mut rx: broadcast::Receiver<()>,
+) -> Option<(Result<Event, Infallible>, broadcast::Receiver<()>)> {
+    match rx.recv().await {
+        Ok(()) | Err(RecvError::Lagged(_)) => Some((sse(&LiveEvent::MissionsChanged), rx)),
+        Err(RecvError::Closed) => None,
+    }
 }
 
 /// Neue Auslösungen. Wer welche verpasst, sieht sie beim nächsten Laden der Liste.
@@ -264,6 +280,7 @@ mod tests {
             clamp_to_ground: true,
             author: "RC Plus 1".into(),
             origin: crate::contract::MapElementOrigin::Pilot,
+            mission_id: None,
         }
     }
 
@@ -317,6 +334,31 @@ mod tests {
         assert_eq!(event["type"], "photo_shot");
         assert_eq!(event["shot"]["id"], "RC1/DJI_1");
         assert_eq!(event["shot"]["photos"][0]["lens"], "thermal");
+    }
+
+    #[tokio::test]
+    async fn mission_changes_reach_the_browser() {
+        let app = test_app().await;
+        let mission = app
+            .state
+            .missions
+            .create(
+                crate::contract::MissionCreate {
+                    name: "A".into(),
+                    location: None,
+                },
+                "u",
+                1,
+            )
+            .await
+            .unwrap();
+        let mut body = open_live(&app, Role::Kiosk).await;
+        opening(&mut body).await;
+        app.state.missions.start(mission.id, 2).await.unwrap();
+        assert_eq!(
+            next_data(&mut body).await,
+            serde_json::json!({"type": "missions_changed"})
+        );
     }
 
     #[tokio::test]

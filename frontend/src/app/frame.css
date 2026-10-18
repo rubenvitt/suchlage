@@ -67,12 +67,6 @@ body {
   padding: 0;
   justify-content: center;
 }
-.sl-head .sl-mark::before {
-  content: '';
-  width: 14px;
-  height: 14px;
-  background: var(--lfh-rahmen-marke);
-}
 .sl-head .sl-word {
   font: var(--lfh-typo-seitentitel-gewicht) var(--lfh-typo-seitentitel-groesse) var(--lfh-schrift-display);
   letter-spacing: 0.04em;

@@ -241,6 +241,7 @@ pub fn map_elements() -> Vec<MapElement> {
             origin: MapElementOrigin::Web,
             created_at_ms: T0 - 300_000,
             updated_at_ms: T0 - 300_000,
+            mission_id: None,
         },
         MapElement {
             id: "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10".into(),
@@ -257,6 +258,7 @@ pub fn map_elements() -> Vec<MapElement> {
             origin: MapElementOrigin::Pilot,
             created_at_ms: T0 - 60_000,
             updated_at_ms: T0 - 60_000,
+            mission_id: None,
         },
     ]
 }
@@ -354,6 +356,7 @@ pub fn live_events() -> Vec<LiveEvent> {
         LiveEvent::PhotoShot {
             shot: photo_shots()[0].clone(),
         },
+        LiveEvent::MissionsChanged,
     ]
 }
 
@@ -400,6 +403,7 @@ pub fn photo_shots() -> Vec<PhotoShot> {
             absolute_altitude_m: Some(142.3),
             relative_altitude_m: Some(61.5),
             gimbal_yaw_deg: Some(87.4),
+            mission_id: None,
             photos: vec![
                 photo(
                     11,
@@ -421,6 +425,7 @@ pub fn photo_shots() -> Vec<PhotoShot> {
             absolute_altitude_m: None,
             relative_altitude_m: None,
             gimbal_yaw_deg: None,
+            mission_id: None,
             photos: vec![photo(
                 14,
                 "DJI_20261017143140_0002_T.JPG",

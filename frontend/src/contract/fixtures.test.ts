@@ -15,6 +15,7 @@ const ARTEN: Record<LiveEvent['type'], true> = {
   map_element: true,
   map_element_deleted: true,
   photo_shot: true,
+  missions_changed: true,
 };
 
 test('jede Live-Ereignisart hat genau ein Beispiel', () => {

@@ -14,6 +14,7 @@ use crate::auth::session::{Operator, Viewer};
 use crate::contract::PhotoShot;
 use crate::error::AppError;
 use crate::time::now_ms;
+use crate::web::missions::parse_scope;
 
 /// So weit zurück zeigt die Lagekarte Fotos, wenn der Browser nichts anderes verlangt.
 pub const RECENT_MS: i64 = 24 * 3_600_000;
@@ -29,6 +30,7 @@ pub fn routes() -> Router<AppState> {
 #[derive(Deserialize)]
 struct RecentQuery {
     since_ms: Option<i64>,
+    mission: Option<String>,
 }
 
 /// Auslösungen für die Lagekarte, auch für das Großbild.
@@ -38,7 +40,11 @@ async fn recent(
     Query(q): Query<RecentQuery>,
 ) -> Result<Json<Vec<PhotoShot>>, AppError> {
     let since = q.since_ms.unwrap_or_else(|| now_ms() - RECENT_MS);
-    Ok(Json(state.photos.recent(since).await?))
+    Ok(Json(match parse_scope(q.mission.as_deref())? {
+        Some(Some(mission)) => state.photos.in_mission(mission).await?,
+        Some(None) => state.photos.recent_unassigned(since).await?,
+        None => state.photos.recent(since).await?,
+    }))
 }
 
 /// Alle Fotos eines Flugs; wie das Flugdetail nur für Konten.
@@ -318,6 +324,65 @@ mod tests {
             send(&app.router, get("/api/photos")).await.0,
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    #[tokio::test]
+    async fn photos_of_a_mission_ignore_the_24h_window() {
+        let (app, _) = with_storage().await;
+        let mission = app
+            .state
+            .missions
+            .create(
+                crate::contract::MissionCreate {
+                    name: "A".into(),
+                    location: None,
+                },
+                "Operator",
+                1,
+            )
+            .await
+            .unwrap()
+            .id;
+        let now = now_ms();
+        let photos = &app.state.photos;
+        let (old, _) = photos
+            .accept(photo("DJI_1_T.JPG", None, now - 3 * RECENT_MS))
+            .await
+            .unwrap();
+        photos
+            .accept(photo("DJI_2_T.JPG", None, now - 60_000))
+            .await
+            .unwrap();
+        photos
+            .accept(photo("DJI_3_T.JPG", None, now - 2 * RECENT_MS))
+            .await
+            .unwrap();
+        sqlx::query("UPDATE photos SET mission_id = ? WHERE id = ?")
+            .bind(mission)
+            .bind(old)
+            .execute(&app.state.pool)
+            .await
+            .unwrap();
+        let kiosk = app.cookie(Role::Kiosk).await;
+        let ids = |uri: String| {
+            let router = app.router.clone();
+            let kiosk = kiosk.clone();
+            async move {
+                let (status, list) = send(&router, with_cookie(get(&uri), &kiosk)).await;
+                assert_eq!(status, StatusCode::OK, "{list}");
+                list.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| s["id"].as_str().unwrap().to_string())
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(
+            ids(format!("/api/photos?mission={mission}")).await,
+            ["RC1/DJI_1"]
+        );
+        assert_eq!(ids("/api/photos?mission=none".into()).await, ["RC1/DJI_2"]);
+        assert_eq!(ids("/api/photos".into()).await, ["RC1/DJI_2"]);
     }
 
     #[tokio::test]

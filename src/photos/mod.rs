@@ -216,6 +216,17 @@ impl PhotoHub {
         ))
     }
 
+    /// Alle Auslösungen eines Einsatzes, ohne Zeitgrenze.
+    pub async fn in_mission(&self, mission: i64) -> Result<Vec<PhotoShot>, AppError> {
+        Ok(rules::shots(&store::in_mission(&self.pool, mission).await?))
+    }
+
+    /// Auslösungen ohne Einsatz ab `since_ms`, höchstens `RECENT_LIMIT` (die neuesten).
+    pub async fn recent_unassigned(&self, since_ms: i64) -> Result<Vec<PhotoShot>, AppError> {
+        let rows = store::since_unassigned(&self.pool, since_ms).await?;
+        Ok(rules::shots(&rows[..rows.len().min(RECENT_LIMIT as usize)]))
+    }
+
     pub async fn of_flight(&self, flight_id: i64) -> Result<Vec<PhotoShot>, AppError> {
         Ok(rules::shots(
             &store::of_flight(&self.pool, flight_id).await?,
