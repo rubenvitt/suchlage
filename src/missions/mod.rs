@@ -82,13 +82,18 @@ impl MissionHub {
         let _serial = self.writes.lock().await;
         let current = self.get(id).await?;
         rules::transition(current.state, to).map_err(AppError::Unprocessable)?;
-        if to == MissionState::Closed && store::has_open_flight(&self.pool, id).await? {
-            return Err(AppError::Unprocessable(
-                "Im Einsatz fliegt noch ein Fluggerät".into(),
-            ));
+        if to == MissionState::Closed {
+            // Den Zustand ändert unter dem Schloss niemand sonst: Bleibt die Zeile unverändert,
+            // fliegt im Einsatz noch ein Fluggerät (ein Flugstart läuft nicht über dieses Schloss).
+            if !store::close(&self.pool, id, now_ms).await? {
+                return Err(AppError::Unprocessable(
+                    "Im Einsatz fliegt noch ein Fluggerät".into(),
+                ));
+            }
+        } else {
+            // Ein zweiter laufender Einsatz scheitert am Teilindex (409).
+            store::set_state(&self.pool, id, to, now_ms).await?;
         }
-        // Ein zweiter laufender Einsatz scheitert am Teilindex (409).
-        store::set_state(&self.pool, id, to, now_ms).await?;
         self.map
             .set_pilot_scope(store::running_id(&self.pool).await?);
         self.notify();

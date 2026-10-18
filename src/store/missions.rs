@@ -140,6 +140,21 @@ pub async fn set_state(
     Ok(())
 }
 
+/// Schließt einen offenen Einsatz ohne offenen Flug. Prüfen und Schreiben in einer Anweisung,
+/// damit kein Flugstart dazwischenfällt. `false`, wenn nichts geändert wurde.
+pub async fn close(pool: &SqlitePool, id: i64, now_ms: i64) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE missions SET state = 'closed', closed_at_ms = ?1 \
+         WHERE id = ?2 AND state IN ('prepared', 'running') AND NOT EXISTS \
+         (SELECT 1 FROM flights WHERE mission_id = ?2 AND ended_at_ms IS NULL)",
+    )
+    .bind(now_ms)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
 pub async fn add_section(
     pool: &SqlitePool,
     mission_id: i64,
@@ -156,16 +171,6 @@ pub async fn add_section(
     .execute(pool)
     .await?;
     Ok(())
-}
-
-pub async fn has_open_flight(pool: &SqlitePool, mission_id: i64) -> Result<bool, sqlx::Error> {
-    let hit: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM flights WHERE mission_id = ? AND ended_at_ms IS NULL LIMIT 1",
-    )
-    .bind(mission_id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(hit.is_some())
 }
 
 /// Ordnet einen Flug ohne Einsatz dem letzten Abschnitt des Ziels zu, samt seinen Fotos.
@@ -386,6 +391,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retried_photo_without_flight_stays_in_its_mission() {
+        let pool = test_pool().await;
+        let a = create(&pool, &mc("A"), "u", 1).await.unwrap();
+        set_state(&pool, a.id, MissionState::Running, 2)
+            .await
+            .unwrap();
+        upsert(&pool, &photo("no-flight", None)).await.unwrap();
+        set_state(&pool, a.id, MissionState::Closed, 3)
+            .await
+            .unwrap();
+        let b = create(&pool, &mc("B"), "u", 4).await.unwrap();
+        set_state(&pool, b.id, MissionState::Running, 5)
+            .await
+            .unwrap();
+        upsert(&pool, &photo("no-flight", None)).await.unwrap();
+        assert_eq!(in_mission(&pool, a.id).await.unwrap().len(), 1);
+        assert!(in_mission(&pool, b.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn closing_waits_for_the_open_flight_to_end() {
+        let pool = test_pool().await;
+        let m = create(&pool, &mc("A"), "u", 1).await.unwrap();
+        set_state(&pool, m.id, MissionState::Running, 2)
+            .await
+            .unwrap();
+        flights::insert(&pool, &flight(1, "AC1")).await.unwrap();
+        assert!(!close(&pool, m.id, 3).await.unwrap());
+        assert_eq!(running_id(&pool).await.unwrap(), Some(m.id));
+        sqlx::query("UPDATE flights SET ended_at_ms = 4, end_reason = 'landed' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(close(&pool, m.id, 5).await.unwrap());
+        assert_eq!(running_id(&pool).await.unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn photo_of_an_unassigned_flight_stays_unassigned() {
         let pool = test_pool().await;
         flights::insert(&pool, &flight(1, "AC1")).await.unwrap();
@@ -417,7 +460,6 @@ mod tests {
         flights::insert(&pool, &flight(1, "AC1")).await.unwrap();
         upsert(&pool, &photo("p", Some(1))).await.unwrap();
         let m = create(&pool, &mc("A"), "u", 1).await.unwrap();
-        assert!(!has_open_flight(&pool, m.id).await.unwrap());
         assert!(assign_flight(&pool, 1, m.id).await.unwrap());
         assert!(!assign_flight(&pool, 1, m.id).await.unwrap());
         assert_eq!(
@@ -427,7 +469,8 @@ mod tests {
         assert_eq!(of_flight(&pool, 1).await.unwrap().len(), 1);
         assert_eq!(in_mission(&pool, m.id).await.unwrap().len(), 1);
         assert!(since_unassigned(&pool, 0).await.unwrap().is_empty());
-        assert!(has_open_flight(&pool, m.id).await.unwrap());
+        // Der zugeordnete Flug ist offen: Abschließen ändert nichts.
+        assert!(!close(&pool, m.id, 9).await.unwrap());
 
         let pin = examples::map_elements().remove(1);
         map_elements::insert(&pool, &pin).await.unwrap();

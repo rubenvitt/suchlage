@@ -20,8 +20,18 @@ pub fn transition(from: MissionState, to: MissionState) -> Result<(), String> {
     match (from, to) {
         (Prepared, Running) | (Prepared, Closed) | (Running, Closed) => Ok(()),
         _ => Err(format!(
-            "Einsatz kann nicht von {from:?} nach {to:?} wechseln"
+            "Einsatz kann nicht von „{}“ nach „{}“ wechseln",
+            label(from),
+            label(to)
         )),
+    }
+}
+
+fn label(state: MissionState) -> &'static str {
+    match state {
+        MissionState::Prepared => "vorbereitet",
+        MissionState::Running => "laufend",
+        MissionState::Closed => "abgeschlossen",
     }
 }
 
@@ -35,7 +45,10 @@ mod tests {
         assert!(transition(Prepared, Running).is_ok());
         assert!(transition(Prepared, Closed).is_ok());
         assert!(transition(Running, Closed).is_ok());
-        assert!(transition(Closed, Running).is_err());
+        assert_eq!(
+            transition(Closed, Running).unwrap_err(),
+            "Einsatz kann nicht von „abgeschlossen“ nach „laufend“ wechseln"
+        );
         assert!(transition(Running, Prepared).is_err());
         assert!(transition(Closed, Closed).is_err());
     }

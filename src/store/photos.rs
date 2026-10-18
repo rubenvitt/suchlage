@@ -91,7 +91,8 @@ fn row(r: &sqlx::sqlite::SqliteRow) -> PhotoRow {
 }
 
 /// Legt an oder überschreibt die Angaben zum selben Objekt (Pilot 2 wiederholt den Callback nach
-/// einem Fehler). Das Vorschaubild bleibt, das Objekt ist dasselbe. Liefert die ID.
+/// einem Fehler). Das Vorschaubild bleibt, das Objekt ist dasselbe. Ohne Flug bleibt ein schon
+/// zugeordnetes Foto in seinem Einsatz, auch wenn inzwischen ein anderer läuft. Liefert die ID.
 pub async fn upsert(pool: &SqlitePool, p: &NewPhoto) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "INSERT INTO photos (object_key, name, fingerprint, tiny_fingerprint, shot_key, lens, \
@@ -106,7 +107,8 @@ pub async fn upsert(pool: &SqlitePool, p: &NewPhoto) -> Result<i64, sqlx::Error>
          lon = excluded.lon, absolute_altitude_m = excluded.absolute_altitude_m, \
          relative_altitude_m = excluded.relative_altitude_m, \
          gimbal_yaw_deg = excluded.gimbal_yaw_deg, payload_model_key = excluded.payload_model_key, \
-         mission_id = excluded.mission_id \
+         mission_id = CASE WHEN excluded.flight_id IS NOT NULL THEN excluded.mission_id \
+         ELSE COALESCE(photos.mission_id, excluded.mission_id) END \
          RETURNING id",
     )
     .bind(&p.object_key)
