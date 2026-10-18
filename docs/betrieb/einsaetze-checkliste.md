@@ -18,7 +18,7 @@ SUL-76 auf dem Board. Kann im selben Termin wie die Feldabnahmen M2 und M3 laufe
 - [ ] Pilot 2 zeigt das Suchgebiet. Falls nicht sofort: Karte in Pilot 2 neu öffnen (Zeit bis zur
       Anzeige notieren).
 - [ ] In Pilot 2 einen Punkt setzen: Er erscheint im Browser auf der Lage und gehört zum laufenden
-      Einsatz (Filter „Einsatz“ auf der Lage).
+      Einsatz (Einsatzwahl „Einsatz wählen“ in der Leiste der Lage).
 - [ ] Flug starten und landen: Der Flug steht in der Flugliste dieses Einsatzes und nicht unter
       „ohne Einsatz“.
 - [ ] Optional: Abschnitt anlegen; ein weiterer Flug gehört zum aktiven Abschnitt, der frühere Flug

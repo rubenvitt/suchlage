@@ -112,9 +112,9 @@ sleep 3
 FLIGHT=$(api http://127.0.0.1:8080/api/flights | jq '.[0]')
 [ "$(printf '%s' "$FLIGHT" | jq -r .end_reason)" = landed ]; check $? "Flug erkannt und gelandet"
 ID=$(printf '%s' "$FLIGHT" | jq -r .id)
-api "http://127.0.0.1:8080/api/flights?mission=$MISSION" | jq -e --arg id "$ID" 'map(select(.id == $id)) | length == 1' >/dev/null
+api "http://127.0.0.1:8080/api/flights?mission=$MISSION" | jq -e --argjson id "$ID" 'map(select(.id == $id)) | length == 1' >/dev/null
 check $? "Flug steht in der Flugliste des Einsatzes"
-api "http://127.0.0.1:8080/api/flights?mission=none" | jq -e --arg id "$ID" 'map(select(.id == $id)) | length == 0' >/dev/null
+api "http://127.0.0.1:8080/api/flights?mission=none" | jq -e --argjson id "$ID" 'map(select(.id == $id)) | length == 0' >/dev/null
 check $? "Flug fehlt unter „ohne Einsatz“"
 api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.segments | length >= 1' >/dev/null; check $? "Spur gespeichert"
 api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.video != null' >/dev/null; check $? "Flugvideo aufgezeichnet"
