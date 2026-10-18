@@ -74,8 +74,10 @@ export function MissionHeader() {
   return <Archived mission={mission} admin={admin} />;
 }
 
-/** Deutlich (Spec §2, Skizze 3): Niemand soll ohne Einsatz fliegen, ohne es zu merken. */
-/** `running`: Es läuft einer (Adresse `?einsatz=ohne`), dann führt der Knopf dorthin. */
+/**
+ * Deutlich (Spec §2, Skizze 3): Niemand soll ohne Einsatz fliegen, ohne es zu merken.
+ * `running`: Es läuft einer (Adresse `?einsatz=ohne`), dann führt der Knopf dorthin.
+ */
 function Without({ running }: { running: boolean }) {
   const { reset } = useSkip();
   const navigate = useNavigate();

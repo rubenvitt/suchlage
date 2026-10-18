@@ -24,7 +24,7 @@ export function MobileView() {
   const [follow, setFollow] = useState(true);
   const notice = viewerNoticeOf(state, focus);
   const { data: me } = useMe();
-  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
+  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk', me?.role === 'admin');
 
   return (
     <div className="sl-mobile">

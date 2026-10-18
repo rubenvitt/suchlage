@@ -2,6 +2,7 @@ import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   liveEvents,
+  meAdmin,
   snapshotEmpty,
   snapshotFlying,
   snapshotGatewayOnly,
@@ -276,8 +277,18 @@ test('Fotos: Liste und Strom auf der Karte, ein Klick öffnet die Vorschau mit O
   expect(karte.props!.selectedPhotoId).toBe(id);
   const panel = await screen.findByRole('region', { name: /^Foto / });
   expect(within(panel).getByRole('link', { name: 'Herunterladen' })).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: 'Foto löschen …' })).toBeNull();
   await userEvent.click(within(panel).getByRole('button', { name: 'Foto schließen' }));
   expect(screen.queryByRole('region', { name: /^Foto / })).toBeNull();
+});
+
+test('Verwaltung löscht ein Foto auch auf der Lage: Fotos ohne Flug hätten sonst keinen Löschknopf', async () => {
+  server.use(http.get('/api/me', () => HttpResponse.json(meAdmin)));
+  show(snapshotFlying, [eventOf('photo_shot')]);
+  await vi.waitFor(() => expect(karte.props!.photos).toHaveLength(2));
+  act(() => karte.props!.onPhotoClick!(karte.props!.photos![0]!.id));
+  const panel = await screen.findByRole('region', { name: /^Foto / });
+  expect(await within(panel).findByRole('button', { name: 'Foto löschen …' })).toBeInTheDocument();
 });
 
 const elementOf = (id: string, mission_id: number | null): MapElement => ({

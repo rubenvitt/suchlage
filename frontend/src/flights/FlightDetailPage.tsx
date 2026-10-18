@@ -126,12 +126,14 @@ function Detail({ data }: { data: FlightDetail }) {
             meta={r.date}
             aktion={
               <Space size={12}>
-                {admin && (
+                {/* Ein laufender Flug ist gesperrt (422); der Knopf erscheint erst nach der Landung. */}
+                {admin && !running && (
                   <DeleteButton
                     label="Flug löschen …"
                     title={`Flug ${f.id} löschen?`}
                     pending={removeFlight.isPending}
                     error={removeFlight.error}
+                    onOpen={removeFlight.reset}
                     onConfirm={() => removeFlight.mutateAsync(f.id)}
                   >
                     Mit dem Flug gelöscht: {goes}.
@@ -209,12 +211,13 @@ function Detail({ data }: { data: FlightDetail }) {
                 <a className="sl-panel-link" href={data.video.download_url} download>
                   Video herunterladen
                 </a>
-                {admin && (
+                {admin && !running && (
                   <DeleteButton
                     label="Video löschen …"
                     title={`Video von Flug ${f.id} löschen?`}
                     pending={removeVideo.isPending}
                     error={removeVideo.error}
+                    onOpen={removeVideo.reset}
                     onConfirm={() => removeVideo.mutateAsync(f.id)}
                   >
                     Gelöscht wird nur die Aufzeichnung; Spur und Fotos bleiben.

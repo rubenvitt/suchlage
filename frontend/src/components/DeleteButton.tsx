@@ -11,18 +11,27 @@ interface Props {
   children: ReactNode;
   pending: boolean;
   error: unknown;
+  /** `reset` der Mutation: Ein alter Fehler steht beim nächsten Öffnen nicht mehr im Dialog. */
+  onOpen: () => void;
   onConfirm: () => Promise<unknown>;
 }
 
 /**
  * Löschen mit Rückfrage (nur Verwaltung). Ein Dialog statt Popconfirm: Der Text des Servers (422, 503)
- * bleibt neben dem Knopf stehen, bis man abbricht oder es erneut versucht.
+ * bleibt neben dem Knopf stehen, bis man es erneut versucht oder den Dialog neu öffnet.
  */
-export function DeleteButton({ label, title, children, pending, error, onConfirm }: Props) {
+export function DeleteButton({ label, title, children, pending, error, onOpen, onConfirm }: Props) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size="small" danger onClick={() => setOpen(true)}>
+      <Button
+        size="small"
+        danger
+        onClick={() => {
+          onOpen();
+          setOpen(true);
+        }}
+      >
         {label}
       </Button>
       <Modal

@@ -53,7 +53,7 @@ export function WorkstationView() {
     scope,
     onStartDrawing: () => setFollow(false),
   });
-  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
+  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk', me?.role === 'admin');
   const empty = emptyOf(state, focus);
 
   return (

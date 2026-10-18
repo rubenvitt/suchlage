@@ -11,7 +11,7 @@ interface Props {
   shot: PhotoShot;
   /** Original und Download nur für Konten; das Großbild zeigt nur das Vorschaubild. */
   canOpenOriginal: boolean;
-  /** „Foto löschen …“ nur für die Verwaltung und nur im Flugdetail. */
+  /** „Foto löschen …“ nur für die Verwaltung (Flugdetail und Lage). */
   canDelete?: boolean;
   onClose: () => void;
 }
@@ -62,6 +62,7 @@ export function PhotoPanel({ shot, canOpenOriginal, canDelete = false, onClose }
           title={`Foto ${shotTitle(shot)} löschen?`}
           pending={remove.isPending}
           error={remove.error}
+          onOpen={remove.reset}
           onConfirm={() => remove.mutateAsync(shot.id)}
         >
           {shot.photos.length > 1

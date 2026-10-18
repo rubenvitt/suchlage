@@ -372,8 +372,9 @@ ein zweiter Versuch nach dem Einhängen räumt alles. Dasselbe gilt für Fotos, 
 
 **Aufräumen ohne Einsatz.** Alle 10 Minuten löscht der Server Kartenelemente ohne Einsatz, die seit
 mehr als 24 h nicht geändert wurden. Browser und Pilot 2 erfahren es sofort. Flüge und Fotos ohne
-Einsatz bleiben, damit man sie später einem Einsatz zuordnen kann; sie lassen sich im Flugdetail
-einzeln löschen (nur `admin`). Einsätze, Flüge, Videos und Fotos löscht nur ein Mensch, nie der Server
+Einsatz bleiben, damit man sie später einem Einsatz zuordnen kann. Löschen nur `admin`: Flüge einzeln
+im Flugdetail, Fotos dort oder auf der Lage unter „ohne Einsatz“ (Foto auf der Karte wählen,
+„Foto löschen …“) – auch Fotos ohne Flug. Einsätze, Flüge, Videos und Fotos löscht nur ein Mensch, nie der Server
 von selbst.
 
 **Broker neu aufbauen.** Ist `mqtt-data` verloren, Schritt 5 wiederholen und das neue Passwort

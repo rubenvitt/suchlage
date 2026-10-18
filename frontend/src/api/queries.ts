@@ -132,16 +132,16 @@ export const useAddSection = () =>
     apiSend<Mission>('POST', `/api/missions/${id}/sections`, body),
   );
 /**
- * Einsatz mit allem, was dazugehört, löschen (nur Verwaltung); 422 laufend, 503 Ablage fehlt.
- * `onDeleted` läuft vor dem Neuladen: Die offene Ansicht des Einsatzes fiele sonst kurz auf den laufenden.
- */
-/**
  * In diesem Tab gelöschte Einsätze. Ihre offene Ansicht verlässt der Lösch-Dialog selbst; die
  * Umleitung für verschwundene Einsätze (`MissionHeader`) liefe sonst gegen dessen Navigation, die
  * React als Übergang später anwendet als das neu geladene Einsatzverzeichnis.
  */
 export const deletedHere = new Set<number>();
 
+/**
+ * Einsatz mit allem, was dazugehört, löschen (nur Verwaltung); 422 laufend, 503 Ablage fehlt.
+ * `onDeleted` läuft vor dem Neuladen: Die offene Ansicht des Einsatzes fiele sonst kurz auf den laufenden.
+ */
 export function useDeleteMission(onDeleted: () => void) {
   const client = useQueryClient();
   return useMutation({

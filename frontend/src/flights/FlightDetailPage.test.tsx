@@ -148,6 +148,26 @@ test('Flug löschen zeigt den Text des Servers', async () => {
   await userEvent.click(await screen.findByRole('button', { name: 'Endgültig löschen' }));
   expect(await screen.findByText('Ein laufender Flug lässt sich nicht löschen')).toBeInTheDocument();
   expect(screen.getByLabelText('Adresse')).toHaveTextContent('/flights/6');
+  // Abbrechen und wieder öffnen: Der alte Fehler steht nicht mehr im Dialog.
+  await userEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Flug löschen …' }));
+  expect(await screen.findByRole('dialog', { name: 'Flug 6 löschen?' })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.queryByText('Ein laufender Flug lässt sich nicht löschen')).not.toBeInTheDocument(),
+  );
+});
+
+test('während des Flugs keine Löschknöpfe für Flug und Video', async () => {
+  asAdmin();
+  const flight = { ...flightDetail.flight, ended_at_ms: null, end_reason: null };
+  server.use(http.get('/api/flights/:id', () => HttpResponse.json({ ...flightDetail, flight })));
+  page();
+  expect(await screen.findByLabelText('Flugvideo')).toBeInTheDocument();
+  await userEvent.click(await screen.findByRole('button', { name: /DJI_20261017143012_0001_T\.JPG/ }));
+  // Die Verwaltung ist angemeldet: Fotos lassen sich löschen, Flug und Video erst nach der Landung.
+  expect(await screen.findByRole('button', { name: 'Foto löschen …' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Flug löschen …' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Video löschen …' })).not.toBeInTheDocument();
 });
 
 test('„Video löschen …“ löscht nur die Aufzeichnung und zeigt Fehler des Servers', async () => {
