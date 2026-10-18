@@ -9,6 +9,7 @@ import { Frame } from '../shell/Frame';
 import { SyncCell } from '../shell/SyncCell';
 import { LagePage } from '../views/LagePage';
 import { entryFor, useSkip } from './entry';
+import { flugmappeHint } from './flugmappe';
 import './missions.css';
 
 const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
@@ -111,7 +112,7 @@ function WelcomePage({ onConflict }: { onConflict: (text: string) => void }) {
                       <StatusChip ton="achtung" wort="Vorbereitet" />
                       <div className="sl-welcome-item">
                         <Link to={`/?einsatz=${m.id}`}>{m.name}</Link>
-                        <span>{[m.location, `angelegt ${created(m)}`].filter(Boolean).join(' · ')}</span>
+                        <span>{[m.location, `angelegt ${created(m)}`, flugmappeHint(m)].filter(Boolean).join(' · ')}</span>
                       </div>
                       <Button
                         aria-label={`Starten: ${m.name}`}
