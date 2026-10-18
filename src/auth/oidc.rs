@@ -199,7 +199,7 @@ impl OidcState {
 
     /// Discovery mit Cache je Issuer; der zweite Wert sagt, ob sie eben erst geladen wurde. Ein
     /// Fehlschlag gilt `min_refresh` lang, ohne den Anbieter erneut zu fragen – außer mit `retry`
-    /// (Prüfung beim Einrichten).
+    /// (Prüfung beim Einrichten, Anmeldung im Browser).
     async fn metadata(
         &self,
         issuer: &str,
@@ -359,8 +359,10 @@ impl OidcState {
             .map(|_| ())
     }
 
+    /// Eine Anmeldung fragt nach einem Fehlschlag sofort neu: Die Drosselung gilt den
+    /// Zugriffstokens und soll niemanden aussperren, wenn der Anbieter wieder da ist.
     async fn client(&self, cfg: &OidcSettings, redirect_url: &str) -> Result<Client, AppError> {
-        let (meta, _) = self.metadata(&cfg.issuer, Instant::now(), false).await?;
+        let (meta, _) = self.metadata(&cfg.issuer, Instant::now(), true).await?;
         let redirect = RedirectUrl::new(redirect_url.to_string())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(CoreClient::from_provider_metadata(
