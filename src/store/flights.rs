@@ -192,6 +192,20 @@ pub async fn of_mission(
     Ok(rows.iter().map(summary).collect())
 }
 
+/// Alle Flüge einer Fernsteuerung, auch laufende.
+pub async fn of_gateway(
+    pool: &SqlitePool,
+    gateway_sn: &str,
+) -> Result<Vec<FlightSummary>, sqlx::Error> {
+    let rows = sqlx::query(select_flights!(
+        "WHERE gateway_sn = ? ORDER BY started_at_ms, id"
+    ))
+    .bind(gateway_sn)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(summary).collect())
+}
+
 /// Löscht den Flug samt Fotozeilen mit dieser `flight_id` (Spurpunkte kaskadieren).
 /// `false`, wenn es den Flug nicht gibt.
 pub async fn delete_rows(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {

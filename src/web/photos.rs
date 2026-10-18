@@ -3,14 +3,14 @@
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::header;
+use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::app::AppState;
-use crate::auth::session::{Operator, Viewer};
+use crate::auth::session::{Admin, Operator, Viewer};
 use crate::contract::PhotoShot;
 use crate::error::AppError;
 use crate::time::now_ms;
@@ -24,6 +24,10 @@ pub fn routes() -> Router<AppState> {
         .route("/photos", get(recent))
         .route("/photos/{id}/thumb", get(thumb))
         .route("/photos/{id}/original", get(original))
+        .route(
+            "/photos/shots/{shot_id}",
+            axum::routing::delete(delete_shot),
+        )
         .route("/flights/{id}/photos", get(of_flight))
 }
 
@@ -72,6 +76,16 @@ async fn thumb(
         .header(header::CACHE_CONTROL, "private, max-age=86400, immutable")
         .body(Body::from(bytes))
         .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+/// Alle Dateien einer Auslösung. Die ID enthält `/` (`RC1/DJI_…`) und kommt URL-kodiert.
+async fn delete_shot(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(shot_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    state.deleter.delete_shot(&shot_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]

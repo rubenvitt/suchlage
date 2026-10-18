@@ -7,8 +7,10 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 
 use crate::app::AppState;
-use crate::auth::session::{Operator, Viewer};
-use crate::contract::{Mission, MissionAssign, MissionCreate, SectionCreate};
+use crate::auth::session::{Admin, Operator, Viewer};
+use crate::contract::{
+    Mission, MissionAssign, MissionContents, MissionCreate, MissionUpdate, SectionCreate,
+};
 use crate::error::AppError;
 use crate::extract::JsonBody;
 use crate::time::now_ms;
@@ -16,6 +18,8 @@ use crate::time::now_ms;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/missions", get(list).post(create))
+        .route("/missions/{id}", put(update).delete(delete))
+        .route("/missions/{id}/contents", get(contents))
         .route("/missions/{id}/start", post(start))
         .route("/missions/{id}/close", post(close))
         .route("/missions/{id}/sections", post(add_section))
@@ -50,6 +54,33 @@ async fn create(
             .create(input, &user.display_name, now_ms())
             .await?,
     ))
+}
+
+async fn update(
+    _: Operator,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    JsonBody(input): JsonBody<MissionUpdate>,
+) -> Result<Json<Mission>, AppError> {
+    Ok(Json(state.missions.update(id, input).await?))
+}
+
+async fn contents(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<MissionContents>, AppError> {
+    Ok(Json(state.deleter.contents(id).await?))
+}
+
+/// Löscht den Einsatz mit allem, was dazugehört (Flüge, Videos, Fotos, Kartenelemente).
+async fn delete(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    state.deleter.delete_mission(id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn start(

@@ -16,7 +16,14 @@ pub struct Segment {
 
 /// Segmente der Fernsteuerung `rc`, nach Startzeit sortiert. Leer, wenn `live/<rc>` fehlt;
 /// `NotFound`, wenn die Ablage selbst fehlt (nicht eingehängt).
+/// `InvalidInput`, wenn `rc` keine gültige SN ist (kein Pfad außerhalb von `live/`).
 pub fn scan(video_dir: &Path, rc: &str) -> std::io::Result<Vec<Segment>> {
+    if !crate::sn::is_valid_sn(rc) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("ungültige Fernsteuerung {rc:?}"),
+        ));
+    }
     video_dir.metadata()?;
     let entries = match std::fs::read_dir(video_dir.join("live").join(rc)) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
@@ -115,6 +122,18 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn invalid_rc_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        for rc in ["../RC1", "", "RC 1", "a/b"] {
+            assert_eq!(
+                scan(dir.path(), rc).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidInput,
+                "{rc:?}"
+            );
+        }
     }
 
     #[test]

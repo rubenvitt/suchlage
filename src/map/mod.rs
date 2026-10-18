@@ -244,7 +244,8 @@ impl MapHub {
         }
     }
 
-    fn publish(&self, change: MapChange) {
+    /// Auch für Löschungen am Hub vorbei (ganzer Einsatz in einer Transaktion).
+    pub fn publish(&self, change: MapChange) {
         // Ohne Empfänger (kein Browser, kein Pilot) geht die Änderung nur in die Datenbank.
         let _ = self.changes.send(change);
     }

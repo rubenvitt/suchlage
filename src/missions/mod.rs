@@ -7,7 +7,9 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 use tokio::sync::{Mutex, broadcast};
 
-use crate::contract::{Mission, MissionAssign, MissionCreate, MissionState, SectionCreate};
+use crate::contract::{
+    Mission, MissionAssign, MissionCreate, MissionState, MissionUpdate, SectionCreate,
+};
 use crate::error::AppError;
 use crate::map::MapHub;
 use crate::store::{flights, missions as store};
@@ -61,7 +63,7 @@ impl MissionHub {
         };
         let _serial = self.writes.lock().await;
         let mission = store::create(&self.pool, &input, created_by, now_ms).await?;
-        self.notify();
+        self.changed();
         Ok(mission)
     }
 
@@ -96,7 +98,24 @@ impl MissionHub {
         }
         self.map
             .set_pilot_scope(store::running_id(&self.pool).await?);
-        self.notify();
+        self.changed();
+        self.get(id).await
+    }
+
+    /// Name und Ort ändern, auch im laufenden Einsatz; abgeschlossen ist nur lesbar.
+    pub async fn update(&self, id: i64, input: MissionUpdate) -> Result<Mission, AppError> {
+        let input = MissionUpdate {
+            name: rules::name(&input.name, "Name").map_err(AppError::Validation)?,
+            location: input.location,
+        };
+        let _serial = self.writes.lock().await;
+        if self.get(id).await?.state == MissionState::Closed {
+            return Err(AppError::Unprocessable(
+                "Der Einsatz ist abgeschlossen".into(),
+            ));
+        }
+        store::update(&self.pool, id, &input).await?;
+        self.changed();
         self.get(id).await
     }
 
@@ -117,7 +136,7 @@ impl MissionHub {
             ));
         }
         store::add_section(&self.pool, id, &input, now_ms).await?;
-        self.notify();
+        self.changed();
         self.get(id).await
     }
 
@@ -133,11 +152,12 @@ impl MissionHub {
                 "Der Flug gehört schon zu einem Einsatz".into(),
             ));
         }
-        self.notify();
+        self.changed();
         Ok(())
     }
 
-    fn notify(&self) {
+    /// Meldet den Browsern „neu laden“ (`missions_changed`), auch nach Löschungen.
+    pub fn changed(&self) {
         // Ohne Empfänger schlägt `send` fehl – dann hört niemand zu.
         let _ = self.changes.send(());
     }

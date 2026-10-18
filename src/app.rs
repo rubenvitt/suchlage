@@ -34,6 +34,8 @@ pub struct AppState {
     /// Fotos aus Pilot 2 (M3).
     pub photos: crate::photos::PhotoHub,
     pub missions: crate::missions::MissionHub,
+    /// Löschen von Einsätzen, Flügen und Medien (nur Admin).
+    pub deleter: crate::deletion::Deleter,
     /// Für die Proxies zu MediaMTX (`media::http_client`).
     pub http: reqwest::Client,
     /// Funkprotokoll der Fernsteuerungen für die Systemseite.
@@ -200,6 +202,13 @@ pub async fn run(
     let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
         .await
         .map_err(startup_error)?;
+    let deleter = crate::deletion::Deleter {
+        pool: pool.clone(),
+        photos: photos.clone(),
+        map: map.clone(),
+        missions: missions.clone(),
+        video_dir: boot.video_dir(),
+    };
     let state = AppState {
         boot: Arc::new(boot),
         pool: pool.clone(),
@@ -211,6 +220,7 @@ pub async fn run(
         map,
         photos,
         missions,
+        deleter,
         http: crate::media::http_client(),
         devlog,
     };
