@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PairingError, connect, connectMap, isConnected, liveStatus, pair, readRcSn, remoteLog, startManualLive, verify } from "./pilot.js";
+import { MEDIA_PARAMS, PairingError, connect, connectMap, connectMedia, isConnected, liveStatus, pair, readRcSn, remoteLog, startManualLive, verify } from "./pilot.js";
 
 const lic = { appId: "1", appKey: "k", license: "l", workspaceId: "768d4a2e-1f34-477c-9fcc-872285e895f6", rcLabel: "RC Plus 1" };
 const conn = { mqttHost: "tcp://127.0.0.1:1883", mqttUser: "rc-RCSN01", mqttPass: "p", rtmpUrl: "rtmp://127.0.0.1:1935/live/RCSN01?user=rc-RCSN01&pass=x" };
@@ -60,6 +60,39 @@ test("ohne API-Token (älterer Server) lädt connectMap nichts", () => {
   const { bridge, calls } = fakeBridge();
   assert.equal(connectMap({ ...lic, ...conn }, bridge, () => {}), false);
   assert.equal(calls.length, 0);
+});
+
+test("mit Fotospeicher lädt connect nach den Kartenmodulen media mit Auto-Upload der Originale", () => {
+  const { bridge, calls } = fakeBridge();
+  const log = [];
+  const loaded = connect({ ...lic, ...conn, ...map, media: true }, bridge, (m) => log.push(m));
+  assert.deepEqual(loaded, { map: true, media: true });
+  const modules = calls.filter((c) => c[0] === "platformLoadComponent").map((c) => c[1]);
+  assert.deepEqual(modules, ["thing", "liveshare", "api", "ws", "map", "media"]);
+  const media = calls.find((c) => c[1] === "media");
+  assert.deepEqual(JSON.parse(media[2]), { autoUploadPhoto: true, autoUploadPhotoType: 0, autoUploadVideo: false });
+  assert.deepEqual(MEDIA_PARAMS, JSON.parse(media[2]));
+  assert.ok(log.includes("Foto-Upload: automatisch (Original)"), log.join("\n"));
+});
+
+test("ohne Fotospeicher oder ohne API-Token lädt connectMedia nichts", () => {
+  for (const cfg of [{ ...lic, ...map, media: false }, { ...lic, media: true }]) {
+    const { bridge, calls } = fakeBridge();
+    assert.equal(connectMedia(cfg, bridge, () => {}), false);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("scheitert media oder ist der Auto-Upload aus, bleibt die Kopplung und das Protokoll sagt es", () => {
+  const failsOn = (name, [module]) => name === "platformLoadComponent" && module === "media";
+  const log = [];
+  const { bridge } = fakeBridge({ failsOn });
+  assert.deepEqual(connect({ ...lic, ...conn, ...map, media: true }, bridge, (m) => log.push(m)), { map: true, media: false });
+  assert.ok(log.some((m) => m.startsWith("Foto-Upload nicht verfügbar")), log.join("\n"));
+  const off = [];
+  const { bridge: offBridge } = fakeBridge({ data: { mediaGetAutoUploadPhoto: false } });
+  assert.equal(connectMedia({ ...lic, ...map, media: true }, offBridge, (m) => off.push(m)), false);
+  assert.ok(off.some((m) => m.startsWith("Foto-Upload: aus")), off.join("\n"));
 });
 
 test("verify bricht bei abgelehnter Lizenz ab", () => {

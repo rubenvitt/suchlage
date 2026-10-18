@@ -1,6 +1,6 @@
 [package]
 name = "suchlage"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.99"
 default-run = "suchlage"
@@ -40,6 +40,8 @@ getrandom = "0.3"
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 time = "0.3"
+# Vorschaubilder der Fotos (M3); nur JPEG, das schreibt Pilot 2.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

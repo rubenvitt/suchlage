@@ -13,7 +13,7 @@ use tokio::sync::oneshot;
 
 use crate::app::AppState;
 use crate::auth::session::Viewer;
-use crate::contract::{LiveEvent, SituationSnapshot};
+use crate::contract::{LiveEvent, PhotoShot, SituationSnapshot};
 use crate::error::AppError;
 use crate::map::{MapChange, MapHub};
 use crate::runtime::service::SituationHandle;
@@ -33,7 +33,8 @@ async fn situation(
     Ok(Json(state.situation.snapshot().await?))
 }
 
-/// Zuerst ein `snapshot` und alle Kartenelemente, dann die Ereignisse beider Hubs. Kommt der Strom
+/// Zuerst ein `snapshot` und alle Kartenelemente, dann die Ereignisse der Lage, der Karte und der
+/// Fotos. Kommt der Strom
 /// nicht hinterher, folgt statt der verpassten Ereignisse ein neuer `snapshot` bzw. die ganze Liste.
 async fn live(
     _: Viewer,
@@ -43,6 +44,7 @@ async fn live(
     // Vor dem Lesen abonnieren: Keine Änderung fällt zwischen Liste und Strom heraus. Doppelt
     // ankommende sind harmlos, der Browser legt nach ID ab.
     let map_rx = state.map.subscribe();
+    let photo_rx = state.photos.subscribe();
     let elements = state.map.list().await?;
     let first = stream::iter([
         sse(&LiveEvent::Snapshot { snapshot }),
@@ -58,8 +60,10 @@ async fn live(
         })
         .filter_map(|()| async { None }),
     );
-    let map = stream::unfold((map_rx, state.map.clone()), next_map_event).take_until(on_end);
-    Ok(Sse::new(first.chain(stream::select(situation, map)))
+    let map = stream::unfold((map_rx, state.map.clone()), next_map_event);
+    let photos = stream::unfold(photo_rx, next_photo_event);
+    let hubs = stream::select(map, photos).take_until(on_end);
+    Ok(Sse::new(first.chain(stream::select(situation, hubs)))
         .keep_alive(KeepAlive::new().interval(KEEP_ALIVE)))
 }
 
@@ -97,6 +101,21 @@ async fn next_map_event((mut rx, hub): MapFeed) -> Option<(Result<Event, Infalli
         Err(RecvError::Closed) => return None,
     };
     Some((sse(&event), (rx, hub)))
+}
+
+/// Neue Auslösungen. Wer welche verpasst, sieht sie beim nächsten Laden der Liste.
+async fn next_photo_event(
+    mut rx: broadcast::Receiver<PhotoShot>,
+) -> Option<(Result<Event, Infallible>, broadcast::Receiver<PhotoShot>)> {
+    loop {
+        match rx.recv().await {
+            Ok(shot) => return Some((sse(&LiveEvent::PhotoShot { shot }), rx)),
+            Err(RecvError::Lagged(missed)) => {
+                tracing::debug!(missed, "Fotostrom überholt");
+            }
+            Err(RecvError::Closed) => return None,
+        }
+    }
 }
 
 fn sse(event: &LiveEvent) -> Result<Event, Infallible> {
@@ -267,6 +286,37 @@ mod tests {
         let event = next_data(&mut body).await;
         assert_eq!(event["type"], "map_element_deleted");
         assert_eq!(event["id"], created.id.as_str());
+    }
+
+    #[tokio::test]
+    async fn new_photos_reach_the_browser() {
+        let app = test_app().await;
+        let mut body = open_live(&app, Role::Kiosk).await;
+        opening(&mut body).await;
+        let photo = crate::store::photos::NewPhoto {
+            object_key: "fotos/RC1/DJI_1_T.JPG".into(),
+            name: "DJI_1_T.JPG".into(),
+            fingerprint: None,
+            tiny_fingerprint: None,
+            shot_key: "RC1/DJI_1".into(),
+            lens: crate::contract::PhotoLens::Thermal,
+            gateway_sn: "RC1".into(),
+            aircraft_sn: None,
+            flight_id: None,
+            taken_at_ms: Some(1),
+            uploaded_at_ms: 2,
+            lat: Some(52.0),
+            lon: Some(10.0),
+            absolute_altitude_m: None,
+            relative_altitude_m: None,
+            gimbal_yaw_deg: None,
+            payload_model_key: None,
+        };
+        app.state.photos.accept(photo).await.unwrap();
+        let event = next_data(&mut body).await;
+        assert_eq!(event["type"], "photo_shot");
+        assert_eq!(event["shot"]["id"], "RC1/DJI_1");
+        assert_eq!(event["shot"]["photos"][0]["lens"], "thermal");
     }
 
     #[tokio::test]

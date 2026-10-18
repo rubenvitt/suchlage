@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
+import { useRecentPhotos } from '../api/queries';
 import type { LiveState } from '../live/reducer';
+import { mergeShots } from '../photos/photos';
 import type { Focus } from './selectors';
 
 /**
@@ -11,5 +13,7 @@ export function useLiveMapData(state: LiveState, focus: Focus) {
   const aircraft = useMemo(() => (focus.aircraft ? [focus.aircraft] : []), [focus.aircraft]);
   const tracks = useMemo(() => (focus.flight ? [focus.flight.segments] : []), [focus.flight]);
   const elements = useMemo(() => Object.values(state.mapElements), [state.mapElements]);
-  return { gateways, aircraft, tracks, elements };
+  const { data: listed } = useRecentPhotos();
+  const photos = useMemo(() => mergeShots(listed, state.photoShots), [listed, state.photoShots]);
+  return { gateways, aircraft, tracks, elements, photos };
 }

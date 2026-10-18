@@ -1,0 +1,68 @@
+/* Vorschau einer Auslösung über der Karte, oben links: rechts stehen die Kartenwerkzeuge. */
+.sl-photo-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100% - 24px));
+  padding: 8px;
+  background: var(--lfh-paneel);
+  border: 1px solid var(--lfh-linie);
+  color: var(--lfh-text);
+  font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-groesse) var(--lfh-schrift-text);
+}
+.sl-photo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sl-photo-frame {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  background: var(--lfh-grund);
+}
+.sl-photo-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 50vh;
+}
+.sl-photo-links {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+}
+/* Fotoleiste im Flugdetail: Vorschaubilder im Raster, jedes ein Knopf. */
+.sl-photo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.sl-photo-strip button {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 1px solid var(--lfh-linie);
+  background: var(--lfh-grund);
+  color: var(--lfh-gedaempft);
+  font: inherit;
+  cursor: pointer;
+}
+.sl-photo-strip button[aria-pressed='true'] {
+  border-color: var(--lfh-bedien);
+  color: var(--lfh-text);
+}
+.sl-photo-strip img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+.sl-photo-strip .sl-photo-pending {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+}

@@ -5,8 +5,8 @@ cd "$(dirname "$0")/.."
 FAIL=0
 check() { if [ "$1" = 0 ]; then echo "ok   $2"; else echo "FAIL $2"; FAIL=1; fi; }
 # Eigenes Compose-Projekt: `down -v` darf nie den laufenden Dev-Stack (suchlage-dev) samt Broker-Volume treffen.
-if curl -s -o /dev/null http://127.0.0.1:8080/api/health || nc -z 127.0.0.1 1883 2>/dev/null; then
-  echo "Port 8080 oder 1883 ist belegt – läuft noch \`mise run dev\`? Erst beenden."; exit 1
+if curl -s -o /dev/null http://127.0.0.1:8080/api/health || nc -z 127.0.0.1 1883 2>/dev/null || nc -z 127.0.0.1 3900 2>/dev/null; then
+  echo "Port 8080, 1883 oder 3900 ist belegt – läuft noch \`mise run dev\`? Erst beenden."; exit 1
 fi
 TMP=$(mktemp -d)
 export SUCHLAGE_DATA_DIR="$TMP/data" SUCHLAGE_BIND=127.0.0.1:8080 SUCHLAGE_PUBLIC_URL=http://127.0.0.1:8080
@@ -56,6 +56,12 @@ api http://127.0.0.1:8080/api/map/elements | jq -e 'map(select(.id == "smoke-pin
 check $? "Punkt aus Pilot 2 erscheint im Browser"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-auth-token: falsch' "$MAP/element-groups")" = 401 ]
 check $? "Kartenelemente ohne gültigen Token: 401"
+# M3: Upload-Zugang nur mit Token, Ablageort je Fernsteuerung.
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'x-auth-token: falsch' "http://127.0.0.1:8080/storage/api/v1/workspaces/$WS/sts")" = 401 ]
+check $? "Foto-Upload ohne gültigen Token: 401"
+STS=$(curl -sf -X POST -H "x-auth-token: $TOKEN_A" "http://127.0.0.1:8080/storage/api/v1/workspaces/$WS/sts")
+printf '%s' "$STS" | jq -e '.data.object_key_prefix == "fotos/RCA" and .data.credentials.access_key_id != null' >/dev/null
+check $? "sts liefert einen Upload-Schlüssel für fotos/RCA"
 
 mq() { $DC exec -T mqtt "$@"; }
 # update_topo wird beantwortet (Serverrolle darf senden, RC darf ihr status_reply abonnieren)
@@ -105,6 +111,17 @@ api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.segments | length >= 1' >/
 api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.video != null' >/dev/null; check $? "Flugvideo aufgezeichnet"
 SIZE=$(curl -sf -b "$JAR" "http://127.0.0.1:8080/api/flights/$ID/video?download=1" | wc -c)
 [ "$SIZE" -gt 1000 ]; check $? "Flugvideo herunterladbar ($SIZE Bytes)"
+
+# M3: Der Simulator lädt nach der Landung eine Auslösung (Wärme und Weit) über Garage hoch.
+SHOT=$(api http://127.0.0.1:8080/api/photos | jq '.[-1]')
+[ "$(printf '%s' "$SHOT" | jq -r .flight_id)" = "$ID" ]; check $? "Foto dem Flug zugeordnet"
+printf '%s' "$SHOT" | jq -e '.position != null and ([.photos[].lens] == ["thermal", "wide"])' >/dev/null
+check $? "Foto mit Aufnahmeort, Wärmebild zuerst"
+PHOTO=$(printf '%s' "$SHOT" | jq -r '.photos[0].id')
+i=0; until curl -sf -b "$JAR" -o /dev/null "http://127.0.0.1:8080/api/photos/$PHOTO/thumb"; do i=$((i+1)); [ $i -lt 20 ] || break; sleep 1; done
+curl -sf -b "$JAR" -o /dev/null "http://127.0.0.1:8080/api/photos/$PHOTO/thumb"; check $? "Vorschaubild erzeugt"
+SIZE=$(curl -sf -b "$JAR" "http://127.0.0.1:8080/api/photos/$PHOTO/original?download=1" | wc -c)
+[ "$SIZE" -gt 1000 ]; check $? "Original herunterladbar ($SIZE Bytes)"
 
 [ $FAIL = 0 ] && echo ok || { echo "--- Server-Log (Ende)"; tail -40 "$TMP/server.log"; echo "--- Simulator-Log"; tail -20 "$TMP/sim.log"; }
 exit $FAIL

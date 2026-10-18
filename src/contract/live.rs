@@ -3,6 +3,7 @@ use ts_rs::TS;
 
 use super::flights::{FlightSummary, TrackPoint};
 use super::map::MapElement;
+use super::photos::PhotoShot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -258,5 +259,9 @@ pub enum LiveEvent {
     },
     MapElementDeleted {
         id: String,
+    },
+    /// Neue oder ergänzte Auslösung (M3); die Liste lädt der Browser über `/api/photos`.
+    PhotoShot {
+        shot: PhotoShot,
     },
 }

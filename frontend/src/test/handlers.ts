@@ -28,6 +28,17 @@ export const handlersFor = (me: Me) => {
     http.get('/api/situation', () => HttpResponse.json(fx.snapshotFlying)),
     http.get('/api/flights', () => HttpResponse.json(fx.flightList)),
     http.get('/api/flights/:id', () => HttpResponse.json(fx.flightDetail)),
+    http.get('/api/flights/:id/photos', () => HttpResponse.json(fx.photoShots)),
+    http.get('/api/photos', () => HttpResponse.json(fx.photoShots)),
+    // Vorschau-Modus: ein Platzhalter statt eines echten Vorschaubilds.
+    http.get(
+      '/api/photos/:id/thumb',
+      () =>
+        new HttpResponse(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="512"><rect width="640" height="512" fill="#3a2a52"/><circle cx="320" cy="256" r="60" fill="#f2a33a"/></svg>',
+          { headers: { 'content-type': 'image/svg+xml' } },
+        ),
+    ),
     http.get('/api/settings', () => HttpResponse.json(fx.settingsView)),
     http.put('/api/settings/:section', () => HttpResponse.json(fx.settingsView)),
     http.get('/api/remote-controllers', () => HttpResponse.json(fx.remoteControllers)),

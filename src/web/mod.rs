@@ -6,6 +6,8 @@ pub mod flights;
 pub mod live;
 pub mod map;
 pub mod media;
+pub mod photos;
 pub mod pilot;
 pub mod pilot_map;
+pub mod pilot_media;
 pub mod streams;

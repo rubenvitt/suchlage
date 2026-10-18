@@ -6,6 +6,7 @@ import { useServerNow } from '../live/LiveProvider';
 import type { LiveState } from '../live/reducer';
 import { SituationMap } from '../map/SituationMap';
 import { useMapEditor } from '../map/useMapEditor';
+import { usePhotoSelection } from '../photos/usePhotoSelection';
 import { TelemetryStrip } from '../telemetry/TelemetryStrip';
 import { EmptyState } from './EmptyState';
 import { FlightPanel } from './FlightPanel';
@@ -46,6 +47,7 @@ export function WorkstationView() {
   const { gateways } = map;
   const canControl = me?.role === 'admin' || me?.role === 'operator';
   const editor = useMapEditor(map.elements, { enabled: canControl, onStartDrawing: () => setFollow(false) });
+  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
   const empty = emptyOf(state, focus);
 
   return (
@@ -58,9 +60,11 @@ export function WorkstationView() {
           follow={follow}
           onFollowChange={setFollow}
           {...editor.mapProps}
+          {...photo.mapProps}
         />
         {empty && <div className="sl-view-notice">{empty}</div>}
         {editor.overlay}
+        {photo.overlay}
       </div>
       <aside className="sl-work-side" aria-label="Livebild und Flug">
         {/* Ohne Fernsteuerung gibt es nichts zu wählen und kein Bild zum Vergrößern. */}

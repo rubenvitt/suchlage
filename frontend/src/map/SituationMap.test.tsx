@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConfigProvider, theme } from 'antd';
 import type { ReactElement } from 'react';
-import { mapElements, snapshotFlying } from '../contract/fixtures.generated';
+import { mapElements, photoShots, snapshotFlying } from '../contract/fixtures.generated';
 import type { Freshness } from '../live/freshness';
 import { farbenHell } from '../theme/tokens';
 import { MAP_UNAVAILABLE_TEXT, MAP_UNAVAILABLE_TITLE } from './MapBoundary';
@@ -28,6 +28,7 @@ const { FakeMap, GPUInitializationError, maps, gpu } = vi.hoisted(() => {
     >(() => []);
     addImage = vi.fn();
     addLayer = vi.fn();
+    setLayoutProperty = vi.fn();
     fitBounds = vi.fn();
     easeTo = vi.fn();
     zoomIn = vi.fn();
@@ -273,4 +274,45 @@ test('ein Klick meldet Koordinate und getroffenes Element, beim Zeichnen nur die
   expect(onMapClick).toHaveBeenLastCalledWith({ lat: 52.43, lon: 10.01 }, null);
   expect(map.doubleClickZoom.disable).toHaveBeenCalled();
   expect(map.features('draft')).toHaveLength(1);
+});
+
+test('Fotos: nur Auslösungen mit Ort, ein Klick wählt, der Knopf blendet die Ebene aus', async () => {
+  const onPhotoClick = vi.fn();
+  const onMapClick = vi.fn();
+  render(
+    light(
+      <SituationMap
+        {...live}
+        photos={photoShots}
+        selectedPhotoId={photoShots[0]!.id}
+        onPhotoClick={onPhotoClick}
+        onMapClick={onMapClick}
+      />,
+    ),
+  );
+  const map = loaded();
+  const features = map.features('photos');
+  expect(features).toHaveLength(1);
+  expect(features[0].properties).toMatchObject({ id: photoShots[0]!.id, selected: true });
+  expect(features[0].geometry.coordinates).toEqual([10.013, 52.4319]);
+
+  map.queryRenderedFeatures.mockImplementation((_box, options) =>
+    (options as { layers: string[] }).layers.includes('photos') ? [{ properties: { id: 'foto-1' } }] : [],
+  );
+  act(() => map.handlers.get('click')!({ point: { x: 10, y: 10 }, lngLat: { lat: 1, lng: 2 }, target: map }));
+  expect(onPhotoClick).toHaveBeenCalledWith('foto-1');
+  expect(onMapClick).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Fotos' }));
+  expect(map.setLayoutProperty).toHaveBeenCalledWith('photos', 'visibility', 'none');
+  expect(map.setLayoutProperty).toHaveBeenCalledWith('photos-label', 'visibility', 'none');
+  act(() => map.handlers.get('click')!({ point: { x: 10, y: 10 }, lngLat: { lat: 1, lng: 2 }, target: map }));
+  expect(onPhotoClick).toHaveBeenCalledTimes(1);
+  expect(onMapClick).toHaveBeenCalledTimes(1);
+});
+
+test('ohne Fotos kein Knopf „Fotos“', () => {
+  render(light(<SituationMap {...live} />));
+  loaded();
+  expect(screen.queryByRole('button', { name: 'Fotos' })).toBeNull();
 });

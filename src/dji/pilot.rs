@@ -33,4 +33,7 @@ pub struct PilotConnection {
     pub ws_host: String,
     /// Für `api` und `ws`. Jedes Koppeln erzeugt einen neuen.
     pub api_token: String,
+    /// Modul `media` laden (M3): Der Server hat einen Fotospeicher. Fehlt bei älteren Servern.
+    #[serde(default)]
+    pub media: bool,
 }

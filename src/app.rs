@@ -31,6 +31,8 @@ pub struct AppState {
     pub streams: StreamOrchestrator,
     /// Kartenelemente (M2) für Browser und Pilots.
     pub map: crate::map::MapHub,
+    /// Fotos aus Pilot 2 (M3).
+    pub photos: crate::photos::PhotoHub,
     /// Für die Proxies zu MediaMTX (`media::http_client`).
     pub http: reqwest::Client,
     /// Funkprotokoll der Fernsteuerungen für die Systemseite.
@@ -64,6 +66,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::live::routes())
         .merge(crate::web::flights::routes())
         .merge(crate::web::map::routes())
+        .merge(crate::web::photos::routes())
         .merge(crate::web::streams::routes())
         .merge(crate::web::media::routes())
         .merge(crate::web::devlog::routes())
@@ -75,6 +78,8 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::pilot::routes())
         // Pilot 2 hängt `/map/api/v1/…` an die Wurzel; der WebSocket liegt unter `/pilot/ws`.
         .merge(crate::web::pilot_map::routes())
+        // Medienverwaltung (M3): `/media/api/v1/…` und `/storage/api/v1/…` an der Wurzel.
+        .merge(crate::web::pilot_media::routes())
         .merge(crate::web::media::internal_routes())
         .fallback(crate::static_files::serve)
         .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
@@ -152,6 +157,12 @@ pub async fn run(
     let map = crate::map::MapHub::new(pool.clone(), stop_rx.clone());
     let (mqtt, link_requests) = crate::mqtt::MqttLink::channel();
     let devlog = crate::devlog::DeviceLog::new(stop_rx.clone());
+    // Upload-Schlüssel der Fotos (M3) laufen nach einer Stunde ab; der Lauf löscht sie danach.
+    tokio::spawn(crate::storage::garage::cleanup_loop(
+        crate::media::http_client(),
+        settings.clone(),
+        stop_rx.clone(),
+    ));
     let session_task = tokio::spawn(crate::dji::session::run(
         settings.subscribe(),
         crate::dji::session::SessionDeps {
@@ -178,6 +189,12 @@ pub async fn run(
         public_url = %boot.public_url,
         "Suchlage läuft"
     );
+    let photos = crate::photos::PhotoHub::new(
+        pool.clone(),
+        settings.clone(),
+        crate::media::http_client(),
+        boot.thumbs_dir(),
+    );
     let state = AppState {
         boot: Arc::new(boot),
         pool: pool.clone(),
@@ -187,6 +204,7 @@ pub async fn run(
         mqtt,
         streams,
         map,
+        photos,
         http: crate::media::http_client(),
         devlog,
     };

@@ -59,6 +59,11 @@ impl BootConfig {
     pub fn records_dir(&self) -> PathBuf {
         self.data_dir.join("records")
     }
+
+    /// Vorschaubilder der Fotos (M3); jederzeit aus dem Fotospeicher neu erzeugbar.
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.data_dir.join("thumbs")
+    }
 }
 
 #[cfg(test)]

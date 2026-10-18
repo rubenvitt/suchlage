@@ -4,5 +4,6 @@ import type { DjiSettingsView } from "./DjiSettingsView";
 import type { GeneralSettings } from "./GeneralSettings";
 import type { MediaSettings } from "./MediaSettings";
 import type { OidcSettingsView } from "./OidcSettingsView";
+import type { PhotoStorageSettingsView } from "./PhotoStorageSettingsView";
 
-export type SettingsView = { oidc: OidcSettingsView | null, dji: DjiSettingsView | null, broker: BrokerSettingsView | null, media: MediaSettings | null, general: GeneralSettings, };
+export type SettingsView = { oidc: OidcSettingsView | null, dji: DjiSettingsView | null, broker: BrokerSettingsView | null, media: MediaSettings | null, photo_storage: PhotoStorageSettingsView | null, general: GeneralSettings, };

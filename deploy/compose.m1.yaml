@@ -9,7 +9,7 @@ services:
       SUCHLAGE_PUBLIC_URL: "${SUCHLAGE_PUBLIC_URL:?öffentliche Adresse, z. B. https://suchlage.example.org}"
     ports: ["127.0.0.1:8080:8080"]
     volumes: ["server-data:/data"]
-    depends_on: [mqtt, media]
+    depends_on: [mqtt, media, fotos]
     restart: unless-stopped
 
   mqtt:
@@ -35,7 +35,22 @@ services:
       - video:/recordings
     restart: unless-stopped
 
+  # Fotospeicher (M3). S3 (3900) nur an der Tailscale-IP: Pilot 2 lädt direkt hoch. Die Admin-API
+  # (3903) bleibt im Compose-Netz. Einrichtung einmalig mit deploy/fotos-init.sh.
+  fotos:
+    image: dxflrs/garage:v2.4.1
+    command: ["/garage", "server", "--single-node"]
+    ports: ["${SUCHLAGE_BIND_IP:?}:3900:3900"]
+    volumes:
+      - ./garage/garage.m1.toml:/etc/garage.toml:ro
+      - ../garage-secrets:/etc/garage-secrets:ro
+      - fotos-meta:/var/lib/garage/meta
+      - fotos-data:/var/lib/garage/data
+    restart: unless-stopped
+
 volumes:
   server-data:
   mqtt-data:
   video:
+  fotos-meta:
+  fotos-data:

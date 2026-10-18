@@ -1,4 +1,5 @@
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
 import { Route, Routes } from 'react-router';
@@ -10,8 +11,14 @@ import { renderWithApp } from '../test/render';
 import { FlightDetailPage } from './FlightDetailPage';
 
 vi.mock('../map/SituationMap', () => ({
-  SituationMap: (p: { tracks: unknown[][]; staticFit?: boolean }) => (
-    <div data-testid="karte" data-segments={p.tracks[0]?.length} data-static={String(p.staticFit)} />
+  SituationMap: (p: { tracks: unknown[][]; staticFit?: boolean; photos?: unknown[]; selectedPhotoId?: string | null }) => (
+    <div
+      data-testid="karte"
+      data-segments={p.tracks[0]?.length}
+      data-static={String(p.staticFit)}
+      data-photos={p.photos?.length}
+      data-selected={p.selectedPhotoId ?? ''}
+    />
   ),
 }));
 vi.mock('../shell/Frame', () => ({ Frame: (p: { children: ReactNode }) => <>{p.children}</> }));
@@ -77,4 +84,21 @@ test('Fehler beim Abruf zeigt den Fehlerzustand mit erneutem Abruf', async () =>
   page();
   expect(await screen.findByText('Daten nicht abrufbar')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Erneut abrufen' })).toBeInTheDocument();
+});
+
+test('Fotos des Flugs: Leiste mit Vorschaubildern, ein Klick wählt die Auslösung und öffnet die Vorschau', async () => {
+  page();
+  const strip = await screen.findByRole('button', { name: /DJI_20261017143012_0001_T\.JPG/ });
+  expect(screen.getByTestId('karte')).toHaveAttribute('data-photos', '2');
+  expect(screen.getByText('2 Auslösungen')).toBeInTheDocument();
+  await userEvent.click(strip);
+  expect(strip).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByTestId('karte')).toHaveAttribute('data-selected', 'RCSIM0001/DJI_20261017143012_0001');
+  expect(screen.getByRole('region', { name: /^Foto / })).toBeInTheDocument();
+});
+
+test('ohne Fotos sagt das Detail, woher sie kämen', async () => {
+  server.use(http.get('/api/flights/:id/photos', () => HttpResponse.json([])));
+  page();
+  expect(await screen.findByText(/Keine Fotos/)).toBeInTheDocument();
 });

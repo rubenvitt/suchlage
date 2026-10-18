@@ -27,6 +27,7 @@
       <dt>Verbindung zu Suchlage</dt><dd id="st-mqtt">noch nicht aufgebaut</dd>
       <dt>Livebild</dt><dd id="st-live">–</dd>
       <dt>Kartenabgleich</dt><dd id="st-ws">–</dd>
+      <dt>Fotos</dt><dd id="st-media">–</dd>
     </dl>
     <button id="connect" class="primary">Verbinden</button>
     <button id="live">Livebild manuell starten</button>
@@ -81,8 +82,10 @@
       try {
         const fresh = !cfg;
         cfg = cfg ?? (await pair(code, bridge, log, post)); // pair verbindet beim ersten Mal selbst
-        if (action === "connect" && !fresh) connect(cfg, bridge, log);
+        if (action === "connect" && !fresh) cfg.modules = connect(cfg, bridge, log);
         if (action === "live") startManualLive(cfg, bridge, log);
+        const media = cfg.modules?.media;
+        row("st-media", media ? "automatischer Upload" : cfg.media ? "nicht verfügbar – Protokoll unten" : "Server ohne Fotospeicher", media ? "ok" : cfg.media ? "fehler" : "");
         show(`Angemeldet als ${cfg.rcLabel}.`);
       } catch (e) {
         if (e instanceof PairingError) {

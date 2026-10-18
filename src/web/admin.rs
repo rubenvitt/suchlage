@@ -9,8 +9,8 @@ use crate::app::AppState;
 use crate::auth::session::Admin;
 use crate::contract::{
     BrokerSettingsInput, DjiSettingsInput, GeneralSettings, KioskTokenCreate, KioskTokenCreated,
-    KioskTokenView, MediaSettings, OidcSettingsInput, RemoteControllerCreate,
-    RemoteControllerCreated, RemoteControllerView, SettingsView,
+    KioskTokenView, MediaSettings, OidcSettingsInput, PhotoStorageSettingsInput,
+    RemoteControllerCreate, RemoteControllerCreated, RemoteControllerView, SettingsView,
 };
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -50,6 +50,10 @@ async fn settings_update(
         "dji" => s.update_dji(parse::<DjiSettingsInput>(body)?).await?,
         "broker" => s.update_broker(parse::<BrokerSettingsInput>(body)?).await?,
         "media" => s.update_media(parse::<MediaSettings>(body)?).await?,
+        "photo_storage" => {
+            s.update_photo_storage(parse::<PhotoStorageSettingsInput>(body)?)
+                .await?
+        }
         "general" => s.update_general(parse::<GeneralSettings>(body)?).await?,
         _ => return Err(AppError::NotFound),
     }

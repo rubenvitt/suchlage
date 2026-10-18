@@ -5,6 +5,7 @@ pub mod control;
 pub mod devlog;
 pub mod link;
 pub mod map;
+pub mod media;
 pub mod pilot;
 pub mod record;
 pub mod recorder;

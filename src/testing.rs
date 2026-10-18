@@ -27,6 +27,8 @@ pub struct TestApp {
     /// Anfragen an die MQTT-Sitzung; Tests beantworten sie selbst, eine Sitzung läuft nicht.
     pub mqtt_requests: mpsc::Receiver<crate::mqtt::LinkRequest>,
     stop: watch::Sender<bool>,
+    /// Vorschaubilder der Fotos; lebt so lange wie die App.
+    _thumbs: tempfile::TempDir,
 }
 
 /// App wie in `app::run`, aber mit In-Memory-DB, öffentlicher HTTPS-Adresse und ohne Auto-Livebild.
@@ -63,11 +65,19 @@ pub async fn test_app() -> TestApp {
         pool.clone(),
         settings.clone(),
     );
+    let thumbs = tempfile::tempdir().unwrap();
+    let photos = crate::photos::PhotoHub::new(
+        pool.clone(),
+        settings.clone(),
+        crate::media::http_client(),
+        thumbs.path().to_path_buf(),
+    );
     let state = AppState {
         boot: Arc::new(boot),
         pool,
         situation,
         settings,
+        photos,
         oidc: Arc::new(crate::auth::oidc::OidcState::new()),
         mqtt,
         streams,
@@ -81,6 +91,7 @@ pub async fn test_app() -> TestApp {
         live_requests,
         mqtt_requests,
         stop,
+        _thumbs: thumbs,
     }
 }
 

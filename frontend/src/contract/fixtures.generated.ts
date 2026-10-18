@@ -8,6 +8,7 @@ import type { KioskTokenView } from './generated/KioskTokenView';
 import type { LiveEvent } from './generated/LiveEvent';
 import type { MapElement } from './generated/MapElement';
 import type { Me } from './generated/Me';
+import type { PhotoShot } from './generated/PhotoShot';
 import type { RemoteControllerView } from './generated/RemoteControllerView';
 import type { SettingsView } from './generated/SettingsView';
 import type { SituationSnapshot } from './generated/SituationSnapshot';
@@ -601,6 +602,46 @@ export const liveEvents: LiveEvent[] = [
   {
     "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
     "type": "map_element_deleted"
+  },
+  {
+    "shot": {
+      "absolute_altitude_m": 142.3,
+      "aircraft_sn": "ACSIM0001",
+      "flight_id": 6,
+      "gateway_sn": "RCSIM0001",
+      "gimbal_yaw_deg": 87.4,
+      "id": "RCSIM0001/DJI_20261017143012_0001",
+      "photos": [
+        {
+          "id": 11,
+          "lens": "thermal",
+          "name": "DJI_20261017143012_0001_T.JPG",
+          "original_url": "/api/photos/11/original",
+          "thumb_url": "/api/photos/11/thumb"
+        },
+        {
+          "id": 12,
+          "lens": "wide",
+          "name": "DJI_20261017143012_0001_W.JPG",
+          "original_url": "/api/photos/12/original",
+          "thumb_url": "/api/photos/12/thumb"
+        },
+        {
+          "id": 13,
+          "lens": "zoom",
+          "name": "DJI_20261017143012_0001_Z.JPG",
+          "original_url": "/api/photos/13/original",
+          "thumb_url": "/api/photos/13/thumb"
+        }
+      ],
+      "position": {
+        "lat": 52.4319,
+        "lon": 10.013
+      },
+      "relative_altitude_m": 61.5,
+      "taken_at_ms": 1792142900000
+    },
+    "type": "photo_shot"
   }
 ];
 
@@ -767,6 +808,16 @@ export const settingsView: SettingsView = {
     "has_client_secret": true,
     "issuer": "https://id.example.org",
     "redirect_url": "https://suchlage.example.org/api/auth/oidc/callback"
+  },
+  "photo_storage": {
+    "access_key_id": "GK31c2f218a2e44f485b94239e",
+    "admin_url": "http://fotos:3903",
+    "bucket": "suchlage-fotos",
+    "has_admin_token": true,
+    "has_secret_access_key": true,
+    "rc_url": "http://100.64.0.10:3900",
+    "region": "garage",
+    "s3_url": "http://fotos:3900"
   }
 };
 
@@ -778,7 +829,8 @@ export const settingsEmpty: SettingsView = {
     "record_raw_mqtt": true
   },
   "media": null,
-  "oidc": null
+  "oidc": null,
+  "photo_storage": null
 };
 
 export const remoteControllers: RemoteControllerView[] = [
@@ -855,6 +907,66 @@ export const mapElements: MapElement[] = [
       }
     ],
     "updated_at_ms": 1792149940000
+  }
+];
+
+export const photoShots: PhotoShot[] = [
+  {
+    "absolute_altitude_m": 142.3,
+    "aircraft_sn": "ACSIM0001",
+    "flight_id": 6,
+    "gateway_sn": "RCSIM0001",
+    "gimbal_yaw_deg": 87.4,
+    "id": "RCSIM0001/DJI_20261017143012_0001",
+    "photos": [
+      {
+        "id": 11,
+        "lens": "thermal",
+        "name": "DJI_20261017143012_0001_T.JPG",
+        "original_url": "/api/photos/11/original",
+        "thumb_url": "/api/photos/11/thumb"
+      },
+      {
+        "id": 12,
+        "lens": "wide",
+        "name": "DJI_20261017143012_0001_W.JPG",
+        "original_url": "/api/photos/12/original",
+        "thumb_url": "/api/photos/12/thumb"
+      },
+      {
+        "id": 13,
+        "lens": "zoom",
+        "name": "DJI_20261017143012_0001_Z.JPG",
+        "original_url": "/api/photos/13/original",
+        "thumb_url": "/api/photos/13/thumb"
+      }
+    ],
+    "position": {
+      "lat": 52.4319,
+      "lon": 10.013
+    },
+    "relative_altitude_m": 61.5,
+    "taken_at_ms": 1792142900000
+  },
+  {
+    "absolute_altitude_m": null,
+    "aircraft_sn": "ACSIM0001",
+    "flight_id": 6,
+    "gateway_sn": "RCSIM0001",
+    "gimbal_yaw_deg": null,
+    "id": "RCSIM0001/DJI_20261017143140_0002",
+    "photos": [
+      {
+        "id": 14,
+        "lens": "thermal",
+        "name": "DJI_20261017143140_0002_T.JPG",
+        "original_url": "/api/photos/14/original",
+        "thumb_url": null
+      }
+    ],
+    "position": null,
+    "relative_altitude_m": null,
+    "taken_at_ms": 1792142990000
   }
 ];
 

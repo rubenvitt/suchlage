@@ -11,16 +11,19 @@ import {
   StatusChip,
 } from '../components/instrument';
 import { ApiError } from '../api/client';
-import { useFlight } from '../api/queries';
+import { useFlight, useFlightPhotos, useMe } from '../api/queries';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import { useLive, useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
+import { LENS_LABEL, mergeShots, shotTitle } from '../photos/photos';
+import { usePhotoSelection } from '../photos/usePhotoSelection';
 import { Frame } from '../shell/Frame';
 import { DASH, fmt } from '../telemetry/format';
 import { flightRow } from './flightRow';
 import './flights.css';
 
 const NO_DEVICES: never[] = [];
+const NO_LIVE_SHOTS = {};
 // Im Detail zeichnet die Karte keine Live-Zeichen; die Uhr bleibt fest, damit sie nicht sekündlich neu rechnet.
 const STATIC_NOW = 0;
 
@@ -79,6 +82,10 @@ function Detail({ data }: { data: FlightDetail }) {
   const nowMs = useServerNow();
   // Die Seite rendert sekündlich mit der Uhr; die Karte bekommt die Spur nur neu, wenn neue Daten kommen.
   const tracks = useMemo(() => [data.segments], [data.segments]);
+  const { data: listed } = useFlightPhotos(f.id);
+  const photos = useMemo(() => mergeShots(listed, NO_LIVE_SHOTS), [listed]);
+  const { data: me } = useMe();
+  const photo = usePhotoSelection(photos, me != null && me.role !== 'kiosk');
   const r = flightRow(f, nowMs);
   const [distance, distanceUnit] = fmt.distance(f.distance_m);
   const height = fmt.meters(f.max_elevation_m);
@@ -95,7 +102,10 @@ function Detail({ data }: { data: FlightDetail }) {
             thresholds={thresholds}
             staticFit
             label={`Spur von Flug ${f.id}`}
+            photos={photos}
+            {...photo.mapProps}
           />
+          {photo.overlay}
         </div>
         <div className="sl-detail-side">
           <Paneel
@@ -131,6 +141,34 @@ function Detail({ data }: { data: FlightDetail }) {
                 {f.aircraft_sn}
               </Datenfeld>
             </Datenraster>
+          </Paneel>
+          <Paneel titel="Fotos" meta={photos.length ? `${photos.length} Auslösungen` : undefined} koerperPolster>
+            {photos.length ? (
+              <div className="sl-photo-strip">
+                {photos.map((shot) => {
+                  const first = shot.photos[0]!;
+                  return (
+                    <button
+                      key={shot.id}
+                      type="button"
+                      aria-pressed={photo.mapProps.selectedPhotoId === shot.id}
+                      onClick={() => photo.select(shot.id)}
+                    >
+                      {first.thumb_url ? (
+                        <img src={first.thumb_url} alt={`${LENS_LABEL[first.lens]}: ${first.name}`} />
+                      ) : (
+                        <span className="sl-photo-pending">…</span>
+                      )}
+                      <span>{shotTitle(shot)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="sl-muted">
+                Keine Fotos. Pilot 2 lädt Fotos hoch, sobald der Fotospeicher eingerichtet ist.
+              </p>
+            )}
           </Paneel>
           <Paneel titel="Video" koerperPolster>
             {data.video ? (

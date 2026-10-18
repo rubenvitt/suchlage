@@ -568,3 +568,13 @@ Beispiel `live_start_push` (RTMP):
 5. Optional: `POST /media/api/v1/workspaces/{workspace_id}/group-upload-callback` für Dateigruppen.
 
 > **Doku-Fehler:** Das Feld heißt wirklich `tinny_fingerprint` (Tippfehler im Original, so übernehmen). `shoot_position.lat`/`lng` sind als **integer** typisiert; in der Praxis ist double zu erwarten (Feldtest).
+
+**Ergänzungen aus dem Original und der DJI-Demo (17.10.2026):**
+
+- **Modul `media`:** Parameter `{autoUploadPhoto: boolean, autoUploadPhotoType: 0 (Original) | 1 (Vorschaubild), autoUploadVideo: boolean}`, alle optional. Vorher Workspace-ID und Modul `thing` setzen. JS-Schnittstellen: `mediaSetAutoUploadPhoto(bool)`, `mediaGetAutoUploadPhoto()`, `mediaSetUploadPhotoType(int)`, `mediaGetUploadPhotoType()`, `mediaSetAutoUploadVideo(bool)`, `mediaGetAutoUploadVideo()`, `mediaSetDownloadOwner(0 eigene RC | 1 andere)`, `mediaGetDownloadOwner()`.
+- **`tiny-fingerprints`:** Body `{"tiny_fingerprints": ["…"]}`, Antwort `data.tiny_fingerprints` = die bekannten aus der Anfrage. Beispielwert: `5aec4c6e78052bf38fab901bcd1a2319_2021_12_8_22_13_10`.
+- **`fast-upload`:** Body `{fingerprint (Pflicht), name, path, ext{drone_model_key, is_original, payload_model_key, tinny_fingerprint, sn}}`. Die Demo antwortet `code: 0`, wenn der Fingerprint bekannt ist, sonst einen Fehler-Code bei HTTP 200; dann lädt Pilot 2 normal hoch.
+- **`sts`:** ohne Body. `expire` in Sekunden. Die Demo holt bei MinIO per AssumeRole echte Session-Daten und gibt `endpoint` (z. B. `http://192.168.1.1:9000`), `region` (`us-east-1`) und ein festes `object_key_prefix` aus.
+- **`upload-callback`:** Pflicht sind nur `result`, `name`, `object_key`. `relative_altitude` ist als integer typisiert, `absolute_altitude` und `gimbal_yaw_degree` als number. `created_time` ist ein String ohne dokumentiertes Format.
+- **`group-upload-callback`:** Body `{file_group_id, file_count, file_uploaded_count}`, gedacht für Wegpunkt-Missionen. Die Demo antwortet nur.
+- **Suchlage (M3):** Garage statt MinIO, ohne STS. Die Umsetzung steht in `docs/superpowers/plans/2026-10-17-m3-fotos.md`.
