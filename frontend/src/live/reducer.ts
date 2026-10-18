@@ -134,9 +134,10 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
       // Dieselbe Auslösung kommt zweimal: beim Upload und mit fertigem Vorschaubild.
       return { ...s, photoShots: { ...s.photoShots, [e.shot.id]: e.shot } };
     case 'missions_changed':
-      // Gelöscht oder umgehängt: Fotos und letzter Flug kommen wieder aus den neu geladenen Listen
-      // bzw. dem nächsten Flugende, wie nach einem Neuladen. Laufende Flüge lassen sich nicht löschen.
-      return { ...s, photoShots: {}, ended: {} };
+      // Gelöscht oder umgehängt: Die Fotos kommen aus der neu geladenen Liste. Der letzte Flug bleibt
+      // (das Ereignis kommt bei jeder Einsatzänderung); ein gelöschter steht bis zur nächsten Landung
+      // oder zum Neuladen noch als „Letzter Flug“ da. Laufende Flüge lassen sich nicht löschen.
+      return { ...s, photoShots: {} };
     default:
       // Ein lange offener Tab kann einen neueren Server erleben; dessen neue Ereignisse lassen den Stand stehen.
       console.warn('Unbekanntes Live-Ereignis – übersprungen');

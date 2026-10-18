@@ -113,7 +113,7 @@ test('Auslösungen aus dem Strom: neue kommen dazu, dieselbe ID ersetzt die alte
   expect(resnap.photoShots).toEqual({});
 });
 
-test('missions_changed leert Auslösungen und letzten Flug, laufende Flüge bleiben', () => {
+test('missions_changed leert Auslösungen, letzter und laufende Flüge bleiben', () => {
   const ended = applyEvent(flying(), ev('flight_ended'), 0);
   const s = applyEvent(applyEvent(ended, ev('flight_started'), 0), ev('photo_shot'), 0);
   expect(Object.keys(s.ended)).not.toHaveLength(0);
@@ -121,7 +121,13 @@ test('missions_changed leert Auslösungen und letzten Flug, laufende Flüge blei
   expect(Object.keys(s.flights)).not.toHaveLength(0);
   const changed = applyEvent(s, { type: 'missions_changed' }, 0);
   expect(changed.photoShots).toEqual({});
-  expect(changed.ended).toEqual({});
+  expect(changed.ended).toBe(s.ended);
   expect(changed.flights).toBe(s.flights);
   expect(changed.mapElements).toBe(s.mapElements);
+});
+
+test('nach der Landung steht „Letzter Flug“ auch nach Einsatzänderungen noch da', () => {
+  const landed = applyEvent(flying(), ev('flight_ended'), 0);
+  const closed = applyEvent(landed, { type: 'missions_changed' }, 0);
+  expect(closed.ended['ACSIM0001']).toBe(landed.ended['ACSIM0001']);
 });
