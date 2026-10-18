@@ -8,22 +8,12 @@ import { resolveScope, type MissionScope } from './scope';
  * Einsätze sind bekannt; vorher wäre der Scope stillschweigend „ohne Einsatz“. Ein gescheiterter
  * Neuabruf behält die alten Daten und bleibt `ready`.
  */
-export function useMissionScope(): {
-  scope: MissionScope;
-  setScope: (param: string) => void;
-  ready: boolean;
-} {
-  const [params, setParams] = useSearchParams();
+export function useMissionScope(): { scope: MissionScope; ready: boolean } {
+  const [params] = useSearchParams();
   const kiosk = useMe().data?.role === 'kiosk';
   const { data } = useMissions();
   const param = kiosk ? null : params.get('einsatz');
   // Stabile Referenz: Die Kartendaten hängen am Scope und sollen nicht jede Sekunde neu entstehen.
   const scope = useMemo(() => resolveScope(param, data ?? []), [param, data]);
-  const setScope = (param: string) =>
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('einsatz', param);
-      return next;
-    });
-  return { scope, setScope, ready: data !== undefined };
+  return { scope, ready: data !== undefined };
 }

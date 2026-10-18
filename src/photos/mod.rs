@@ -95,6 +95,13 @@ impl PhotoHub {
             .is_some())
     }
 
+    /// Löscht das Objekt; fehlt es schon, ist das auch erledigt.
+    pub async fn delete_object(&self, object_key: &str) -> Result<(), AppError> {
+        let cfg = self.storage()?;
+        let (bucket, creds) = server_access(&cfg);
+        s3::delete(&self.http, &bucket, &creds, object_key).await
+    }
+
     /// Flug, zu dem eine Aufnahme gehört.
     pub async fn flight_at(
         &self,

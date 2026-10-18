@@ -1,9 +1,10 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
-import { Route, Routes } from 'react-router';
-import { flightDetail } from '../contract/fixtures.generated';
+import { Route, Routes, useLocation } from 'react-router';
+import { queryKeys } from '../api/queries';
+import { flightDetail, meAdmin } from '../contract/fixtures.generated';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
 import { server } from '../test/server';
@@ -23,15 +24,24 @@ vi.mock('../map/SituationMap', () => ({
 }));
 vi.mock('../shell/Frame', () => ({ Frame: (p: { children: ReactNode }) => <>{p.children}</> }));
 
+function Address() {
+  const { pathname, search } = useLocation();
+  return <output aria-label="Adresse">{pathname + search}</output>;
+}
+
 const page = (route = '/flights/6') =>
   renderWithApp(
     <LiveProvider store={createLiveStore()}>
       <Routes>
         <Route path="/flights/:id" element={<FlightDetailPage />} />
+        <Route path="/flights" element={<p>Flugliste</p>} />
       </Routes>
+      <Address />
     </LiveProvider>,
     { route },
   );
+
+const asAdmin = () => server.use(http.get('/api/me', () => HttpResponse.json(meAdmin)));
 
 test('Detail zeigt Spur, Kennzahlen und Video mit Download', async () => {
   page();
@@ -101,4 +111,112 @@ test('ohne Fotos sagt das Detail, woher sie kämen', async () => {
   server.use(http.get('/api/flights/:id/photos', () => HttpResponse.json([])));
   page();
   expect(await screen.findByText(/Keine Fotos/)).toBeInTheDocument();
+});
+
+test('Bedienung sieht keine Löschknöpfe', async () => {
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: /DJI_20261017143012_0001_T\.JPG/ }));
+  expect(screen.getByRole('region', { name: /^Foto / })).toBeInTheDocument();
+  for (const name of ['Flug löschen …', 'Video löschen …', 'Foto löschen …'])
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+});
+
+test('„Flug löschen …“ fragt nach, nennt was mitgeht, und führt danach zur Flugliste', async () => {
+  asAdmin();
+  const deleted = vi.fn();
+  server.use(http.delete('/api/flights/:id', ({ params }) => (deleted(params.id), new HttpResponse(null, { status: 204 }))));
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: 'Flug löschen …' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Flug 6 löschen?' });
+  expect(dialog).toHaveTextContent('Spur, Video und 2 Auslösungen');
+  expect(deleted).not.toHaveBeenCalled();
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Endgültig löschen' }));
+  expect(await screen.findByText('Flugliste')).toBeInTheDocument();
+  expect(deleted).toHaveBeenCalledWith('6');
+  expect(screen.getByLabelText('Adresse')).toHaveTextContent(/^\/flights$/);
+});
+
+test('Flug löschen zeigt den Text des Servers', async () => {
+  asAdmin();
+  server.use(
+    http.delete('/api/flights/:id', () =>
+      HttpResponse.json({ error: 'Ein laufender Flug lässt sich nicht löschen' }, { status: 422 }),
+    ),
+  );
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: 'Flug löschen …' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Endgültig löschen' }));
+  expect(await screen.findByText('Ein laufender Flug lässt sich nicht löschen')).toBeInTheDocument();
+  expect(screen.getByLabelText('Adresse')).toHaveTextContent('/flights/6');
+  // Abbrechen und wieder öffnen: Der alte Fehler steht nicht mehr im Dialog.
+  await userEvent.click(screen.getByRole('button', { name: 'Abbrechen' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Flug löschen …' }));
+  expect(await screen.findByRole('dialog', { name: 'Flug 6 löschen?' })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.queryByText('Ein laufender Flug lässt sich nicht löschen')).not.toBeInTheDocument(),
+  );
+});
+
+test('während des Flugs keine Löschknöpfe für Flug und Video', async () => {
+  asAdmin();
+  const flight = { ...flightDetail.flight, ended_at_ms: null, end_reason: null };
+  server.use(http.get('/api/flights/:id', () => HttpResponse.json({ ...flightDetail, flight })));
+  page();
+  expect(await screen.findByLabelText('Flugvideo')).toBeInTheDocument();
+  await userEvent.click(await screen.findByRole('button', { name: /DJI_20261017143012_0001_T\.JPG/ }));
+  // Die Verwaltung ist angemeldet: Fotos lassen sich löschen, Flug und Video erst nach der Landung.
+  expect(await screen.findByRole('button', { name: 'Foto löschen …' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Flug löschen …' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Video löschen …' })).not.toBeInTheDocument();
+});
+
+test('„Video löschen …“ löscht nur die Aufzeichnung und zeigt Fehler des Servers', async () => {
+  asAdmin();
+  const deleted = vi.fn();
+  server.use(
+    http.delete('/api/flights/:id/video', () => {
+      deleted();
+      return HttpResponse.json({ error: 'Videoablage nicht eingehängt' }, { status: 503 });
+    }),
+  );
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: 'Video löschen …' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Video von Flug 6 löschen?' });
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Endgültig löschen' }));
+  expect(await within(dialog).findByText('Videoablage nicht eingehängt')).toBeInTheDocument();
+  expect(deleted).toHaveBeenCalledTimes(1);
+});
+
+test('ohne Video kein „Video löschen …“', async () => {
+  asAdmin();
+  server.use(http.get('/api/flights/:id', () => HttpResponse.json({ ...flightDetail, video: null })));
+  page();
+  expect(await screen.findByRole('button', { name: 'Flug löschen …' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Video löschen …' })).not.toBeInTheDocument();
+});
+
+test('„Foto löschen …“ löscht die Auslösung mit allen Linsen', async () => {
+  asAdmin();
+  const deleted = vi.fn();
+  server.use(
+    http.delete('/api/photos/shots/:shot', ({ request }) => (deleted(new URL(request.url).pathname), new HttpResponse(null, { status: 204 }))),
+  );
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: /DJI_20261017143012_0001_T\.JPG/ }));
+  await userEvent.click(screen.getByRole('button', { name: 'Foto löschen …' }));
+  const dialog = await screen.findByRole('dialog', { name: /^Foto .* löschen\?$/ });
+  expect(dialog).toHaveTextContent('alle 3 Linsen');
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Endgültig löschen' }));
+  await waitFor(() =>
+    expect(deleted).toHaveBeenCalledWith('/api/photos/shots/RCSIM0001%2FDJI_20261017143012_0001'),
+  );
+});
+
+test('ein anderswo gelöschter Flug führt beim Neuladen zur Flugliste statt zu einem Fehler', async () => {
+  const { client } = page();
+  expect(await screen.findByRole('link', { name: 'Video herunterladen' })).toBeInTheDocument();
+  server.use(http.get('/api/flights/:id', () => HttpResponse.json({ error: 'x' }, { status: 404 })));
+  await client.invalidateQueries({ queryKey: queryKeys.flight(6) });
+  expect(await screen.findByText('Flugliste')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

@@ -386,8 +386,8 @@ pub fn photo_shots() -> Vec<PhotoShot> {
         id,
         name: name.into(),
         lens,
-        thumb_url: thumb.then(|| format!("/api/photos/{id}/thumb")),
-        original_url: format!("/api/photos/{id}/original"),
+        thumb_url: thumb.then(|| format!("/api/photos/{id}/thumb?v=1792248620000")),
+        original_url: format!("/api/photos/{id}/original?v=1792248620000"),
     };
     vec![
         PhotoShot {

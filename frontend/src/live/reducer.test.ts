@@ -101,7 +101,7 @@ test('Kartenelemente: Liste ersetzt, Einzelnes ersetzt nach ID, Löschen entfern
   expect(applyEvent(deleted, { type: 'map_elements', elements: [] }, 0).mapElements).toEqual({});
 });
 
-test('Auslösungen aus dem Strom: neue kommen dazu, dieselbe ID ersetzt die alte, ein Snapshot lässt sie stehen', () => {
+test('Auslösungen aus dem Strom: neue kommen dazu, dieselbe ID ersetzt die alte, ein Snapshot leert sie', () => {
   const shot = ev('photo_shot');
   const once = applyEvent(flying(), shot, 0);
   expect(Object.keys(once.photoShots)).toEqual([shot.shot.id]);
@@ -109,5 +109,25 @@ test('Auslösungen aus dem Strom: neue kommen dazu, dieselbe ID ersetzt die alte
   const updated = applyEvent(once, { type: 'photo_shot', shot: thumb }, 0);
   expect(updated.photoShots[shot.shot.id]!.photos[0]!.thumb_url).toBe(`/x/${thumb.photos[0]!.id}`);
   const resnap = applyEvent(updated, { type: 'snapshot', snapshot: snapshotFlying }, 0);
-  expect(resnap.photoShots).toBe(updated.photoShots);
+  // Der Snapshot lädt die Fotoliste neu; eine in der Lücke gelöschte Auslösung bliebe sonst auf der Karte.
+  expect(resnap.photoShots).toEqual({});
+});
+
+test('missions_changed leert Auslösungen, letzter und laufende Flüge bleiben', () => {
+  const ended = applyEvent(flying(), ev('flight_ended'), 0);
+  const s = applyEvent(applyEvent(ended, ev('flight_started'), 0), ev('photo_shot'), 0);
+  expect(Object.keys(s.ended)).not.toHaveLength(0);
+  expect(Object.keys(s.photoShots)).not.toHaveLength(0);
+  expect(Object.keys(s.flights)).not.toHaveLength(0);
+  const changed = applyEvent(s, { type: 'missions_changed' }, 0);
+  expect(changed.photoShots).toEqual({});
+  expect(changed.ended).toBe(s.ended);
+  expect(changed.flights).toBe(s.flights);
+  expect(changed.mapElements).toBe(s.mapElements);
+});
+
+test('nach der Landung steht „Letzter Flug“ auch nach Einsatzänderungen noch da', () => {
+  const landed = applyEvent(flying(), ev('flight_ended'), 0);
+  const closed = applyEvent(landed, { type: 'missions_changed' }, 0);
+  expect(closed.ended['ACSIM0001']).toBe(landed.ended['ACSIM0001']);
 });

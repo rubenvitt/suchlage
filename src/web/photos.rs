@@ -3,14 +3,14 @@
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::header;
+use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::app::AppState;
-use crate::auth::session::{Operator, Viewer};
+use crate::auth::session::{Admin, Operator, Viewer};
 use crate::contract::PhotoShot;
 use crate::error::AppError;
 use crate::time::now_ms;
@@ -24,6 +24,10 @@ pub fn routes() -> Router<AppState> {
         .route("/photos", get(recent))
         .route("/photos/{id}/thumb", get(thumb))
         .route("/photos/{id}/original", get(original))
+        .route(
+            "/photos/shots/{shot_id}",
+            axum::routing::delete(delete_shot),
+        )
         .route("/flights/{id}/photos", get(of_flight))
 }
 
@@ -72,6 +76,17 @@ async fn thumb(
         .header(header::CACHE_CONTROL, "private, max-age=86400, immutable")
         .body(Body::from(bytes))
         .map_err(|e| AppError::Internal(e.to_string()))
+}
+
+/// Alle Dateien einer Auslösung. Die ID enthält `/` (`RC1/DJI_…`) und kommt URL-kodiert.
+async fn delete_shot(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(shot_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_shot(&shot_id).await }).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -198,10 +213,11 @@ mod tests {
             original.clone(),
         );
         let mut shots = app.state.photos.subscribe();
+        let at = now_ms();
         let (id, first) = app
             .state
             .photos
-            .accept(photo("DJI_1_T.JPG", None, now_ms()))
+            .accept(photo("DJI_1_T.JPG", None, at))
             .await
             .unwrap();
         assert_eq!(
@@ -215,15 +231,16 @@ mod tests {
             .unwrap();
         assert_eq!(
             ready.photos[0].thumb_url.as_deref(),
-            Some(format!("/api/photos/{id}/thumb").as_str())
+            Some(format!("/api/photos/{id}/thumb?v={at}").as_str())
         );
 
+        // Die Version in der Adresse ist nur für den Browser-Cache; die Handler übergehen sie.
         let viewer = app.cookie(Role::Kiosk).await;
         let res = app
             .router
             .clone()
             .oneshot(with_cookie(
-                get(&format!("/api/photos/{id}/thumb")),
+                get(ready.photos[0].thumb_url.as_deref().unwrap()),
                 &viewer,
             ))
             .await
@@ -245,7 +262,7 @@ mod tests {
             .router
             .clone()
             .oneshot(with_cookie(
-                get(&format!("/api/photos/{id}/original?download=1")),
+                get(&format!("{}&download=1", ready.photos[0].original_url)),
                 &admin,
             ))
             .await

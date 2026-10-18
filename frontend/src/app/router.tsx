@@ -7,8 +7,8 @@ import LoginPage from '../auth/LoginPage';
 import { FlightDetailPage } from '../flights/FlightDetailPage';
 import { FlightsPage } from '../flights/FlightsPage';
 import { MissionsPage } from '../missions/MissionsPage';
+import { EntryPage } from '../missions/WelcomePage';
 import { Frame } from '../shell/Frame';
-import { LagePage } from '../views/LagePage';
 import { RequireRole } from './RequireRole';
 import { RouteError } from './RouteError';
 import { SessionLayout } from './SessionLayout';
@@ -25,7 +25,7 @@ export const routes = [
       {
         element: <SessionLayout />,
         children: [
-          { path: '/', element: <LagePage /> },
+          { path: '/', element: <EntryPage /> },
           {
             path: '/einsaetze',
             element: (

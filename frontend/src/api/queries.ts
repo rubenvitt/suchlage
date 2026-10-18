@@ -1,4 +1,4 @@
-import { skipToken, useQuery } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AuthOptions } from '../contract/generated/AuthOptions';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
@@ -6,11 +6,15 @@ import type { Health } from '../contract/generated/Health';
 import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
+import type { MissionContents } from '../contract/generated/MissionContents';
+import type { MissionCreate } from '../contract/generated/MissionCreate';
+import type { MissionUpdate } from '../contract/generated/MissionUpdate';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
+import type { SectionCreate } from '../contract/generated/SectionCreate';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
 import type { SettingsView } from '../contract/generated/SettingsView';
 import { scopeQuery, type MissionScope } from '../missions/scope';
-import { ApiError, apiGet } from './client';
+import { ApiError, apiGet, apiSend } from './client';
 
 export const queryKeys = {
   me: ['me'] as const,
@@ -100,3 +104,91 @@ export const useFlightPhotos = (id: number | null) =>
     queryKey: queryKeys.flightPhotos(id),
     queryFn: id == null ? skipToken : () => apiGet<PhotoShot[]>(`/api/flights/${id}/photos`),
   });
+
+/** Schreibt am Einsatz; danach laden die Einsätze neu (auch nach einem Fehler: der Stand kann sich geändert haben). */
+function useMissionWrite<V, R>(send: (v: V) => Promise<R>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: send,
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
+  });
+}
+
+/** Einsatz anlegen (vorbereitet). */
+export const useCreateMission = () =>
+  useMissionWrite((input: MissionCreate) => apiSend<Mission>('POST', '/api/missions', input));
+/** Vorbereiteten Einsatz starten; 409, wenn schon einer läuft. */
+export const useStartMission = () =>
+  useMissionWrite((id: number) => apiSend<Mission>('POST', `/api/missions/${id}/start`));
+/** Laufenden Einsatz abschließen; 422 während eines Flugs. */
+export const useCloseMission = () =>
+  useMissionWrite((id: number) => apiSend<Mission>('POST', `/api/missions/${id}/close`));
+export const useUpdateMission = () =>
+  useMissionWrite(({ id, ...body }: MissionUpdate & { id: number }) =>
+    apiSend<Mission>('PUT', `/api/missions/${id}`, body),
+  );
+export const useAddSection = () =>
+  useMissionWrite(({ id, ...body }: SectionCreate & { id: number }) =>
+    apiSend<Mission>('POST', `/api/missions/${id}/sections`, body),
+  );
+/**
+ * In diesem Tab gelöschte Einsätze. Ihre offene Ansicht verlässt der Lösch-Dialog selbst; die
+ * Umleitung für verschwundene Einsätze (`MissionHeader`) liefe sonst gegen dessen Navigation, die
+ * React als Übergang später anwendet als das neu geladene Einsatzverzeichnis.
+ */
+export const deletedHere = new Set<number>();
+
+/**
+ * Einsatz mit allem, was dazugehört, löschen (nur Verwaltung); 422 laufend, 503 Ablage fehlt.
+ * `onDeleted` läuft vor dem Neuladen: Die offene Ansicht des Einsatzes fiele sonst kurz auf den laufenden.
+ */
+export function useDeleteMission(onDeleted: () => void) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<void>('DELETE', `/api/missions/${id}`),
+    onSuccess: (_, id) => {
+      deletedHere.add(id);
+      onDeleted();
+      for (const queryKey of [queryKeys.missions, queryKeys.flights, queryKeys.photos])
+        void client.invalidateQueries({ queryKey });
+    },
+  });
+}
+/** Mengen für die Lösch-Rückfrage. */
+export const useMissionContents = (id: number) =>
+  useQuery({
+    queryKey: [...queryKeys.missions, id, 'contents'],
+    queryFn: () => apiGet<MissionContents>(`/api/missions/${id}/contents`),
+  });
+
+/**
+ * Flug samt Spur, Video und Fotos löschen (nur Verwaltung); 422 laufend, 503 Ablage fehlt.
+ * `onDeleted` verlässt das Detail vor dem Neuladen, sonst liefe dessen 404-Umleitung dagegen.
+ */
+export function useDeleteFlight(onDeleted: () => void) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<void>('DELETE', `/api/flights/${id}`),
+    onSuccess: () => {
+      onDeleted();
+      for (const queryKey of [queryKeys.missions, queryKeys.flights, queryKeys.photos])
+        void client.invalidateQueries({ queryKey });
+    },
+  });
+}
+/** Nur die Aufzeichnung eines Flugs löschen; danach zeigt das Detail „Kein Video“. */
+export function useDeleteFlightVideo() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<void>('DELETE', `/api/flights/${id}/video`),
+    onSuccess: (_, id) => client.invalidateQueries({ queryKey: queryKeys.flight(id) }),
+  });
+}
+/** Eine Auslösung mit allen Linsen löschen. Die Kennung enthält `/` und geht darum kodiert. */
+export function useDeleteShot() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (shotId: string) => apiSend<void>('DELETE', `/api/photos/shots/${encodeURIComponent(shotId)}`),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.photos }),
+  });
+}

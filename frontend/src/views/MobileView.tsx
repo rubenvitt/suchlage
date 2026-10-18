@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMe } from '../api/queries';
-import { MissionBar } from '../missions/MissionBar';
+import { MissionHeader } from '../missions/MissionHeader';
 import { useMissionScope } from '../missions/useMissionScope';
 import { useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
@@ -24,12 +24,12 @@ export function MobileView() {
   const [follow, setFollow] = useState(true);
   const notice = viewerNoticeOf(state, focus);
   const { data: me } = useMe();
-  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
+  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk', me?.role === 'admin');
 
   return (
     <div className="sl-mobile">
       <div className="sl-mobile-mission">
-        <MissionBar />
+        <MissionHeader />
       </div>
       {notice}
       {focus.gateway && <VideoSlot focus={focus} ready={state.ready} canControl={false} />}

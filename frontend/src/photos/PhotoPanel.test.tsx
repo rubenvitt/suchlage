@@ -8,15 +8,15 @@ const [three, pending] = photoShots as [(typeof photoShots)[0], (typeof photoSho
 
 test('Wärmebild zuerst, der Umschalter wechselt die Linse samt Download', async () => {
   renderWithApp(<PhotoPanel shot={three} canOpenOriginal onClose={() => {}} />);
-  expect(screen.getByRole('img')).toHaveAttribute('src', '/api/photos/11/thumb');
+  expect(screen.getByRole('img')).toHaveAttribute('src', '/api/photos/11/thumb?v=1792248620000');
   expect(screen.getByRole('img')).toHaveAccessibleName('Wärme: DJI_20261017143012_0001_T.JPG');
   await userEvent.click(screen.getByRole('radio', { name: 'Zoom' }));
-  expect(screen.getByRole('img')).toHaveAttribute('src', '/api/photos/13/thumb');
+  expect(screen.getByRole('img')).toHaveAttribute('src', '/api/photos/13/thumb?v=1792248620000');
   expect(screen.getByRole('link', { name: 'Herunterladen' })).toHaveAttribute(
     'href',
-    '/api/photos/13/original?download=1',
+    '/api/photos/13/original?v=1792248620000&download=1',
   );
-  expect(screen.getByRole('link', { name: 'Original öffnen' })).toHaveAttribute('href', '/api/photos/13/original');
+  expect(screen.getByRole('link', { name: 'Original öffnen' })).toHaveAttribute('href', '/api/photos/13/original?v=1792248620000');
 });
 
 test('ohne Konto kein Original; ohne Vorschaubild und Ort ein Hinweis; Schließen meldet sich', async () => {

@@ -1,13 +1,13 @@
 //! Flugliste und Flugdetail. Nur für Konten: das Großbild zeigt die Lage, nicht das Archiv.
 
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::app::AppState;
-use crate::auth::session::Operator;
+use crate::auth::session::{Admin, Operator};
 use crate::contract::{FlightDetail, FlightSummary, FlightVideo, TrackPoint};
 use crate::error::AppError;
 use crate::situation::track::TrackBuilder;
@@ -19,8 +19,8 @@ const LIST_LIMIT: i64 = 200;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/flights", get(list))
-        .route("/flights/{id}", get(get_one))
-        .route("/flights/{id}/video", get(video))
+        .route("/flights/{id}", get(get_one).delete(delete_flight))
+        .route("/flights/{id}/video", get(video).delete(delete_video))
 }
 
 #[derive(serde::Deserialize)]
@@ -58,6 +58,27 @@ async fn get_one(
     Path(id): Path<i64>,
 ) -> Result<Json<FlightDetail>, AppError> {
     Ok(Json(detail(&state, id).await?))
+}
+
+/// Flug mit Spur, Video und Fotos.
+async fn delete_flight(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_flight(id).await }).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_video(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_flight_video(id).await }).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(serde::Deserialize)]

@@ -620,22 +620,22 @@ export const liveEvents: LiveEvent[] = [
           "id": 11,
           "lens": "thermal",
           "name": "DJI_20261017143012_0001_T.JPG",
-          "original_url": "/api/photos/11/original",
-          "thumb_url": "/api/photos/11/thumb"
+          "original_url": "/api/photos/11/original?v=1792248620000",
+          "thumb_url": "/api/photos/11/thumb?v=1792248620000"
         },
         {
           "id": 12,
           "lens": "wide",
           "name": "DJI_20261017143012_0001_W.JPG",
-          "original_url": "/api/photos/12/original",
-          "thumb_url": "/api/photos/12/thumb"
+          "original_url": "/api/photos/12/original?v=1792248620000",
+          "thumb_url": "/api/photos/12/thumb?v=1792248620000"
         },
         {
           "id": 13,
           "lens": "zoom",
           "name": "DJI_20261017143012_0001_Z.JPG",
-          "original_url": "/api/photos/13/original",
-          "thumb_url": "/api/photos/13/thumb"
+          "original_url": "/api/photos/13/original?v=1792248620000",
+          "thumb_url": "/api/photos/13/thumb?v=1792248620000"
         }
       ],
       "position": {
@@ -933,22 +933,22 @@ export const photoShots: PhotoShot[] = [
         "id": 11,
         "lens": "thermal",
         "name": "DJI_20261017143012_0001_T.JPG",
-        "original_url": "/api/photos/11/original",
-        "thumb_url": "/api/photos/11/thumb"
+        "original_url": "/api/photos/11/original?v=1792248620000",
+        "thumb_url": "/api/photos/11/thumb?v=1792248620000"
       },
       {
         "id": 12,
         "lens": "wide",
         "name": "DJI_20261017143012_0001_W.JPG",
-        "original_url": "/api/photos/12/original",
-        "thumb_url": "/api/photos/12/thumb"
+        "original_url": "/api/photos/12/original?v=1792248620000",
+        "thumb_url": "/api/photos/12/thumb?v=1792248620000"
       },
       {
         "id": 13,
         "lens": "zoom",
         "name": "DJI_20261017143012_0001_Z.JPG",
-        "original_url": "/api/photos/13/original",
-        "thumb_url": "/api/photos/13/thumb"
+        "original_url": "/api/photos/13/original?v=1792248620000",
+        "thumb_url": "/api/photos/13/thumb?v=1792248620000"
       }
     ],
     "position": {
@@ -971,7 +971,7 @@ export const photoShots: PhotoShot[] = [
         "id": 14,
         "lens": "thermal",
         "name": "DJI_20261017143140_0002_T.JPG",
-        "original_url": "/api/photos/14/original",
+        "original_url": "/api/photos/14/original?v=1792248620000",
         "thumb_url": null
       }
     ],

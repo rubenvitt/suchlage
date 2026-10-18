@@ -2,6 +2,7 @@ import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   liveEvents,
+  meAdmin,
   snapshotEmpty,
   snapshotFlying,
   snapshotGatewayOnly,
@@ -19,6 +20,7 @@ import type { MapElement } from '../contract/generated/MapElement';
 import type { SituationSnapshot } from '../contract/generated/SituationSnapshot';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
+import { MissionHeader } from '../missions/MissionHeader';
 import { SyncCell } from '../shell/SyncCell';
 import { renderWithApp } from '../test/render';
 import { WorkstationView } from './WorkstationView';
@@ -58,7 +60,9 @@ function show(
   store.setStatus(status);
   return renderWithApp(
     <LiveProvider store={store}>
+      {/* Wie im Kopf der Lage: Live-Strom und Einsatz. */}
       <SyncCell />
+      <MissionHeader />
       <WorkstationView />
     </LiveProvider>,
     { route },
@@ -273,8 +277,18 @@ test('Fotos: Liste und Strom auf der Karte, ein Klick öffnet die Vorschau mit O
   expect(karte.props!.selectedPhotoId).toBe(id);
   const panel = await screen.findByRole('region', { name: /^Foto / });
   expect(within(panel).getByRole('link', { name: 'Herunterladen' })).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: 'Foto löschen …' })).toBeNull();
   await userEvent.click(within(panel).getByRole('button', { name: 'Foto schließen' }));
   expect(screen.queryByRole('region', { name: /^Foto / })).toBeNull();
+});
+
+test('Verwaltung löscht ein Foto auch auf der Lage: Fotos ohne Flug hätten sonst keinen Löschknopf', async () => {
+  server.use(http.get('/api/me', () => HttpResponse.json(meAdmin)));
+  show(snapshotFlying, [eventOf('photo_shot')]);
+  await vi.waitFor(() => expect(karte.props!.photos).toHaveLength(2));
+  act(() => karte.props!.onPhotoClick!(karte.props!.photos![0]!.id));
+  const panel = await screen.findByRole('region', { name: /^Foto / });
+  expect(await within(panel).findByRole('button', { name: 'Foto löschen …' })).toBeInTheDocument();
 });
 
 const elementOf = (id: string, mission_id: number | null): MapElement => ({
@@ -301,7 +315,7 @@ test('unter „ohne Einsatz“ stehen nur die Elemente ohne Einsatz', async () =
     'open',
     '/?einsatz=ohne',
   );
-  await screen.findByRole('combobox', { name: 'Einsatz wählen' });
+  await screen.findByText('Ohne Einsatz');
   expect(karte.props!.elements!.map((e) => e.id)).toEqual(['frei']);
 });
 
@@ -329,7 +343,7 @@ test('bei abgeschlossenem Einsatz sind die Zeichenwerkzeuge aus', async () => {
   const closed: Mission[] = missionFixtures().map((m) => (m.id === 1 ? { ...m, state: 'closed' } : m));
   server.use(...missionHandlers(closed));
   show(snapshotFlying, [], 'open', '/?einsatz=1');
-  expect(await screen.findByText('Abgeschlossen')).toBeInTheDocument();
+  expect(await screen.findByText(/^Archiv:/)).toBeInTheDocument();
   expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
 });
 
@@ -343,7 +357,7 @@ test('ein Element ohne Einsatz lässt sich einem Einsatz zuordnen', async () => 
     }),
   );
   show(snapshotFlying, [elementsEvent(elementOf('frei', null))], 'open', '/?einsatz=ohne');
-  await screen.findByRole('combobox', { name: 'Einsatz wählen' });
+  await screen.findByText('Ohne Einsatz');
   await screen.findByRole('toolbar', { name: 'Zeichnen' });
   await vi.waitFor(() => expect(karte.props!.elements).toHaveLength(1));
   klick(52.4, 10.0, 'frei');

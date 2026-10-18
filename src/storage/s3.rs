@@ -1,4 +1,4 @@
-//! S3 mit Signatur Version 4, nur was Suchlage braucht: `HEAD`, `GET` und `PUT` eines Objekts im
+//! S3 mit Signatur Version 4, nur was Suchlage braucht: `HEAD`, `GET`, `PUT` und `DELETE` eines Objekts im
 //! Path-Style (`<endpoint>/<bucket>/<key>`). Kein AWS-SDK: Das zöge einen zweiten HTTP- und
 //! TLS-Stack herein. Die Signatur ist eine reine Funktion und gegen die AWS-Testvektoren geprüft.
 
@@ -272,6 +272,21 @@ pub async fn put(
     }
 }
 
+/// Löscht das Objekt; fehlt es schon, ist das auch erledigt.
+pub async fn delete(
+    http: &reqwest::Client,
+    bucket: &Bucket,
+    creds: &Credentials,
+    key: &str,
+) -> Result<(), AppError> {
+    let res = send(http, bucket, creds, reqwest::Method::DELETE, key, None).await?;
+    if res.status().is_success() || res.status() == reqwest::StatusCode::NOT_FOUND {
+        Ok(())
+    } else {
+        Err(refused(&res))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
@@ -421,6 +436,36 @@ mod tests {
         };
         assert!(matches!(
             head(&http, &bucket, &wrong, "fotos/RC1/DJI_1_T.JPG").await,
+            Err(AppError::Unavailable(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn delete_signs_and_treats_404_as_done() {
+        let (url, seen) = crate::storage::fake::start().await;
+        let (bucket, creds) = crate::storage::server_access(&crate::storage::fake::settings(&url));
+        let http = reqwest::Client::new();
+        put(
+            &http,
+            &bucket,
+            &creds,
+            "fotos/RC1/a.jpg",
+            b"x".to_vec(),
+            "image/jpeg",
+        )
+        .await
+        .unwrap();
+        delete(&http, &bucket, &creds, "fotos/RC1/a.jpg")
+            .await
+            .unwrap();
+        assert!(seen.lock().unwrap().objects.is_empty());
+        // Zweiter Versuch trifft auf 404 und gilt als erledigt.
+        delete(&http, &bucket, &creds, "fotos/RC1/a.jpg")
+            .await
+            .unwrap();
+        seen.lock().unwrap().down = true;
+        assert!(matches!(
+            delete(&http, &bucket, &creds, "fotos/RC1/a.jpg").await,
             Err(AppError::Unavailable(_))
         ));
     }

@@ -9,6 +9,7 @@ import { PhotoPanel } from './PhotoPanel';
 export function usePhotoSelection(
   photos: PhotoShot[],
   canOpenOriginal: boolean,
+  canDelete = false,
 ): {
   mapProps: { selectedPhotoId: string | null; onPhotoClick: (id: string) => void };
   overlay: ReactNode;
@@ -20,7 +21,9 @@ export function usePhotoSelection(
     mapProps: { selectedPhotoId: shot?.id ?? null, onPhotoClick: setSelectedId },
     overlay: shot && (
       // Neuer Schlüssel je Auslösung: Die Linsenwahl beginnt wieder beim Wärmebild.
-      <PhotoPanel key={shot.id} shot={shot} canOpenOriginal={canOpenOriginal} onClose={() => setSelectedId(null)} />
+      <PhotoPanel key={shot.id} shot={shot} canOpenOriginal={canOpenOriginal}
+        canDelete={canDelete}
+        onClose={() => setSelectedId(null)} />
     ),
     select: setSelectedId,
   };

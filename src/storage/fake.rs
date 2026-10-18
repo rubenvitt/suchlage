@@ -26,6 +26,10 @@ pub struct Seen {
     pub deleted: Vec<String>,
     /// Pfad (`/<bucket>/<key>`) → Inhalt
     pub objects: HashMap<String, Vec<u8>>,
+    /// Simuliert einen nicht erreichbaren Fotospeicher: S3 antwortet mit 503.
+    pub down: bool,
+    /// Simuliert einen hängenden Fotospeicher: S3 antwortet nie.
+    pub hang: bool,
 }
 
 pub type Shared = Arc<Mutex<Seen>>;
@@ -96,11 +100,17 @@ async fn s3(State(seen): State<Shared>, req: Request) -> Response {
     if !signed {
         return StatusCode::FORBIDDEN.into_response();
     }
+    if seen.lock().unwrap().hang {
+        std::future::pending::<()>().await;
+    }
     let (method, path) = (req.method().clone(), req.uri().path().to_string());
     let body: Bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
     let mut s = seen.lock().unwrap();
+    if s.down {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     match method {
         Method::PUT => {
             s.objects.insert(path, body.to_vec());
@@ -112,6 +122,10 @@ async fn s3(State(seen): State<Shared>, req: Request) -> Response {
         },
         Method::GET => match s.objects.get(&path) {
             Some(o) => o.clone().into_response(),
+            None => StatusCode::NOT_FOUND.into_response(),
+        },
+        Method::DELETE => match s.objects.remove(&path) {
+            Some(_) => StatusCode::NO_CONTENT.into_response(),
             None => StatusCode::NOT_FOUND.into_response(),
         },
         _ => StatusCode::METHOD_NOT_ALLOWED.into_response(),

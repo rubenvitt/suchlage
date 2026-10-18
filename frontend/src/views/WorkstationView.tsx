@@ -1,7 +1,6 @@
 import { Button } from 'antd';
 import { useState } from 'react';
 import { useMe } from '../api/queries';
-import { MissionBar } from '../missions/MissionBar';
 import { useMissionScope } from '../missions/useMissionScope';
 import { Segmentleiste } from '../components/instrument';
 import { useServerNow } from '../live/LiveProvider';
@@ -54,7 +53,7 @@ export function WorkstationView() {
     scope,
     onStartDrawing: () => setFollow(false),
   });
-  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk');
+  const photo = usePhotoSelection(map.photos, me != null && me.role !== 'kiosk', me?.role === 'admin');
   const empty = emptyOf(state, focus);
 
   return (
@@ -69,9 +68,6 @@ export function WorkstationView() {
           {...editor.mapProps}
           {...photo.mapProps}
         />
-        <div className="sl-view-mission">
-          <MissionBar />
-        </div>
         {empty && <div className="sl-view-notice">{empty}</div>}
         {editor.overlay}
         {photo.overlay}

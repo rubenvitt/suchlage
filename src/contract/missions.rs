@@ -62,3 +62,21 @@ pub struct MissionAssign {
     #[ts(type = "number")]
     pub mission_id: i64,
 }
+
+/// Name und Ort eines Einsatzes ändern.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MissionUpdate {
+    pub name: String,
+    pub location: Option<String>,
+}
+
+/// Was an einem Einsatz hängt (Anzahl Flüge, Fotodateien, Kartenelemente, Videoabschnitte).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MissionContents {
+    pub flights: u32,
+    pub photos: u32,
+    pub map_elements: u32,
+    pub video_segments: u32,
+}

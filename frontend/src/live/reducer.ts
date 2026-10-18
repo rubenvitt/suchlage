@@ -27,7 +27,10 @@ export interface LiveState {
   system: SystemStatus | null;
   /** Kartenelemente nach ID; ein Snapshot lässt sie stehen, die Liste danach ersetzt sie. */
   mapElements: Record<string, MapElement>;
-  /** Auslösungen aus dem Live-Strom nach ID; die Liste davor lädt `useMapPhotos`. */
+  /**
+   * Auslösungen aus dem Live-Strom nach ID; die Liste davor lädt `useMapPhotos`. Snapshot und
+   * `missions_changed` leeren sie: Die Liste lädt dann neu, und eine gelöschte Auslösung bliebe sonst stehen.
+   */
   photoShots: Record<string, PhotoShot>;
 }
 
@@ -73,7 +76,7 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
         streams: byKey(snap.streams, (st) => st.gateway_sn),
         system: snap.system,
         mapElements: s.mapElements,
-        photoShots: s.photoShots,
+        photoShots: {},
       };
     }
     case 'gateway':
@@ -131,7 +134,10 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
       // Dieselbe Auslösung kommt zweimal: beim Upload und mit fertigem Vorschaubild.
       return { ...s, photoShots: { ...s.photoShots, [e.shot.id]: e.shot } };
     case 'missions_changed':
-      return s;
+      // Gelöscht oder umgehängt: Die Fotos kommen aus der neu geladenen Liste. Der letzte Flug bleibt
+      // (das Ereignis kommt bei jeder Einsatzänderung); ein gelöschter steht bis zur nächsten Landung
+      // oder zum Neuladen noch als „Letzter Flug“ da. Laufende Flüge lassen sich nicht löschen.
+      return { ...s, photoShots: {} };
     default:
       // Ein lange offener Tab kann einen neueren Server erleben; dessen neue Ereignisse lassen den Stand stehen.
       console.warn('Unbekanntes Live-Ereignis – übersprungen');

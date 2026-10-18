@@ -13,6 +13,10 @@ use crate::error::AppError;
 use crate::store::map_elements as store;
 use crate::store::missions;
 
+/// Elemente ohne Einsatz verfallen so lange nach ihrer letzten Änderung.
+pub const UNASSIGNED_TTL_MS: i64 = 24 * 3_600_000;
+const CLEANUP_EVERY: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 /// Puffer je Empfänger. Wer mehr verpasst, bekommt die ganze Liste neu.
 const CHANGES_BUFFERED: usize = 256;
 
@@ -212,6 +216,21 @@ impl MapHub {
         Ok(())
     }
 
+    /// Löscht Elemente ohne Einsatz, zuletzt geändert vor `cutoff_ms`, und verteilt es. Unter der
+    /// Schreibsperre: Eine gleichzeitige Änderung oder Zuordnung geht nicht verloren.
+    pub async fn delete_unassigned_older_than(&self, cutoff_ms: i64) -> Result<usize, AppError> {
+        let _serial = self.writes.lock().await;
+        let ids = store::unassigned_older_than(&self.pool, cutoff_ms).await?;
+        let mut deleted = 0;
+        for id in ids {
+            if store::delete(&self.pool, &id).await? {
+                self.publish(MapChange::Deleted { id });
+                deleted += 1;
+            }
+        }
+        Ok(deleted)
+    }
+
     /// Ordnet ein Element „ohne Einsatz“ nachträglich zu, auch einem abgeschlossenen Einsatz.
     pub async fn assign(&self, id: &str, mission_id: i64) -> Result<MapElement, AppError> {
         let _serial = self.writes.lock().await;
@@ -244,9 +263,26 @@ impl MapHub {
         }
     }
 
-    fn publish(&self, change: MapChange) {
+    /// Auch für Löschungen am Hub vorbei (ganzer Einsatz in einer Transaktion).
+    pub fn publish(&self, change: MapChange) {
         // Ohne Empfänger (kein Browser, kein Pilot) geht die Änderung nur in die Datenbank.
         let _ = self.changes.send(change);
+    }
+}
+
+/// Räumt Elemente ohne Einsatz nach 24 h auf, bis der Server stoppt; der erste Lauf folgt gleich.
+pub async fn cleanup_loop(map: MapHub, mut stop: watch::Receiver<bool>) {
+    loop {
+        let cutoff = crate::time::now_ms() - UNASSIGNED_TTL_MS;
+        match map.delete_unassigned_older_than(cutoff).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(n, "Kartenelemente ohne Einsatz gelöscht"),
+            Err(e) => tracing::warn!(error = %e, "Kartenelemente nicht aufgeräumt"),
+        }
+        tokio::select! {
+            () = tokio::time::sleep(CLEANUP_EVERY) => {}
+            _ = stop.changed() => return,
+        }
     }
 }
 
@@ -287,6 +323,48 @@ mod tests {
             origin: e.origin,
             mission_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn old_unassigned_elements_are_deleted_and_announced() {
+        let hub = hub().await;
+        let h = 3_600_000;
+        let now = 100 * h;
+        let old = hub.create(pin(None), now - 25 * h).await.unwrap();
+        let fresh = hub.create(pin(None), now - 23 * h).await.unwrap();
+        let mission = crate::store::missions::create(
+            &hub.pool,
+            &crate::contract::MissionCreate {
+                name: "Wald".into(),
+                location: None,
+            },
+            "u",
+            1,
+        )
+        .await
+        .unwrap()
+        .id;
+        let mut assigned = pin(None);
+        assigned.mission_id = Some(mission);
+        let assigned = hub.create(assigned, now - 25 * h).await.unwrap();
+        let mut rx = hub.subscribe();
+
+        let n = hub
+            .delete_unassigned_older_than(now - UNASSIGNED_TTL_MS)
+            .await
+            .unwrap();
+
+        assert_eq!(n, 1);
+        assert_eq!(rx.recv().await.unwrap(), MapChange::Deleted { id: old.id });
+        let left: Vec<_> = hub
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(left.len(), 2);
+        assert!(left.contains(&fresh.id) && left.contains(&assigned.id));
     }
 
     #[tokio::test]

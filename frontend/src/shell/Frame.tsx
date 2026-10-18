@@ -6,12 +6,20 @@ import { MobileTabs } from './MobileTabs';
 import { Rail } from './Rail';
 
 /** Rahmen jeder angemeldeten Seite: Kopf, je nach Ansicht Rail oder untere Leiste. Das Großbild hat keine Bedienung. */
-export function Frame({ status, children }: { status?: ReactNode; children: ReactNode }) {
+export function Frame({
+  mission,
+  status,
+  children,
+}: {
+  mission?: ReactNode;
+  status?: ReactNode;
+  children: ReactNode;
+}) {
   const { data: me } = useMe();
   const mode = useViewMode();
   return (
     <div className="sl-frame" data-mode={mode}>
-      <Header status={status} me={mode === 'kiosk' ? undefined : me} />
+      <Header mission={mission} status={status} me={mode === 'kiosk' ? undefined : me} />
       {mode === 'workstation' && me && <Rail role={me.role} />}
       <main className="sl-main">{children}</main>
       {mode === 'mobile' && <MobileTabs />}

@@ -11,6 +11,9 @@ async function devLogin(page: Page) {
   await page.goto('/anmelden');
   await page.getByRole('button', { name: 'Als Entwicklung anmelden' }).click();
   await expect(page.getByText('SYNC')).toBeVisible({ timeout: 15_000 });
+  // Ohne laufenden Einsatz kommt die Startseite. Die Tests fliegen ohne Einsatz: Keiner startet einen,
+  // damit der Simulator-Flug der anderen Projekte unberührt bleibt.
+  await page.getByRole('button', { name: 'Überspringen' }).click();
 }
 
 /** Karte und Livebild stehen; erst dann zeigt ein Bildschirmfoto die Ansicht, wie sie im Einsatz aussieht. */
@@ -51,7 +54,9 @@ test('Großbild: über Zugangslink, ohne Bedienelemente', async ({ page, browser
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const kiosk = await context.newPage();
   const errors = pageErrors(kiosk);
-  await kiosk.goto(url.replace('http://127.0.0.1:8080', ''));
+  // Nur Pfad und Fragment: Der Link nennt SUCHLAGE_PUBLIC_URL, geladen wird über die baseURL.
+  const { pathname, search, hash } = new URL(url);
+  await kiosk.goto(pathname + search + hash);
   await expect(kiosk.getByRole('region', { name: 'Telemetrie' })).toHaveAttribute('data-size', 'large', {
     timeout: 15_000,
   });

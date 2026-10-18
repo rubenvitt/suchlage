@@ -197,20 +197,8 @@
   }
 }
 
-/* Einsatzleiste über der Karte (Arbeitsplatz), Name des Einsatzes im Großbild, Leiste mobil. */
-.sl-view-mission {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 2;
-  padding: 4px 8px;
-  background: var(--lfh-paneel);
-}
-/* Links oben stehen Einsatzleiste und Hinweis untereinander; rechts liegen die Kartenknöpfe. */
-.sl-view-mission ~ .sl-view-notice {
-  top: 56px;
-}
-.sl-kiosk-mission {
+/* Großbild ohne laufenden Einsatz; links oben steht der Hinweis zum Fluggerät. */
+.sl-kiosk-idle {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -220,7 +208,15 @@
   font-size: 1.25rem;
   font-weight: 600;
 }
+/* Mobil steht der Einsatz über der Ansicht statt im Kopf. */
 .sl-mobile-mission {
   padding: 6px 12px;
   background: var(--lfh-paneel);
+}
+.sl-mobile-mission .sl-mission-status {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.sl-mobile-mission .sl-mission-note {
+  color: var(--lfh-gedaempft);
 }

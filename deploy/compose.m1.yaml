@@ -8,7 +8,8 @@ services:
     environment:
       SUCHLAGE_PUBLIC_URL: "${SUCHLAGE_PUBLIC_URL:?öffentliche Adresse, z. B. https://suchlage.example.org}"
     ports: ["127.0.0.1:8080:8080"]
-    volumes: ["server-data:/data"]
+    # Videoablage von MediaMTX beschreibbar: Der Server löscht Aufzeichnungen (SUCHLAGE_DATA_DIR/video).
+    volumes: ["server-data:/data", "video:/data/video"]
     depends_on: [mqtt, media, fotos]
     restart: unless-stopped
 
@@ -22,8 +23,17 @@ services:
       - mqtt-data:/mosquitto/data
     restart: unless-stopped
 
+  # Gehört der Videoablage dem Server-Nutzer (nonroot, 65532), darf der Server Segmente löschen.
+  # Läuft vor jedem Start, damit auch ältere, von root geschriebene Aufzeichnungen übergehen.
+  video-init:
+    image: busybox:1.37.0-uclibc
+    command: ["chown", "-R", "65532:65532", "/recordings"]
+    volumes: ["video:/recordings"]
+
   media:
     image: bluenviron/mediamtx:1.21.2
+    user: "65532:65532"
+    depends_on: {video-init: {condition: service_completed_successfully}}
     environment:
       MTX_WEBRTCADDITIONALHOSTS: "${SUCHLAGE_BIND_IP:?}"
       MTX_AUTHHTTPADDRESS: http://server:8080/internal/media/auth

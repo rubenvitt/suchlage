@@ -178,6 +178,54 @@ pub async fn next_id(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
         .await
 }
 
+/// Alle Flüge eines Einsatzes, älteste zuerst.
+pub async fn of_mission(
+    pool: &SqlitePool,
+    mission: i64,
+) -> Result<Vec<FlightSummary>, sqlx::Error> {
+    let rows = sqlx::query(select_flights!(
+        "WHERE mission_id = ? ORDER BY started_at_ms, id"
+    ))
+    .bind(mission)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(summary).collect())
+}
+
+/// Alle Flüge einer Fernsteuerung, auch laufende.
+pub async fn of_gateway(
+    pool: &SqlitePool,
+    gateway_sn: &str,
+) -> Result<Vec<FlightSummary>, sqlx::Error> {
+    let rows = sqlx::query(select_flights!(
+        "WHERE gateway_sn = ? ORDER BY started_at_ms, id"
+    ))
+    .bind(gateway_sn)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(summary).collect())
+}
+
+/// Löscht den Flug samt den Fotos `photo_ids` (Spurpunkte kaskadieren). Später angekommene Fotos
+/// des Flugs bleiben ohne Flug (`ON DELETE SET NULL`). `false`, wenn es den Flug nicht gibt.
+pub async fn delete_rows(
+    pool: &SqlitePool,
+    id: i64,
+    photo_ids: &[i64],
+) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM photos WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(crate::store::photos::ids_json(photo_ids))
+        .execute(&mut *tx)
+        .await?;
+    let done = sqlx::query("DELETE FROM flights WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(done.rows_affected() == 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

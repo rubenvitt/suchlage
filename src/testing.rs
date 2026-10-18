@@ -27,8 +27,8 @@ pub struct TestApp {
     /// Anfragen an die MQTT-Sitzung; Tests beantworten sie selbst, eine Sitzung läuft nicht.
     pub mqtt_requests: mpsc::Receiver<crate::mqtt::LinkRequest>,
     stop: watch::Sender<bool>,
-    /// Vorschaubilder der Fotos; lebt so lange wie die App.
-    _thumbs: tempfile::TempDir,
+    /// `SUCHLAGE_DATA_DIR` der App (Vorschaubilder, Videoablage); lebt so lange wie die App.
+    _data: tempfile::TempDir,
 }
 
 /// App wie in `app::run`, aber mit In-Memory-DB, öffentlicher HTTPS-Adresse und ohne Auto-Livebild.
@@ -49,8 +49,11 @@ pub async fn test_app() -> TestApp {
     )
     .await
     .unwrap();
-    let boot = BootConfig::from_lookup(|k| {
-        (k == "SUCHLAGE_PUBLIC_URL").then(|| "https://suchlage.test".to_string())
+    let data = tempfile::tempdir().unwrap();
+    let boot = BootConfig::from_lookup(|k| match k {
+        "SUCHLAGE_PUBLIC_URL" => Some("https://suchlage.test".to_string()),
+        "SUCHLAGE_DATA_DIR" => Some(data.path().display().to_string()),
+        _ => None,
     })
     .unwrap();
     let settings = crate::settings::SettingsHandle::load(pool.clone())
@@ -65,16 +68,22 @@ pub async fn test_app() -> TestApp {
         pool.clone(),
         settings.clone(),
     );
-    let thumbs = tempfile::tempdir().unwrap();
     let photos = crate::photos::PhotoHub::new(
         pool.clone(),
         settings.clone(),
         crate::media::http_client(),
-        thumbs.path().to_path_buf(),
+        boot.thumbs_dir(),
     );
     let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
         .await
         .unwrap();
+    let deleter = crate::deletion::Deleter {
+        pool: pool.clone(),
+        photos: photos.clone(),
+        map: map.clone(),
+        missions: missions.clone(),
+        video_dir: boot.video_dir(),
+    };
     let state = AppState {
         boot: Arc::new(boot),
         pool,
@@ -86,6 +95,7 @@ pub async fn test_app() -> TestApp {
         streams,
         map,
         missions,
+        deleter,
         http: crate::media::http_client(),
         devlog,
     };
@@ -95,11 +105,32 @@ pub async fn test_app() -> TestApp {
         live_requests,
         mqtt_requests,
         stop,
-        _thumbs: thumbs,
+        _data: data,
     }
 }
 
 impl TestApp {
+    /// Richtet den Fotospeicher auf einen Fake ein und liefert dessen Zustand.
+    pub async fn with_photo_storage(&self) -> crate::storage::fake::Shared {
+        let (url, seen) = crate::storage::fake::start().await;
+        let cfg = crate::storage::fake::settings(&url);
+        self.state
+            .settings
+            .update_photo_storage(crate::contract::PhotoStorageSettingsInput {
+                s3_url: cfg.s3_url,
+                rc_url: cfg.rc_url,
+                admin_url: cfg.admin_url,
+                bucket: cfg.bucket,
+                region: cfg.region,
+                access_key_id: cfg.access_key_id,
+                secret_access_key: Some(cfg.secret_access_key),
+                admin_token: Some(cfg.admin_token),
+            })
+            .await
+            .unwrap();
+        seen
+    }
+
     /// Stoppt den Lage-Aktor wie `app::run` beim Herunterfahren.
     pub fn stop_situation(&self) {
         self.stop.send(true).unwrap();
@@ -169,6 +200,10 @@ pub fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap()
+}
+
+pub fn delete(uri: &str) -> Request<Body> {
+    Request::delete(uri).body(Body::empty()).unwrap()
 }
 
 pub fn put_json(uri: &str, body: serde_json::Value) -> Request<Body> {

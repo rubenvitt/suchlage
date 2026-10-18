@@ -130,8 +130,11 @@ fn photo(p: &PhotoRow) -> Photo {
         id: p.id,
         name: p.name.clone(),
         lens: p.lens,
-        thumb_url: p.thumb_ready.then(|| format!("/api/photos/{}/thumb", p.id)),
-        original_url: format!("/api/photos/{}/original", p.id),
+        // Version: Nach einem Löschen vergibt SQLite die ID neu; der Browser-Cache darf nicht treffen.
+        thumb_url: p
+            .thumb_ready
+            .then(|| format!("/api/photos/{}/thumb?v={}", p.id, p.uploaded_at_ms)),
+        original_url: format!("/api/photos/{}/original?v={}", p.id, p.uploaded_at_ms),
     }
 }
 
@@ -342,9 +345,13 @@ mod tests {
         assert_eq!(first.photos[0].thumb_url, None, "Vorschaubild fehlt noch");
         assert_eq!(
             first.photos[1].thumb_url.as_deref(),
-            Some("/api/photos/1/thumb")
+            Some("/api/photos/1/thumb?v=5000"),
+            "Version: eine wiederverwendete ID trifft keinen Browser-Cache"
         );
-        assert_eq!(first.photos[1].original_url, "/api/photos/1/original");
+        assert_eq!(
+            first.photos[1].original_url,
+            "/api/photos/1/original?v=5000"
+        );
         assert_eq!(shots[1].position, None, "ohne Position nicht auf der Karte");
     }
 
