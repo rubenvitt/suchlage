@@ -1,0 +1,23 @@
+/* Übernommen aus Lifeline Hub 5f07a20de (18.10.2026): frontend/src/icons/icons.css */
+/* LFH-595: Rest von antds `resetIcon` (`antd/es/style`), den der Inline-Stil der Hülle nicht trägt. */
+.lfh-icon svg {
+  display: inline-block;
+  vertical-align: inherit;
+}
+
+/* LFH-595: Drehung der Ladeicon (`<Icon drehen />`). Steht still, wer Bewegung abgeschaltet hat. */
+@keyframes lfh-icon-drehen {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lfh-icon-dreht svg {
+  animation: lfh-icon-drehen 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lfh-icon-dreht svg {
+    animation: none;
+  }
+}
