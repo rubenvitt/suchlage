@@ -11,6 +11,8 @@ import type { SectionCreate } from '../contract/generated/SectionCreate';
 import type { RemoteControllerCreate } from '../contract/generated/RemoteControllerCreate';
 import type { RemoteControllerCreated } from '../contract/generated/RemoteControllerCreated';
 import type { SetupResult } from '../contract/generated/SetupResult';
+import { demoElements, demoFlightMissions, demoPhotos, matchesMission } from '../demo/missionData';
+import type { MissionAssign } from '../contract/generated/MissionAssign';
 import * as fx from '../contract/fixtures.generated';
 
 /** Ein laufender und ein vorbereiteter Beispiel-Einsatz. */
@@ -101,17 +103,28 @@ const noContent = () => new HttpResponse(null, { status: 204 });
  */
 export const handlersFor = (me: Me) => {
   // Im Vorschau-Modus gezeichnete Elemente, damit Umbenennen ihre Form behält.
-  const drawn = new Map<string, MapElement>(fx.mapElements.map((e) => [e.id, e]));
+  const drawn = new Map<string, MapElement>(demoElements.map((e) => [e.id, e]));
+  const flightMissions = demoFlightMissions();
   return [
     http.get('/api/me', () => HttpResponse.json(me)),
     http.get('/api/health', () => HttpResponse.json(fx.health)),
     http.get('/api/auth/options', () => HttpResponse.json(fx.authOptionsOidc)),
     http.post('/api/auth/logout', noContent),
     http.get('/api/situation', () => HttpResponse.json(fx.snapshotFlying)),
-    http.get('/api/flights', () => HttpResponse.json(fx.flightList)),
+    http.get('/api/flights', ({ request }) =>
+      HttpResponse.json(
+        fx.flightList.filter((f) => matchesMission(request.url, flightMissions.get(f.id) ?? null)),
+      ),
+    ),
+    http.put('/api/flights/:id/mission', async ({ request, params }) => {
+      flightMissions.set(Number(params.id), ((await request.json()) as MissionAssign).mission_id);
+      return noContent();
+    }),
     http.get('/api/flights/:id', () => HttpResponse.json(fx.flightDetail)),
     http.get('/api/flights/:id/photos', () => HttpResponse.json(fx.photoShots)),
-    http.get('/api/photos', () => HttpResponse.json(fx.photoShots)),
+    http.get('/api/photos', ({ request }) =>
+      HttpResponse.json(demoPhotos.filter((s) => matchesMission(request.url, s.mission_id))),
+    ),
     // Vorschau-Modus: ein Platzhalter statt eines echten Vorschaubilds.
     http.get(
       '/api/photos/:id/thumb',
@@ -145,7 +158,20 @@ export const handlersFor = (me: Me) => {
     }),
     http.delete('/api/kiosk-tokens/:id', noContent),
     http.post('/api/setup', () => HttpResponse.json({ login_url: '/anmelden' } satisfies SetupResult)),
-    http.get('/api/map/elements', () => HttpResponse.json([...drawn.values()])),
+    http.get('/api/map/elements', ({ request }) =>
+      HttpResponse.json([...drawn.values()].filter((e) => matchesMission(request.url, e.mission_id))),
+    ),
+    http.put('/api/map/elements/:id/mission', async ({ request, params }) => {
+      const known = drawn.get(String(params.id));
+      if (!known) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      const changed = {
+        ...known,
+        mission_id: ((await request.json()) as MissionAssign).mission_id,
+        updated_at_ms: Date.now(),
+      };
+      drawn.set(changed.id, changed);
+      return HttpResponse.json(changed);
+    }),
     http.post('/api/map/elements', async ({ request }) => {
       const input = (await request.json()) as MapElementInput;
       const now = Date.now();

@@ -18,6 +18,9 @@ vi.mock('../shell/Frame', () => ({ Frame: (p: { children: ReactNode }) => <>{p.c
 const [running, landed] = flightList as [(typeof flightList)[0], (typeof flightList)[0]];
 const now = running.started_at_ms + 65_000;
 
+// Die Standard-Antwort filtert nach Einsatz; diese Tests zählen alle drei Beispielflüge.
+beforeEach(() => server.use(http.get('/api/flights', () => HttpResponse.json(flightList))));
+
 const page = (route = '/') =>
   renderWithApp(
     <LiveProvider store={createLiveStore()}>
