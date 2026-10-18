@@ -212,6 +212,20 @@ pub async fn since_unassigned(
     Ok(rows.iter().map(row).collect())
 }
 
+/// Auslösungen je Flug der Flüge eines Einsatzes (mehrere Linsen zählen einmal).
+pub async fn shots_per_flight(
+    pool: &SqlitePool,
+    mission: i64,
+) -> Result<Vec<(i64, u32)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT flight_id, COUNT(DISTINCT shot_key) FROM photos \
+         WHERE flight_id IN (SELECT id FROM flights WHERE mission_id = ?) GROUP BY flight_id",
+    )
+    .bind(mission)
+    .fetch_all(pool)
+    .await
+}
+
 /// Alle Fotodateien eines Einsatzes, mit und ohne Flug.
 pub async fn of_mission_all(pool: &SqlitePool, mission: i64) -> Result<Vec<PhotoRow>, sqlx::Error> {
     in_mission(pool, mission).await

@@ -74,9 +74,10 @@ pub async fn test_app() -> TestApp {
         crate::media::http_client(),
         boot.thumbs_dir(),
     );
-    let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
-        .await
-        .unwrap();
+    let missions =
+        crate::missions::MissionHub::start_up(pool.clone(), map.clone(), boot.map_photos_dir())
+            .await
+            .unwrap();
     let deleter = crate::deletion::Deleter {
         pool: pool.clone(),
         photos: photos.clone(),

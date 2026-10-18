@@ -1,6 +1,7 @@
 //! Kartenelemente (M2): ein Ort, der prüft, speichert und jede Änderung an Browser (SSE) und Pilots
 //! (WebSocket) verteilt. Das DJI-Format kennt nur `dji::map`.
 
+pub mod geojson;
 pub mod rules;
 
 use std::sync::Arc;

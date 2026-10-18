@@ -200,9 +200,10 @@ pub async fn run(
         crate::media::http_client(),
         boot.thumbs_dir(),
     );
-    let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
-        .await
-        .map_err(startup_error)?;
+    let missions =
+        crate::missions::MissionHub::start_up(pool.clone(), map.clone(), boot.map_photos_dir())
+            .await
+            .map_err(startup_error)?;
     let deleter = crate::deletion::Deleter {
         pool: pool.clone(),
         photos: photos.clone(),

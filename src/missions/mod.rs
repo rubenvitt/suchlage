@@ -1,7 +1,10 @@
 //! Einsätze: ein Ort, der Übergänge prüft, speichert und jede Änderung an die Browser meldet.
+//! Die Flugmappe schreibt über denselben Ort (`flugmappe`).
 
+pub mod flugmappe;
 pub mod rules;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
@@ -24,11 +27,26 @@ pub struct MissionHub {
     changes: broadcast::Sender<()>,
     /// Ändern ist eine Reihe: Prüfen und Schreiben laufen ohne eine zweite Änderung dazwischen.
     writes: Arc<Mutex<()>>,
+    /// Kartenfotos der Abschnitte (`SUCHLAGE_DATA_DIR/kartenfotos`).
+    map_photos: PathBuf,
+}
+
+impl From<rules::Refusal> for AppError {
+    fn from(r: rules::Refusal) -> Self {
+        match r {
+            rules::Refusal::Conflict(m) => AppError::Conflict(m.into()),
+            rules::Refusal::Unprocessable(m) => AppError::Unprocessable(m.into()),
+        }
+    }
 }
 
 impl MissionHub {
     /// Übernimmt den laufenden Einsatz als Sichtbereich der Pilots.
-    pub async fn start_up(pool: SqlitePool, map: MapHub) -> Result<Self, AppError> {
+    pub async fn start_up(
+        pool: SqlitePool,
+        map: MapHub,
+        map_photos: PathBuf,
+    ) -> Result<Self, AppError> {
         map.set_pilot_scope(store::running_id(&pool).await?);
         let (changes, _) = broadcast::channel(CHANGES_BUFFERED);
         Ok(Self {
@@ -36,7 +54,13 @@ impl MissionHub {
             map,
             changes,
             writes: Arc::new(Mutex::new(())),
+            map_photos,
         })
+    }
+
+    /// Ablage des Kartenfotos eines Abschnitts.
+    pub fn map_photo_path(&self, section_id: i64) -> PathBuf {
+        self.map_photos.join(format!("{section_id}.jpg"))
     }
 
     /// Die Schreibsperre der Einsätze, für Löschungen, die länger dauern (Dateien zuerst). Wer sie
@@ -88,6 +112,16 @@ impl MissionHub {
         now_ms: i64,
     ) -> Result<Mission, AppError> {
         let _serial = self.writes.lock().await;
+        self.change_state_locked(id, to, now_ms).await
+    }
+
+    /// Nur mit gehaltener Schreibsperre.
+    async fn change_state_locked(
+        &self,
+        id: i64,
+        to: MissionState,
+        now_ms: i64,
+    ) -> Result<Mission, AppError> {
         let current = self.get(id).await?;
         rules::transition(current.state, to).map_err(AppError::Unprocessable)?;
         if to == MissionState::Closed {
@@ -136,9 +170,16 @@ impl MissionHub {
             location: input.location,
         };
         let _serial = self.writes.lock().await;
-        if self.get(id).await?.state == MissionState::Closed {
+        let mission = self.get(id).await?;
+        if mission.state == MissionState::Closed {
             return Err(AppError::Unprocessable(
                 "Der Einsatz ist abgeschlossen".into(),
+            ));
+        }
+        // Bei verknüpften Einsätzen ist eine Verlegung Sache der Flugmappe (Spec §4).
+        if mission.flugmappe.is_some() {
+            return Err(AppError::Unprocessable(
+                rules::SECTIONS_FROM_FLUGMAPPE.into(),
             ));
         }
         store::add_section(&self.pool, id, &input, now_ms).await?;
