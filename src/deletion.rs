@@ -33,6 +33,12 @@ struct Files {
     videos: Vec<PathBuf>,
 }
 
+impl Files {
+    fn photo_ids(&self) -> Vec<i64> {
+        self.photos.iter().map(|(id, _)| *id).collect()
+    }
+}
+
 impl Deleter {
     /// Mengen für die Rückfrage vor dem Löschen eines Einsatzes.
     pub async fn contents(&self, mission_id: i64) -> Result<MissionContents, AppError> {
@@ -51,8 +57,8 @@ impl Deleter {
     }
 
     pub async fn delete_mission(&self, id: i64) -> Result<(), AppError> {
-        // shortcut: läuft nicht unter dem Schloss des MissionHub; ein gleichzeitiger Start des
-        // vorbereiteten Einsatzes wird nicht ausgeschlossen. Schloss teilen, falls das je vorkommt.
+        // Die ganze Löschung unter der Einsatzsperre: Kein Start und keine Zuordnung dazwischen.
+        let _serial = self.missions.serial().await;
         if self.missions.get(id).await?.state == MissionState::Running {
             return Err(AppError::Unprocessable(
                 "Ein laufender Einsatz lässt sich nicht löschen".into(),
@@ -74,12 +80,13 @@ impl Deleter {
                     .map(|p| p.id),
             );
         }
-        let elements = self.map.list_in(Some(id)).await?;
         let files = self.collect(photo_ids, &flights).await?;
         self.remove(&files).await?;
-        store::missions::delete_rows(&self.pool, id).await?;
-        for e in elements {
-            self.map.publish(MapChange::Deleted { id: e.id });
+        let elements = store::missions::delete_rows(&self.pool, id, &files.photo_ids())
+            .await?
+            .ok_or(AppError::NotFound)?;
+        for id in elements {
+            self.map.publish(MapChange::Deleted { id });
         }
         self.missions.changed();
         Ok(())
@@ -95,7 +102,9 @@ impl Deleter {
             .collect();
         let files = self.collect(photo_ids, &[flight]).await?;
         self.remove(&files).await?;
-        store::flights::delete_rows(&self.pool, id).await?;
+        if !store::flights::delete_rows(&self.pool, id, &files.photo_ids()).await? {
+            return Err(AppError::NotFound);
+        }
         self.missions.changed();
         Ok(())
     }
@@ -122,7 +131,7 @@ impl Deleter {
         }
         let files = self.collect(photo_ids, &[]).await?;
         self.remove(&files).await?;
-        store::photos::delete_shot_rows(&self.pool, shot_key).await?;
+        store::photos::delete_ids(&self.pool, &files.photo_ids()).await?;
         self.missions.changed();
         Ok(())
     }
@@ -677,6 +686,41 @@ mod tests {
         assert_eq!(seen.lock().unwrap().objects.len(), 1);
         let (status, _) = del(&app, &admin, "/api/photos/shots/RC1%2FDJI_1").await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn start_and_assign_wait_for_a_delete_in_progress() {
+        let app = test_app().await;
+        let id = mission(&app, "A").await;
+        crate::store::flights::insert(&app.state.pool, &flight(1, "RC1", T, Some(T + MIN)))
+            .await
+            .unwrap();
+        let serial = app.state.missions.serial().await;
+        let (hub, deleter) = (app.state.missions.clone(), app.state.deleter.clone());
+        let delete = tokio::spawn(async move { deleter.delete_mission(id).await });
+        let hub2 = hub.clone();
+        let start = tokio::spawn(async move { hub2.start(id, T).await });
+        let assign = tokio::spawn(async move {
+            hub.assign_flight(1, crate::contract::MissionAssign { mission_id: id })
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        for (what, finished) in [
+            ("Löschen", delete.is_finished()),
+            ("Start", start.is_finished()),
+            ("Zuordnen", assign.is_finished()),
+        ] {
+            assert!(!finished, "{what} wartet auf die Einsatzsperre");
+        }
+        drop(serial);
+        let (deleted, started) = (delete.await.unwrap(), start.await.unwrap());
+        let _ = assign.await.unwrap();
+        // Wer zuerst kommt, gewinnt; nie beides: Ein laufender Einsatz wird nicht gelöscht.
+        match (deleted, started) {
+            (Ok(()), Err(crate::error::AppError::NotFound)) => {}
+            (Err(crate::error::AppError::Unprocessable(_)), Ok(m)) => assert_eq!(m.id, id),
+            other => panic!("Löschen und Start überlappen: {other:?}"),
+        }
     }
 
     #[tokio::test]

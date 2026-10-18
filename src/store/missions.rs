@@ -243,24 +243,41 @@ pub async fn counts(pool: &SqlitePool, id: i64) -> Result<(u32, u32, u32), sqlx:
     Ok((f, p, e))
 }
 
-/// Löscht den Einsatz mit allem, was an ihm hängt, in einer Transaktion. `false`, wenn er fehlt.
-pub async fn delete_rows(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+/// Löscht den Einsatz mit allem, was an ihm hängt, in einer Transaktion; von den Fotos genau
+/// `photo_ids` (deren Dateien schon weg sind). Später angekommene Fotos bleiben ohne Einsatz und
+/// ohne Flug. Liefert die IDs der gelöschten Kartenelemente, `None`, wenn der Einsatz fehlt.
+pub async fn delete_rows(
+    pool: &SqlitePool,
+    id: i64,
+    photo_ids: &[i64],
+) -> Result<Option<Vec<String>>, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    // Fotos zuerst: ihre flight_id zeigt auf Flüge (SET NULL), mission_id hat keine Kaskade.
+    sqlx::query("DELETE FROM photos WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(crate::store::photos::ids_json(photo_ids))
+        .execute(&mut *tx)
+        .await?;
+    // mission_id hat keine Kaskade; flight_id wird beim Löschen der Flüge NULL.
     for sql in [
-        "DELETE FROM photos WHERE mission_id = ?1 OR flight_id IN (SELECT id FROM flights WHERE mission_id = ?1)",
-        "DELETE FROM flights WHERE mission_id = ?1",
-        "DELETE FROM map_elements WHERE mission_id = ?1",
-        "DELETE FROM mission_sections WHERE mission_id = ?1",
+        "UPDATE photos SET mission_id = NULL WHERE mission_id = ?",
+        "DELETE FROM flights WHERE mission_id = ?",
     ] {
         sqlx::query(sql).bind(id).execute(&mut *tx).await?;
     }
+    let elements: Vec<String> =
+        sqlx::query_scalar("DELETE FROM map_elements WHERE mission_id = ? RETURNING id")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    sqlx::query("DELETE FROM mission_sections WHERE mission_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     let done = sqlx::query("DELETE FROM missions WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok(done.rows_affected() == 1)
+    Ok((done.rows_affected() == 1).then_some(elements))
 }
 
 #[cfg(test)]
@@ -587,8 +604,12 @@ mod tests {
         let pool = test_pool().await;
         let a = filled(&pool, "A", 1).await;
         let b = filled(&pool, "B", 2).await;
-        assert!(delete_rows(&pool, a).await.unwrap());
-        assert!(!delete_rows(&pool, a).await.unwrap());
+        let ids = photo_ids(&pool, a).await;
+        assert_eq!(
+            delete_rows(&pool, a, &ids).await.unwrap(),
+            Some(vec!["el-A".to_string()])
+        );
+        assert_eq!(delete_rows(&pool, a, &ids).await.unwrap(), None);
         assert_eq!(get(&pool, a).await.unwrap(), None);
         assert_eq!(counts(&pool, b).await.unwrap(), (1, 2, 1));
         assert_eq!(get(&pool, b).await.unwrap().unwrap().sections.len(), 2);
@@ -605,25 +626,63 @@ mod tests {
         }
     }
 
+    async fn photo_ids(pool: &SqlitePool, mission: i64) -> Vec<i64> {
+        crate::store::photos::of_mission_all(pool, mission)
+            .await
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn late_photos_stay_without_mission_or_flight() {
+        let pool = test_pool().await;
+        let a = filled(&pool, "A", 1).await;
+        let ids = photo_ids(&pool, a).await;
+        // Eine Linse kommt nach dem Sammeln an: Ihre Zeile bleibt, ihre Datei ist nicht gelöscht.
+        let late = upsert(&pool, &photo("A-spaet", Some(1))).await.unwrap();
+        assert!(delete_rows(&pool, a, &ids).await.unwrap().is_some());
+        let p = crate::store::photos::get(&pool, late)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((p.mission_id, p.flight_id), (None, None));
+        assert_eq!(rows(&pool, "photos").await, 1);
+        assert_eq!(rows(&pool, "flights").await, 0);
+    }
+
     #[tokio::test]
     async fn flight_delete_takes_its_photos_only() {
         let pool = test_pool().await;
         let a = filled(&pool, "A", 1).await;
         assert_eq!(flights::of_mission(&pool, a).await.unwrap().len(), 1);
-        assert!(flights::delete_rows(&pool, 1).await.unwrap());
-        assert!(!flights::delete_rows(&pool, 1).await.unwrap());
+        let of_flight: Vec<i64> = crate::store::photos::of_flight(&pool, 1)
+            .await
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        let late = upsert(&pool, &photo("A-spaet", Some(1))).await.unwrap();
+        assert!(flights::delete_rows(&pool, 1, &of_flight).await.unwrap());
+        assert!(!flights::delete_rows(&pool, 1, &of_flight).await.unwrap());
+        let late = crate::store::photos::get(&pool, late)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(late.flight_id, None, "später angekommen: bleibt, ohne Flug");
         let left = crate::store::photos::of_mission_all(&pool, a)
             .await
             .unwrap();
-        assert_eq!(left.len(), 1);
-        assert_eq!(left[0].name, "A-n.JPG");
+        assert_eq!(left.len(), 2);
+        assert!(left.iter().any(|p| p.name == "A-n.JPG"));
         assert_eq!(rows(&pool, "track_points").await, 0);
+        let n = left.iter().find(|p| p.name == "A-n.JPG").unwrap().id;
         assert_eq!(
-            crate::store::photos::delete_shot_rows(&pool, "RC1/A-n")
-                .await
-                .unwrap(),
+            crate::store::photos::delete_ids(&pool, &[n]).await.unwrap(),
             1
         );
+        assert_eq!(rows(&pool, "photos").await, 1);
     }
 
     #[tokio::test]

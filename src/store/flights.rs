@@ -206,12 +206,16 @@ pub async fn of_gateway(
     Ok(rows.iter().map(summary).collect())
 }
 
-/// Löscht den Flug samt Fotozeilen mit dieser `flight_id` (Spurpunkte kaskadieren).
-/// `false`, wenn es den Flug nicht gibt.
-pub async fn delete_rows(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+/// Löscht den Flug samt den Fotos `photo_ids` (Spurpunkte kaskadieren). Später angekommene Fotos
+/// des Flugs bleiben ohne Flug (`ON DELETE SET NULL`). `false`, wenn es den Flug nicht gibt.
+pub async fn delete_rows(
+    pool: &SqlitePool,
+    id: i64,
+    photo_ids: &[i64],
+) -> Result<bool, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("DELETE FROM photos WHERE flight_id = ?")
-        .bind(id)
+    sqlx::query("DELETE FROM photos WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(crate::store::photos::ids_json(photo_ids))
         .execute(&mut *tx)
         .await?;
     let done = sqlx::query("DELETE FROM flights WHERE id = ?")

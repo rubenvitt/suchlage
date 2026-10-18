@@ -212,10 +212,11 @@ mod tests {
             original.clone(),
         );
         let mut shots = app.state.photos.subscribe();
+        let at = now_ms();
         let (id, first) = app
             .state
             .photos
-            .accept(photo("DJI_1_T.JPG", None, now_ms()))
+            .accept(photo("DJI_1_T.JPG", None, at))
             .await
             .unwrap();
         assert_eq!(
@@ -229,15 +230,16 @@ mod tests {
             .unwrap();
         assert_eq!(
             ready.photos[0].thumb_url.as_deref(),
-            Some(format!("/api/photos/{id}/thumb").as_str())
+            Some(format!("/api/photos/{id}/thumb?v={at}").as_str())
         );
 
+        // Die Version in der Adresse ist nur für den Browser-Cache; die Handler übergehen sie.
         let viewer = app.cookie(Role::Kiosk).await;
         let res = app
             .router
             .clone()
             .oneshot(with_cookie(
-                get(&format!("/api/photos/{id}/thumb")),
+                get(ready.photos[0].thumb_url.as_deref().unwrap()),
                 &viewer,
             ))
             .await
@@ -259,7 +261,7 @@ mod tests {
             .router
             .clone()
             .oneshot(with_cookie(
-                get(&format!("/api/photos/{id}/original?download=1")),
+                get(&format!("{}&download=1", ready.photos[0].original_url)),
                 &admin,
             ))
             .await

@@ -46,7 +46,7 @@ export function PhotoPanel({ shot, canOpenOriginal, onClose }: Props) {
           <a className="sl-panel-link" href={photo.original_url} target="_blank" rel="noreferrer">
             Original öffnen
           </a>
-          <a className="sl-panel-link" href={`${photo.original_url}?download=1`} download>
+          <a className="sl-panel-link" href={`${photo.original_url}&download=1`} download>
             Herunterladen
           </a>
         </p>

@@ -217,13 +217,19 @@ pub async fn of_mission_all(pool: &SqlitePool, mission: i64) -> Result<Vec<Photo
     in_mission(pool, mission).await
 }
 
-/// Löscht alle Zeilen einer Auslösung; Anzahl gelöschter Zeilen.
-pub async fn delete_shot_rows(pool: &SqlitePool, shot_key: &str) -> Result<u64, sqlx::Error> {
-    let done = sqlx::query("DELETE FROM photos WHERE shot_key = ?")
-        .bind(shot_key)
+/// Löscht genau diese Fotos (deren Dateien schon weg sind); Anzahl gelöschter Zeilen. Eine Linse,
+/// die danach ankam, behält ihre Zeile.
+pub async fn delete_ids(pool: &SqlitePool, ids: &[i64]) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query("DELETE FROM photos WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(ids_json(ids))
         .execute(pool)
         .await?;
     Ok(done.rows_affected())
+}
+
+/// IDs als JSON-Liste für `json_each(?)`: sqlx bindet keine Listen.
+pub(crate) fn ids_json(ids: &[i64]) -> String {
+    serde_json::to_string(ids).expect("Zahlen sind JSON")
 }
 
 pub async fn of_flight(pool: &SqlitePool, flight_id: i64) -> Result<Vec<PhotoRow>, sqlx::Error> {

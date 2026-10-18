@@ -5,7 +5,7 @@ pub mod rules;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, MutexGuard, broadcast};
 
 use crate::contract::{
     Mission, MissionAssign, MissionCreate, MissionState, MissionUpdate, SectionCreate,
@@ -37,6 +37,12 @@ impl MissionHub {
             changes,
             writes: Arc::new(Mutex::new(())),
         })
+    }
+
+    /// Die Schreibsperre der Einsätze, für Löschungen, die länger dauern (Dateien zuerst). Wer sie
+    /// hält, darf keine Methode dieses Hubs aufrufen, die selbst sperrt (nur `get`, `changed`).
+    pub(crate) async fn serial(&self) -> MutexGuard<'_, ()> {
+        self.writes.lock().await
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
