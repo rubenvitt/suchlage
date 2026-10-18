@@ -1,15 +1,29 @@
 import { screen } from '@testing-library/react';
-import { snapshotEmpty, snapshotFlying, snapshotGatewayOnly } from '../contract/fixtures.generated';
+import { http, HttpResponse } from 'msw';
+import {
+  liveEvents,
+  meKiosk,
+  snapshotEmpty,
+  snapshotFlying,
+  snapshotGatewayOnly,
+} from '../contract/fixtures.generated';
 import type { SituationSnapshot } from '../contract/generated/SituationSnapshot';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
+import type { MapElement } from '../contract/generated/MapElement';
+import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
 import { useDichte } from '../theme/ThemeModeProvider';
 import { KioskView } from './KioskView';
 
 vi.mock('../map/SituationMap', () => ({
-  SituationMap: (p: { showTools?: boolean; follow?: boolean }) => (
-    <div data-testid="karte" data-tools={String(p.showTools)} data-follow={String(p.follow)} />
+  SituationMap: (p: { showTools?: boolean; follow?: boolean; elements?: { id: string }[] }) => (
+    <div
+      data-testid="karte"
+      data-tools={String(p.showTools)}
+      data-follow={String(p.follow)}
+      data-elements={p.elements?.map((e) => e.id).join(',')}
+    />
   ),
 }));
 vi.mock('../video/whep', async (importOriginal) => ({
@@ -22,14 +36,16 @@ function DichteProbe() {
 }
 
 /** Vorgabeuhr des Stores: `useServerNow` rechnet auf die Serverzeit des Snapshots, die Werte sind frisch. */
-function show(snapshot: SituationSnapshot | null) {
+function show(snapshot: SituationSnapshot | null, elements: MapElement[] = [], route = '/') {
   const store = createLiveStore();
   if (snapshot) store.dispatch({ type: 'snapshot', snapshot });
+  store.dispatch({ type: 'map_elements', elements });
   return renderWithApp(
     <LiveProvider store={store}>
       <KioskView />
       <DichteProbe />
     </LiveProvider>,
+    { route },
   );
 }
 
@@ -72,4 +88,14 @@ test('Fernsteuerung ohne Fluggerät', async () => {
   show(snapshotGatewayOnly);
   expect(await screen.findByText('Fluggerät aus')).toBeInTheDocument();
   expect(screen.getByText(/RC Plus 1 ist verbunden/)).toBeInTheDocument();
+});
+
+test('Großbild zeigt Name und Elemente des laufenden Einsatzes und ignoriert ?einsatz=', async () => {
+  server.use(http.get('/api/me', () => HttpResponse.json(meKiosk)));
+  const base = liveEvents.find((e) => e.type === 'map_elements')!.elements[0]!;
+  const of = (id: string, mission_id: number | null): MapElement => ({ ...base, id, mission_id });
+  show(snapshotFlying, [of('laufend', 1), of('vorbereitet', 2), of('frei', null)], '/?einsatz=2');
+  expect(await screen.findByText('Übung Wietze')).toBeInTheDocument();
+  expect(screen.queryByText('Hochwasser Aller')).not.toBeInTheDocument();
+  expect(screen.getByTestId('karte')).toHaveAttribute('data-elements', 'laufend');
 });

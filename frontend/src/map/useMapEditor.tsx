@@ -1,13 +1,16 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button, Popconfirm } from 'antd';
 import { useEffect, useEffectEvent, useState, type ReactNode } from 'react';
 import { ApiError, apiSend } from '../api/client';
+import { queryKeys } from '../api/queries';
 import type { GeoPoint } from '../contract/generated/GeoPoint';
 import type { MapElement } from '../contract/generated/MapElement';
 import type { MapElementInput } from '../contract/generated/MapElementInput';
 import type { MapElementKind } from '../contract/generated/MapElementKind';
 import type { MapElementUpdate } from '../contract/generated/MapElementUpdate';
 import { useLiveDispatch } from '../live/LiveProvider';
+import { AssignMissionSelect } from '../missions/AssignMissionSelect';
+import type { MissionScope } from '../missions/scope';
 import { DEFAULT_ELEMENT_COLOR } from './elementColors';
 import {
   KIND_LABEL,
@@ -42,17 +45,21 @@ export interface EditorMapProps {
 
 /**
  * Zeichnen, Auswählen, Umbenennen, Umfärben und Löschen von Kartenelementen. Ohne `enabled` (keine
- * Rolle zum Ändern) bleibt die Karte ohne Bedienung. `onStartDrawing` schaltet etwa das Folgen ab:
+ * Rolle zum Ändern, abgeschlossener Einsatz) bleibt die Karte ohne Bedienung. Neue Elemente gehören
+ * zum gewählten Einsatz. `onStartDrawing` schaltet etwa das Folgen ab:
  * Eine Karte, die mitläuft, lässt keine Eckpunkte setzen.
  */
 export function useMapEditor(
   elements: MapElement[],
-  { enabled, onStartDrawing }: { enabled: boolean; onStartDrawing?: () => void },
+  { enabled, scope, onStartDrawing }: { enabled: boolean; scope: MissionScope; onStartDrawing?: () => void },
 ): { mapProps: EditorMapProps; overlay: ReactNode } {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pending, setPending] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const dispatch = useLiveDispatch();
+  const client = useQueryClient();
+  const missionId = scope.kind === 'mission' ? scope.mission.id : null;
+  const closed = scope.kind === 'mission' && scope.mission.state === 'closed';
   const selected = elements.find((e) => e.id === selectedId) ?? null;
 
   const create = useMutation({
@@ -73,6 +80,18 @@ export function useMapEditor(
     onSuccess: (_, id) => {
       dispatch({ type: 'map_element_deleted', id });
       setSelectedId(null);
+    },
+  });
+
+  const assign = useMutation({
+    mutationFn: ({ id, missionId }: { id: string; missionId: number }) =>
+      apiSend<MapElement>('PUT', `/api/map/elements/${encodeURIComponent(id)}/mission`, {
+        mission_id: missionId,
+      }),
+    onSuccess: (element) => {
+      dispatch({ type: 'map_element', element });
+      setSelectedId(null);
+      void client.invalidateQueries({ queryKey: queryKeys.missions });
     },
   });
 
@@ -121,7 +140,7 @@ export function useMapEditor(
     setSelectedId(elementId);
   };
 
-  if (!enabled) return { mapProps: { selectedElementId: null, draft: null }, overlay: null };
+  if (!enabled || closed) return { mapProps: { selectedElementId: null, draft: null }, overlay: null };
 
   let panel: ReactNode = null;
   if (pending) {
@@ -135,7 +154,9 @@ export function useMapEditor(
         cancelLabel="Verwerfen"
         busy={create.isPending}
         error={errorText(create.error)}
-        onSubmit={(name, color) => create.mutate({ name, kind: pending.kind, points: pending.points, color, mission_id: null })}
+        onSubmit={(name, color) =>
+          create.mutate({ name, kind: pending.kind, points: pending.points, color, mission_id: missionId })
+        }
         onCancel={() => setPending(null)}
       />
     );
@@ -150,22 +171,30 @@ export function useMapEditor(
         submitLabel="Speichern"
         cancelLabel="Schließen"
         busy={save.isPending || remove.isPending}
-        error={errorText(save.error ?? remove.error)}
+        error={errorText(save.error ?? remove.error ?? assign.error)}
         onSubmit={(name, color) => save.mutate({ id: selected.id, body: { name, color } })}
         onCancel={() => setSelectedId(null)}
         extra={
-          <Popconfirm
-            title={`„${selected.name}“ löschen?`}
-            description="Das Element verschwindet auch auf der Fernsteuerung."
-            okText="Löschen"
-            okButtonProps={{ danger: true }}
-            cancelText="Abbrechen"
-            onConfirm={() => remove.mutate(selected.id)}
-          >
-            <Button danger disabled={remove.isPending} aria-label={`Element löschen: ${selected.name}`}>
-              Löschen
-            </Button>
-          </Popconfirm>
+          <>
+            {selected.mission_id === null && (
+              <AssignMissionSelect
+                busy={assign.isPending}
+                onAssign={(missionId) => assign.mutate({ id: selected.id, missionId })}
+              />
+            )}
+            <Popconfirm
+              title={`„${selected.name}“ löschen?`}
+              description="Das Element verschwindet auch auf der Fernsteuerung."
+              okText="Löschen"
+              okButtonProps={{ danger: true }}
+              cancelText="Abbrechen"
+              onConfirm={() => remove.mutate(selected.id)}
+            >
+              <Button danger disabled={remove.isPending} aria-label={`Element löschen: ${selected.name}`}>
+                Löschen
+              </Button>
+            </Popconfirm>
+          </>
         }
       />
     );

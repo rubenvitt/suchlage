@@ -9,6 +9,7 @@ import type { Mission } from '../contract/generated/Mission';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
 import type { SettingsView } from '../contract/generated/SettingsView';
+import { scopeQuery, type MissionScope } from '../missions/scope';
 import { ApiError, apiGet } from './client';
 
 export const queryKeys = {
@@ -23,7 +24,7 @@ export const queryKeys = {
   /** Fotos der Lagekarte (letzte 24 h) und je Flug; der Live-Strom ergänzt beide. */
   missions: ['missions'] as const,
   photos: ['photos'] as const,
-  recentPhotos: ['photos', 'recent'] as const,
+  mapPhotos: (scope: string) => ['photos', 'map', scope] as const,
   flightPhotos: (id: number | null) => ['photos', 'flight', id] as const,
 };
 
@@ -53,8 +54,13 @@ export function useMe() {
 export const useAuthOptions = () =>
   useQuery({ queryKey: queryKeys.authOptions, queryFn: () => apiGet<AuthOptions>('/api/auth/options') });
 // Kein Polling: der LiveProvider (F2) erneuert die Liste bei `flight_started` und `flight_ended`.
-export const useFlights = () =>
-  useQuery({ queryKey: queryKeys.flights, queryFn: () => apiGet<FlightSummary[]>('/api/flights') });
+export const useFlights = (scope: MissionScope) => {
+  const mission = scopeQuery(scope);
+  return useQuery({
+    queryKey: [...queryKeys.flights, mission],
+    queryFn: () => apiGet<FlightSummary[]>(`/api/flights?mission=${mission}`),
+  });
+};
 /** `null` steht für eine Adresse ohne gültige Flugnummer: Dann fragt die Abfrage gar nicht erst. */
 export const useFlight = (id: number | null) =>
   useQuery({
@@ -74,10 +80,16 @@ export const useMissions = () =>
 export const useKioskTokens = () =>
   useQuery({ queryKey: queryKeys.kioskTokens, queryFn: () => apiGet<KioskTokenView[]>('/api/kiosk-tokens') });
 /** Laufender Stand des Servers. Ohne `staleTime`: Nach einem Update zeigt die offene Seite beim nächsten Blick den neuen. */
-export const useHealth = () => useQuery({ queryKey: queryKeys.health, queryFn: () => apiGet<Health>('/api/health') });
-/** Auslösungen der letzten 24 h für die Lagekarte; neue bringt der Live-Strom (`photo_shot`). */
-export const useRecentPhotos = () =>
-  useQuery({ queryKey: queryKeys.recentPhotos, queryFn: () => apiGet<PhotoShot[]>('/api/photos') });
+export const useHealth = () =>
+  useQuery({ queryKey: queryKeys.health, queryFn: () => apiGet<Health>('/api/health') });
+/** Auslösungen der letzten 24 h im gewählten Einsatz; neue bringt der Live-Strom (`photo_shot`). */
+export const useMapPhotos = (scope: MissionScope) => {
+  const mission = scopeQuery(scope);
+  return useQuery({
+    queryKey: queryKeys.mapPhotos(mission),
+    queryFn: () => apiGet<PhotoShot[]>(`/api/photos?mission=${mission}`),
+  });
+};
 /** Alle Fotos eines Flugs; `null` fragt nicht. */
 export const useFlightPhotos = (id: number | null) =>
   useQuery({

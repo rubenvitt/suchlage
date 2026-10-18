@@ -27,7 +27,7 @@ export interface LiveState {
   system: SystemStatus | null;
   /** Kartenelemente nach ID; ein Snapshot lässt sie stehen, die Liste danach ersetzt sie. */
   mapElements: Record<string, MapElement>;
-  /** Auslösungen aus dem Live-Strom nach ID; die Liste davor lädt `useRecentPhotos`. */
+  /** Auslösungen aus dem Live-Strom nach ID; die Liste davor lädt `useMapPhotos`. */
   photoShots: Record<string, PhotoShot>;
 }
 

@@ -10,7 +10,15 @@ import { createLiveStore, type LiveStore } from './situationStore';
 const Ctx = createContext<LiveStore | null>(null);
 
 /** `store` für Tests (vorbefüllt, ohne Verbindung); sonst verbindet der Provider selbst. */
-export function LiveProvider({ store, url = '/api/live', children }: { store?: LiveStore; url?: string; children: ReactNode }) {
+export function LiveProvider({
+  store,
+  url = '/api/live',
+  children,
+}: {
+  store?: LiveStore;
+  url?: string;
+  children: ReactNode;
+}) {
   const [own] = useState(() => store ?? createLiveStore());
   const client = useQueryClient();
   useEffect(() => {
@@ -24,7 +32,11 @@ export function LiveProvider({ store, url = '/api/live', children }: { store?: L
       }
       // Fotos aus einer Lücke im Strom holt die Liste nach; neue Fotos eines Flugs auch sein Detail.
       if (e.type === 'snapshot') void client.invalidateQueries({ queryKey: queryKeys.photos });
-      if (e.type === 'missions_changed') void client.invalidateQueries({ queryKey: queryKeys.missions });
+      if (e.type === 'missions_changed') {
+        void client.invalidateQueries({ queryKey: queryKeys.missions });
+        // Eine Zuordnung ändert die Flugliste je Einsatz.
+        void client.invalidateQueries({ queryKey: queryKeys.flights });
+      }
       if (e.type === 'photo_shot' && e.shot.flight_id != null) {
         void client.invalidateQueries({ queryKey: queryKeys.flightPhotos(e.shot.flight_id) });
       }

@@ -4,7 +4,9 @@ import type { ReactNode } from 'react';
 import { flightList } from '../contract/fixtures.generated';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
+import userEvent from '@testing-library/user-event';
 import { server } from '../test/server';
+import { missionHandlers } from '../test/handlers';
 import { renderWithApp } from '../test/render';
 import { FlightCards } from './FlightCards';
 import { flightRow } from './flightRow';
@@ -16,11 +18,12 @@ vi.mock('../shell/Frame', () => ({ Frame: (p: { children: ReactNode }) => <>{p.c
 const [running, landed] = flightList as [(typeof flightList)[0], (typeof flightList)[0]];
 const now = running.started_at_ms + 65_000;
 
-const page = () =>
+const page = (route = '/') =>
   renderWithApp(
     <LiveProvider store={createLiveStore()}>
       <FlightsPage />
     </LiveProvider>,
+    { route },
   );
 
 test('Zeile zeigt Dauer, Strecke, Höhe und Ausgang', () => {
@@ -98,4 +101,35 @@ test('unter 768 px Karten statt Tabelle', async () => {
   } finally {
     window.innerWidth = width;
   }
+});
+
+test('lädt die Flüge des gewählten Einsatzes', async () => {
+  const urls: string[] = [];
+  server.use(
+    http.get('/api/flights', ({ request }) => {
+      urls.push(new URL(request.url).search);
+      return HttpResponse.json(flightList);
+    }),
+  );
+  page('/?einsatz=2');
+  await vi.waitFor(() => expect(urls).toContain('?mission=2'));
+  // Ohne Zuordnung steht nichts zum Zuordnen an: Der Einsatz hat seine Flüge schon.
+  expect(screen.queryByRole('combobox', { name: 'Einsatz zuordnen' })).not.toBeInTheDocument();
+});
+
+test('unter „ohne Einsatz“ lässt sich jeder Flug zuordnen', async () => {
+  server.use(...missionHandlers());
+  const sent: unknown[] = [];
+  server.use(
+    http.put('/api/flights/:id/mission', async ({ request, params }) => {
+      sent.push([params.id, await request.json()]);
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  page('/?einsatz=ohne');
+  const selects = await screen.findAllByRole('combobox', { name: 'Einsatz zuordnen' });
+  expect(selects).toHaveLength(3);
+  await userEvent.click(selects[1]!);
+  await userEvent.click(await screen.findByTitle('Hochwasser Aller'));
+  await vi.waitFor(() => expect(sent).toEqual([['6', { mission_id: 2 }]]));
 });
