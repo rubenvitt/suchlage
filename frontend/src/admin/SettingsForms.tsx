@@ -1,12 +1,14 @@
-import { Alert, Button, Form, Input, InputNumber, Switch, type FormInstance } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Space, Switch, type FormInstance } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError, apiSend } from '../api/client';
 import { queryKeys } from '../api/queries';
+import { StatusChip } from '../components/instrument';
 import type { BrokerSettingsInput } from '../contract/generated/BrokerSettingsInput';
 import type { BrokerSettingsView } from '../contract/generated/BrokerSettingsView';
 import type { DjiSettingsInput } from '../contract/generated/DjiSettingsInput';
 import type { DjiSettingsView } from '../contract/generated/DjiSettingsView';
+import type { FlugmappeSettings } from '../contract/generated/FlugmappeSettings';
 import type { GeneralSettings } from '../contract/generated/GeneralSettings';
 import type { MediaSettings } from '../contract/generated/MediaSettings';
 import type { OidcSettingsInput } from '../contract/generated/OidcSettingsInput';
@@ -41,20 +43,27 @@ function useSave<I>(section: string, form: FormInstance, secretFields: string[] 
       setDone(true);
     },
   });
-  const error =
-    m.error instanceof ApiError
-      ? m.error.message
-      : m.error
-        ? 'Nicht gespeichert – Server nicht erreichbar.'
-        : null;
-  return { save: m.mutate, pending: m.isPending, done, error };
+  return { save: m.mutate, pending: m.isPending, done, error: saveError(m.error) };
 }
 
-function Result({ done, error }: { done: boolean; error: string | null }) {
+/** Fehlertext am Formular: der Satz des Servers, sonst „nicht erreichbar“. */
+function saveError(e: unknown): string | null {
+  return e instanceof ApiError ? e.message : e ? 'Nicht gespeichert – Server nicht erreichbar.' : null;
+}
+
+function Result({
+  done,
+  error,
+  text = 'Gespeichert.',
+}: {
+  done: boolean;
+  error: string | null;
+  text?: string;
+}) {
   if (error) return <Alert type="error" title={error} className="sl-form-result" />;
   return done ? (
     <p role="status" className="sl-ok">
-      Gespeichert.
+      {text}
     </p>
   ) : null;
 }
@@ -327,6 +336,78 @@ export function PhotoStorageForm({ view }: { view: PhotoStorageSettingsView | nu
       <Button type="primary" htmlType="submit" loading={s.pending}>
         Fotospeicher speichern
       </Button>
+    </Form>
+  );
+}
+
+const EMPTY_FLUGMAPPE: FlugmappeSettings = { client_id: '', allowed_origin: '' };
+
+/**
+ * Schnittstelle für die Flugmappe (SUL-66). „Ausschalten“ entfernt die Einstellung, die Felder
+ * bleiben stehen: „Speichern“ schaltet sie mit denselben Werten wieder ein. Ein leeres Formular
+ * schaltet ebenfalls aus. Der Zustand folgt der letzten Antwort des Servers, sonst `view`.
+ */
+export function FlugmappeForm({ view }: { view: FlugmappeSettings | null }) {
+  const [form] = Form.useForm<FlugmappeSettings>();
+  const client = useQueryClient();
+  const m = useMutation({
+    mutationFn: (body: FlugmappeSettings | null) =>
+      body
+        ? apiSend<SettingsView>('PUT', '/api/settings/flugmappe', body)
+        : apiSend<SettingsView>('DELETE', '/api/settings/flugmappe'),
+    onSuccess: (saved) => {
+      client.setQueryData(queryKeys.settings, saved);
+      // Der Server schreibt die Adresse ohne Schrägstrich am Ende: so zeigt das Formular, was gilt.
+      if (saved.flugmappe) form.setFieldsValue(saved.flugmappe);
+    },
+  });
+  const current = m.data ? m.data.flugmappe : view;
+  return (
+    <Form<FlugmappeSettings>
+      form={form}
+      layout="vertical"
+      className="sl-form"
+      initialValues={view ?? EMPTY_FLUGMAPPE}
+      onFinish={(v) => m.mutate({ client_id: v.client_id ?? '', allowed_origin: v.allowed_origin ?? '' })}
+    >
+      <p className="sl-form-hint sl-form-state">
+        <span>Schnittstelle</span>
+        {current ? <StatusChip ton="normal" wort="an" /> : <StatusChip ton="neutral" wort="aus" />}
+      </p>
+      <p className="sl-form-hint">
+        Die Flugmappe legt darüber Einsätze an, verknüpft sie und schickt Abschnitte und Kartenfotos. Ihre
+        Konten brauchen die Rolle Operator oder Verwaltung und müssen sich einmal in Suchlage angemeldet
+        haben. Ein leeres Formular schaltet die Schnittstelle aus.
+      </p>
+      <Form.Item
+        label="Client-ID"
+        name="client_id"
+        extra="Client-ID der Flugmappe aus Pocket ID – nicht die von Suchlage"
+      >
+        <Input autoComplete="off" />
+      </Form.Item>
+      <Form.Item
+        label="Adresse der Flugmappe"
+        name="allowed_origin"
+        extra="Nur Schema, Host und Port, ohne Pfad"
+      >
+        <Input placeholder="https://uav.iuk-ue.de" autoComplete="off" />
+      </Form.Item>
+      <Result
+        done={m.isSuccess}
+        error={saveError(m.error)}
+        text={m.data?.flugmappe ? 'Gespeichert.' : 'Ausgeschaltet.'}
+      />
+      <Space wrap>
+        <Button type="primary" htmlType="submit" loading={m.isPending && m.variables !== null}>
+          Flugmappe speichern
+        </Button>
+        {current && (
+          <Button loading={m.isPending && m.variables === null} onClick={() => m.mutate(null)}>
+            Ausschalten
+          </Button>
+        )}
+      </Space>
     </Form>
   );
 }

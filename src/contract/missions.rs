@@ -10,6 +10,26 @@ pub enum MissionState {
     Closed,
 }
 
+/// Wo ein Einsatz angelegt wurde: im Browser oder in der Flugmappe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MissionOrigin {
+    Web,
+    Flugmappe,
+}
+
+/// Verknüpfung eines Einsatzes mit einer Flugmappe. Die Einsatz-ID der Flugmappe braucht der
+/// Browser nicht.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FlugmappeLink {
+    /// Anzeigename des Kontos, das verknüpft (oder übernommen) hat.
+    pub linked_by: String,
+    #[ts(type = "number")]
+    pub linked_at_ms: i64,
+}
+
 /// Ein Abschnitt eines Einsatzes (z. B. ein Suchgebiet).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -20,6 +40,11 @@ pub struct MissionSection {
     pub location: Option<String>,
     #[ts(type = "number")]
     pub created_at_ms: i64,
+    /// Ein Foto der Papierkarte liegt (aus der Flugmappe).
+    pub has_map_photo: bool,
+    /// Zeitpunkt des letzten Kartenfotos; taugt als Versionszeichen für die Bild-URL.
+    #[ts(type = "number | null")]
+    pub map_photo_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -39,6 +64,9 @@ pub struct Mission {
     pub closed_at_ms: Option<i64>,
     /// Älteste zuerst; der letzte Abschnitt ist der aktive.
     pub sections: Vec<MissionSection>,
+    pub origin: MissionOrigin,
+    /// `null`: mit keiner Flugmappe verknüpft. Dann legt Suchlage auch Abschnitte an.
+    pub flugmappe: Option<FlugmappeLink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

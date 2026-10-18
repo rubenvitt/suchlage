@@ -794,9 +794,13 @@ mod tests {
 
         let (_stop, stop_rx) = tokio::sync::watch::channel(false);
         let map = crate::map::MapHub::new(app.state.pool.clone(), stop_rx);
-        crate::missions::MissionHub::start_up(app.state.pool.clone(), map.clone())
-            .await
-            .unwrap();
+        crate::missions::MissionHub::start_up(
+            app.state.pool.clone(),
+            map.clone(),
+            app.state.boot.map_photos_dir(),
+        )
+        .await
+        .unwrap();
         assert_eq!(map.pilot_scope(), Some(a));
     }
 

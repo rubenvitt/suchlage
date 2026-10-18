@@ -7,8 +7,8 @@ use tokio::sync::watch;
 
 use crate::config::BootConfig;
 use crate::contract::{
-    BrokerSettingsInput, BrokerSettingsView, DjiSettingsInput, DjiSettingsView, GeneralSettings,
-    MediaSettings, OidcSettingsInput, OidcSettingsView, PhotoStorageSettingsInput,
+    BrokerSettingsInput, BrokerSettingsView, DjiSettingsInput, DjiSettingsView, FlugmappeSettings,
+    GeneralSettings, MediaSettings, OidcSettingsInput, OidcSettingsView, PhotoStorageSettingsInput,
     PhotoStorageSettingsView, SettingsView,
 };
 use crate::error::AppError;
@@ -59,6 +59,8 @@ pub struct Settings {
     pub broker: Option<BrokerSettings>,
     pub media: Option<MediaSettings>,
     pub photo_storage: Option<PhotoStorageSettings>,
+    /// Schnittstelle für die Flugmappe (SUL-66); ohne sie ist sie aus.
+    pub flugmappe: Option<FlugmappeSettings>,
     pub general: GeneralSettings,
     /// Geheimnis des internen MediaMTX-Lesers (ADR 0003); beim ersten Start erzeugt.
     pub internal_secret: String,
@@ -138,6 +140,29 @@ fn is_bucket_name(v: &str) -> bool {
         && v.ends_with(|c: char| c.is_ascii_alphanumeric())
 }
 
+/// Ursprung für CORS: `https://Rechner[:Port]` ohne Pfad, Anfrage und Zugangsdaten; http nur für
+/// Loopback. Gespeichert in der Form, die Browser im `Origin`-Header schicken.
+fn origin(v: &str, field: &str) -> Result<String, AppError> {
+    let v = non_empty(v, field)?;
+    url::Url::parse(&v)
+        .ok()
+        .filter(|u| {
+            issuer_allowed(u.as_str())
+                && u.host_str().is_some_and(|h| !h.is_empty())
+                && u.path() == "/"
+                && u.query().is_none()
+                && u.fragment().is_none()
+                && u.username().is_empty()
+                && u.password().is_none()
+        })
+        .map(|u| u.origin().ascii_serialization())
+        .ok_or_else(|| {
+            invalid(&format!(
+                "{field} muss https://Rechner[:Port] ohne Pfad sein (http nur für localhost)"
+            ))
+        })
+}
+
 pub fn issuer_allowed(issuer: &str) -> bool {
     let Ok(url) = url::Url::parse(issuer) else {
         return false;
@@ -213,6 +238,7 @@ impl SettingsHandle {
             broker: store::settings::get(&pool, "broker").await?,
             media: store::settings::get(&pool, "media").await?,
             photo_storage: store::settings::get(&pool, "photo_storage").await?,
+            flugmappe: store::settings::get(&pool, "flugmappe").await?,
             general: store::settings::get(&pool, "general")
                 .await?
                 .unwrap_or_else(default_general),
@@ -342,6 +368,25 @@ impl SettingsHandle {
         .await
     }
 
+    /// Beide Felder leer: Die Schnittstelle wird ausgeschaltet.
+    pub async fn update_flugmappe(&self, input: FlugmappeSettings) -> Result<(), AppError> {
+        if input.client_id.trim().is_empty() && input.allowed_origin.trim().is_empty() {
+            return self.remove_flugmappe().await;
+        }
+        let value = FlugmappeSettings {
+            client_id: non_empty(&input.client_id, "Client-ID der Flugmappe")?,
+            allowed_origin: origin(&input.allowed_origin, "Adresse der Flugmappe")?,
+        };
+        self.save("flugmappe", &value, |s| s.flugmappe = Some(value.clone()))
+            .await
+    }
+
+    pub async fn remove_flugmappe(&self) -> Result<(), AppError> {
+        store::settings::delete(&self.pool, "flugmappe").await?;
+        self.tx.send_modify(|s| s.flugmappe = None);
+        Ok(())
+    }
+
     pub async fn update_general(&self, input: GeneralSettings) -> Result<(), AppError> {
         self.save("general", &input, |s| s.general = input.clone())
             .await
@@ -380,6 +425,7 @@ impl SettingsHandle {
                 has_secret_access_key: !p.secret_access_key.is_empty(),
                 has_admin_token: !p.admin_token.is_empty(),
             }),
+            flugmappe: s.flugmappe,
             general: s.general,
         }
     }
@@ -587,6 +633,86 @@ mod tests {
         assert!(validate_oidc(&input("https://id.example.org", None)).is_err());
         assert!(validate_oidc(&input("https://id.example.org", Some(" "))).is_err());
         assert!(validate_oidc(&input("id.example.org", Some("s"))).is_err());
+    }
+
+    fn flugmappe(client_id: &str, allowed_origin: &str) -> FlugmappeSettings {
+        FlugmappeSettings {
+            client_id: client_id.into(),
+            allowed_origin: allowed_origin.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn flugmappe_is_validated_survives_a_reload_and_an_empty_form_switches_it_off() {
+        let pool = crate::db::test_pool().await;
+        let h = SettingsHandle::load(pool.clone()).await.unwrap();
+        assert_eq!(h.current().flugmappe, None);
+        h.update_flugmappe(flugmappe(" flugmappe ", "https://UAV.example.org:443/"))
+            .await
+            .unwrap();
+        assert_eq!(
+            h.current().flugmappe,
+            Some(flugmappe("flugmappe", "https://uav.example.org")),
+            "so, wie der Browser den Ursprung schickt"
+        );
+        let again = SettingsHandle::load(pool.clone()).await.unwrap();
+        assert_eq!(again.current().flugmappe, h.current().flugmappe);
+        let boot = BootConfig::from_lookup(|_| None).unwrap();
+        assert_eq!(
+            h.view(&boot).flugmappe.unwrap().allowed_origin,
+            "https://uav.example.org"
+        );
+
+        h.update_flugmappe(flugmappe("  ", "")).await.unwrap();
+        assert_eq!(h.current().flugmappe, None);
+        assert_eq!(
+            SettingsHandle::load(pool)
+                .await
+                .unwrap()
+                .current()
+                .flugmappe,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn flugmappe_origin_is_scheme_host_and_port_only() {
+        let h = SettingsHandle::load(crate::db::test_pool().await)
+            .await
+            .unwrap();
+        for ok in [
+            "https://uav.example.org",
+            "https://uav.example.org:8443",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173/",
+        ] {
+            h.update_flugmappe(flugmappe("fm", ok)).await.unwrap();
+        }
+        assert_eq!(
+            h.current().flugmappe.unwrap().allowed_origin,
+            "http://127.0.0.1:5173"
+        );
+        for bad in [
+            "uav.example.org",
+            "http://uav.example.org",
+            "https://uav.example.org/flugmappe",
+            "https://uav.example.org/?x=1",
+            "https://user@uav.example.org",
+            "ftp://uav.example.org",
+        ] {
+            let err = h.update_flugmappe(flugmappe("fm", bad)).await.unwrap_err();
+            assert!(
+                err.to_string().contains("Adresse der Flugmappe"),
+                "{bad}: {err}"
+            );
+        }
+        let err = h
+            .update_flugmappe(flugmappe(" ", "https://uav.example.org"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Client-ID"), "{err}");
+        h.remove_flugmappe().await.unwrap();
+        assert_eq!(h.current().flugmappe, None);
     }
 
     #[tokio::test]

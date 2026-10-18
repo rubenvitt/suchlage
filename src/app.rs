@@ -55,6 +55,18 @@ impl FromRef<AppState> for Arc<BootConfig> {
     }
 }
 
+impl FromRef<AppState> for SettingsHandle {
+    fn from_ref(state: &AppState) -> Self {
+        state.settings.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<OidcState> {
+    fn from_ref(state: &AppState) -> Self {
+        state.oidc.clone()
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     use tower_http::catch_panic::CatchPanicLayer;
     use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
@@ -74,6 +86,11 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::streams::routes())
         .merge(crate::web::media::routes())
         .merge(crate::web::devlog::routes())
+        // Schnittstelle für die Flugmappe: Bearer statt Sitzung, eigenes CORS (SUL-66).
+        .nest(
+            "/flugmappe/v1",
+            crate::web::flugmappe::routes(state.settings.clone()),
+        )
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()
@@ -200,9 +217,10 @@ pub async fn run(
         crate::media::http_client(),
         boot.thumbs_dir(),
     );
-    let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
-        .await
-        .map_err(startup_error)?;
+    let missions =
+        crate::missions::MissionHub::start_up(pool.clone(), map.clone(), boot.map_photos_dir())
+            .await
+            .map_err(startup_error)?;
     let deleter = crate::deletion::Deleter {
         pool: pool.clone(),
         photos: photos.clone(),

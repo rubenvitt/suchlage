@@ -65,6 +65,11 @@ impl BootConfig {
         self.data_dir.join("thumbs")
     }
 
+    /// Fotos der Papierkarte je Abschnitt (`<Abschnitts-ID>.jpg`), aus der Flugmappe.
+    pub fn map_photos_dir(&self) -> PathBuf {
+        self.data_dir.join("kartenfotos")
+    }
+
     /// Aufzeichnungen von MediaMTX (`live/<RC-SN>/…`), dasselbe Volume wie `/recordings` dort.
     pub fn video_dir(&self) -> PathBuf {
         self.data_dir.join("video")

@@ -436,6 +436,165 @@ pub fn photo_shots() -> Vec<PhotoShot> {
     ]
 }
 
+/// Ein laufender Einsatz aus der Flugmappe mit Kartenfoto im zweiten Abschnitt und ein
+/// vorbereiteter aus dem Browser.
+pub fn missions() -> Vec<Mission> {
+    let section = |id: i64, label: &str, at: i64, photo: Option<i64>| MissionSection {
+        id,
+        label: label.into(),
+        location: None,
+        created_at_ms: at,
+        has_map_photo: photo.is_some(),
+        map_photo_at_ms: photo,
+    };
+    vec![
+        Mission {
+            id: 3,
+            name: "Vermisste Person Waldweg".into(),
+            location: Some("Forst Nord".into()),
+            state: MissionState::Running,
+            created_by: "Gruppenführer I&K".into(),
+            created_at_ms: T0 - 3_600_000,
+            started_at_ms: Some(T0 - 3_600_000),
+            closed_at_ms: None,
+            sections: vec![
+                section(4, "Abschnitt 1", T0 - 3_600_000, None),
+                section(5, "Verlegung Waldrand", T0 - 1_200_000, Some(T0 - 900_000)),
+            ],
+            origin: MissionOrigin::Flugmappe,
+            flugmappe: Some(FlugmappeLink {
+                linked_by: "Gruppenführer I&K".into(),
+                linked_at_ms: T0 - 3_600_000,
+            }),
+        },
+        Mission {
+            id: 4,
+            name: "Übung Kiesgrube".into(),
+            location: None,
+            state: MissionState::Prepared,
+            created_by: "Erika Mustermann".into(),
+            created_at_ms: T0 - 600_000,
+            started_at_ms: None,
+            closed_at_ms: None,
+            sections: vec![section(6, "Abschnitt 1", T0 - 600_000, None)],
+            origin: MissionOrigin::Web,
+            flugmappe: None,
+        },
+    ]
+}
+
+pub const FM_MISSION_ID: &str = "0f6b2a1e-5d43-4c8e-9b7a-2e1f3c4d5a6b";
+pub const FM_SECTION_IDS: [&str; 2] = [
+    "6a1d9c2b-3e4f-4a5b-8c7d-9e0f1a2b3c4d",
+    "b7e8f9a0-1b2c-4d3e-8f4a-5b6c7d8e9f0a",
+];
+
+pub fn fm_me() -> FmMe {
+    FmMe {
+        name: "Gruppenführer I&K".into(),
+        role: Role::Operator,
+        api_version: FLUGMAPPE_API_VERSION,
+    }
+}
+
+/// Der verknüpfte Einsatz aus `missions()` und der vorbereitete ohne Flugmappe.
+pub fn fm_missions() -> Vec<FmMission> {
+    let [linked, prepared] = missions().try_into().unwrap();
+    let fm = |m: Mission, fm_sections: &[&str], link: bool| FmMission {
+        id: m.id,
+        name: m.name,
+        location: m.location,
+        state: m.state,
+        started_at_ms: m.started_at_ms,
+        created_at_ms: m.created_at_ms,
+        created_by: m.created_by.clone(),
+        sections: m
+            .sections
+            .into_iter()
+            .zip(
+                fm_sections
+                    .iter()
+                    .map(|s| Some(s.to_string()))
+                    .chain(std::iter::repeat(None)),
+            )
+            .map(|(s, fm)| FmSection {
+                id: s.id,
+                flugmappe_section_id: fm,
+                label: s.label,
+                location: s.location,
+                created_at_ms: s.created_at_ms,
+                has_map_photo: s.has_map_photo,
+            })
+            .collect(),
+        link: link.then(|| FmLinkInfo {
+            flugmappe_mission_id: FM_MISSION_ID.into(),
+            linked_by: m.created_by,
+            linked_at_ms: m.created_at_ms,
+        }),
+    };
+    vec![fm(linked, &FM_SECTION_IDS, true), fm(prepared, &[], false)]
+}
+
+/// Ein gelandeter Flug im ersten Abschnitt und der laufende im zweiten.
+pub fn fm_flights() -> Vec<FmFlight> {
+    let fm = |f: FlightSummary, section: &str, photos: u32| FmFlight {
+        id: f.id,
+        flugmappe_section_id: Some(section.into()),
+        started_at_ms: f.started_at_ms,
+        ended_at_ms: f.ended_at_ms,
+        end_reason: f.end_reason,
+        aircraft_sn: f.aircraft_sn,
+        aircraft_label: Some("RC Plus 1".into()),
+        max_elevation_m: f.max_elevation_m,
+        distance_m: f.distance_m,
+        photo_count: photos,
+    };
+    vec![
+        fm(flight_landed(6, T0 - 2_400_000), FM_SECTION_IDS[0], 2),
+        fm(flight_running(), FM_SECTION_IDS[1], 0),
+    ]
+}
+
+/// Das Suchgebiet aus `map_elements()` und die Spur des laufenden Flugs.
+pub fn fm_map() -> FmFeatureCollection {
+    let area = &map_elements()[0];
+    let mut ring: Vec<FmPosition> = area.points.iter().map(|p| [p.lon, p.lat]).collect();
+    ring.push(ring[0]);
+    FmFeatureCollection {
+        kind: FmFeatureCollectionType::FeatureCollection,
+        features: vec![
+            FmFeature {
+                kind: FmFeatureType::Feature,
+                geometry: FmGeometry::Polygon {
+                    coordinates: vec![ring],
+                },
+                properties: FmFeatureProperties::MapElement {
+                    id: area.id.clone(),
+                    name: area.name.clone(),
+                    color: area.color.clone(),
+                },
+            },
+            FmFeature {
+                kind: FmFeatureType::Feature,
+                geometry: FmGeometry::MultiLineString {
+                    coordinates: track_segments()
+                        .iter()
+                        .map(|s| s.iter().map(|p| [p.lon, p.lat]).collect())
+                        .collect(),
+                },
+                properties: FmFeatureProperties::FlightTrack {
+                    flight_id: 7,
+                    name: "Flug 7".into(),
+                    color: "#B620E0".into(),
+                    flugmappe_section_id: Some(FM_SECTION_IDS[1].into()),
+                    started_at_ms: T0 - 600_000,
+                    ended_at_ms: None,
+                },
+            },
+        ],
+    }
+}
+
 pub fn settings_view() -> SettingsView {
     SettingsView {
         oidc: Some(OidcSettingsView {
@@ -473,6 +632,10 @@ pub fn settings_view() -> SettingsView {
             has_secret_access_key: true,
             has_admin_token: true,
         }),
+        flugmappe: Some(FlugmappeSettings {
+            client_id: "3c1f8a2e-7b4d-4e6a-9c5b-1d2e3f4a5b6c".into(),
+            allowed_origin: "https://uav.example.org".into(),
+        }),
         general: GeneralSettings {
             auto_live_on_takeoff: true,
             record_raw_mqtt: true,
@@ -487,6 +650,7 @@ pub fn settings_empty() -> SettingsView {
         broker: None,
         media: None,
         photo_storage: None,
+        flugmappe: None,
         general: GeneralSettings {
             auto_live_on_takeoff: true,
             record_raw_mqtt: true,
@@ -573,6 +737,11 @@ pub fn all() -> Vec<Fixture> {
         fx("kioskTokens", "KioskTokenView[]", &kiosk_tokens()),
         fx("mapElements", "MapElement[]", &map_elements()),
         fx("photoShots", "PhotoShot[]", &photo_shots()),
+        fx("missionList", "Mission[]", &missions()),
+        fx("fmMe", "FmMe", &fm_me()),
+        fx("fmMissions", "FmMission[]", &fm_missions()),
+        fx("fmFlights", "FmFlight[]", &fm_flights()),
+        fx("fmMap", "FmFeatureCollection", &fm_map()),
         fx(
             "meAdmin",
             "Me",
@@ -630,5 +799,10 @@ pub fn assert_roundtrips() {
     roundtrip(remote_controllers());
     roundtrip(map_elements());
     roundtrip(photo_shots());
+    roundtrip(missions());
+    roundtrip(fm_me());
+    roundtrip(fm_missions());
+    roundtrip(fm_flights());
+    roundtrip(fm_map());
     roundtrip(health());
 }

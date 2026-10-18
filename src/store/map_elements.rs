@@ -96,7 +96,10 @@ pub async fn get(pool: &SqlitePool, id: &str) -> Result<Option<MapElement>, sqlx
 }
 
 /// `false`, wenn es die ID schon gibt; dann bleibt der gespeicherte Stand unverändert.
-pub async fn insert(pool: &SqlitePool, e: &MapElement) -> Result<bool, sqlx::Error> {
+pub async fn insert<'e>(
+    db: impl sqlx::SqliteExecutor<'e>,
+    e: &MapElement,
+) -> Result<bool, sqlx::Error> {
     let done = sqlx::query(concat!(
         "INSERT INTO map_elements (",
         columns!(),
@@ -113,7 +116,7 @@ pub async fn insert(pool: &SqlitePool, e: &MapElement) -> Result<bool, sqlx::Err
     .bind(e.created_at_ms)
     .bind(e.updated_at_ms)
     .bind(e.mission_id)
-    .execute(pool)
+    .execute(db)
     .await?;
     Ok(done.rows_affected() == 1)
 }

@@ -1,5 +1,5 @@
 //! Löschen von Einsätzen, Flügen und Medien (nur Admin). Erst die Dateien (Fotospeicher,
-//! Vorschaubilder, Video), dann die Datenbankzeilen in einer Transaktion: Scheitert eine Datei mit
+//! Vorschaubilder, Video, Kartenfotos), dann die Datenbankzeilen in einer Transaktion: Scheitert eine Datei mit
 //! etwas anderem als „nicht vorhanden“, bleibt die Datenbank unverändert, ein zweiter Versuch
 //! räumt den Rest.
 
@@ -73,7 +73,8 @@ impl Deleter {
     pub async fn delete_mission(&self, id: i64) -> Result<(), AppError> {
         // Die ganze Löschung unter der Einsatzsperre: Kein Start und keine Zuordnung dazwischen.
         let _serial = self.missions.serial().await;
-        if self.missions.get(id).await?.state == MissionState::Running {
+        let mission = self.missions.get(id).await?;
+        if mission.state == MissionState::Running {
             return Err(AppError::Unprocessable(
                 "Ein laufender Einsatz lässt sich nicht löschen".into(),
             ));
@@ -96,6 +97,10 @@ impl Deleter {
         }
         let files = self.collect(photo_ids, &flights).await?;
         self.remove(&files).await?;
+        // Kartenfotos der Abschnitte (aus der Flugmappe); nicht jeder Abschnitt hat eines.
+        for section in &mission.sections {
+            remove_file(&self.missions.map_photo_path(section.id)).await?;
+        }
         let elements = store::missions::delete_rows(&self.pool, id, &files.photo_ids())
             .await?
             .ok_or(AppError::NotFound)?;
@@ -495,10 +500,22 @@ mod tests {
             .unwrap()
             .objects
             .insert(format!("/{}/fotos/fremd.JPG", fake::BUCKET), vec![]);
+        let map_photo = |section: i64| {
+            let path = app.state.missions.map_photo_path(section);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, [0xFF, 0xD8, 0xFF]).unwrap();
+            path
+        };
+        let section = app.state.missions.get(f.mission).await.unwrap().sections[0].id;
+        let (own, foreign) = (map_photo(section), map_photo(section + 100));
         let mut map = app.state.map.subscribe();
         let mut changed = app.state.missions.subscribe();
         let (status, _) = del(&app, &admin, &format!("/api/missions/{}", f.mission)).await;
         assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(
+            !exists(&own) && exists(&foreign),
+            "nur die Kartenfotos des Einsatzes"
+        );
         assert!(app.state.missions.get(f.mission).await.is_err());
         assert_eq!(
             crate::store::flights::get(&app.state.pool, 1)

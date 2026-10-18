@@ -19,6 +19,7 @@ direkt aus dem Internet erreichbar.
 Browser (Internet) ──HTTPS 443──▶ Traefik / cloudflared ──▶ 127.0.0.1:8080  server
 Browser (Tailnet)  ──UDP 8189──────────────────────────────▶ <TS-IP>:8189     media (WebRTC-Bild)
 RC Plus (Internet) ──HTTPS 443 (/pilot, /map/api/v1, /media/api/v1, /storage/api/v1, WebSocket /pilot/ws)──▶ Traefik / cloudflared
+Flugmappe (Browser) ─HTTPS 443 (/api/flugmappe/v1, Zugriffstoken aus Pocket ID)──▶ Traefik / cloudflared
 RC Plus (Tailnet)  ──TCP 1883──────────────────────────────▶ <TS-IP>:1883     mqtt
 RC Plus (Tailnet)  ──TCP 1935──────────────────────────────▶ <TS-IP>:1935     media (RTMP)
 RC Plus (Tailnet)  ──TCP 3900──────────────────────────────▶ <TS-IP>:3900     fotos (S3, Garage)
@@ -300,6 +301,38 @@ Link mit `?code=<code>` statt `#<code>` eintragen. Siehe Realflug-Checkliste.
 Tailnet zeigt das Großbild das Livebild über HLS. Für WebRTC muss der Rechner im Tailnet sein und
 unter `group:iuk` oder einer eigenen Regel auf UDP 8189 zugreifen dürfen.
 
+## 11. Flugmappe verknüpfen (optional)
+
+Die Flugmappe (`uav.iuk-ue.de`) legt über `/api/flugmappe/v1/…` Einsätze in Suchlage an, verknüpft
+sie, schickt Abschnitte und Kartenfotos und liest Flüge und Karte. Sie meldet sich dabei mit ihrem
+eigenen Zugriffstoken aus **derselben** Pocket ID an, die Suchlage für die Anmeldung nutzt (Schritt 7).
+
+1. **Pocket ID:** Die Flugmappe hat dort ihren eigenen OIDC-Client (öffentlicher Client ohne Secret,
+   PKCE). Für Suchlage braucht er nichts Neues. Seine **Client-ID** notieren, nicht die von Suchlage.
+2. **Suchlage:** *Einstellungen → Flugmappe*
+   - **Client-ID:** die Client-ID der Flugmappe aus Schritt 1. Suchlage nimmt nur Zugriffstokens an,
+     die für diesen Client ausgestellt sind.
+   - **Adresse der Flugmappe:** ihr Ursprung, nur Schema, Host und Port, ohne Pfad:
+     `https://uav.iuk-ue.de`. Nur von dort erlaubt Suchlage Aufrufe aus dem Browser (CORS).
+   - *Flugmappe speichern.* Der Zustand springt auf „an“. *Ausschalten* (oder ein leeres Formular)
+     schaltet die Schnittstelle wieder aus; jeder Aufruf der Flugmappe bekommt dann 503.
+3. **Konten:** Wer aus der Flugmappe mit Suchlage arbeitet, braucht in Suchlage die Rolle Operator
+   oder Verwaltung und muss sich **einmal in Suchlage angemeldet** haben. Suchlage legt über die
+   Schnittstelle keine Konten an; ein unbekanntes Konto bekommt 403.
+
+Schritt 6 deckt den Pfad schon ab. Gegenprobe von außen:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://suchlage.iuk-ue.de/api/flugmappe/v1/me   # 401 (an), 503 (aus)
+curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://suchlage.iuk-ue.de/api/flugmappe/v1/me \
+  -H 'Origin: https://uav.iuk-ue.de' -H 'Access-Control-Request-Method: GET'                # 204
+```
+
+In Suchlage stehen solche Einsätze mit „aus der Flugmappe“ bzw. „mit Flugmappe verknüpft“ (Name,
+Zeit) in der Einsatzliste und in der Kopfleiste. Abschnitte legt bei ihnen nur die Flugmappe an;
+Kartenfotos der Abschnitte zeigt die Einsatzliste, beim laufenden Einsatz das Menü in der Kopfleiste
+(*Kartenfotos …*).
+
 ## Abnahme
 
 `docs/betrieb/m1-realflug-checkliste.md`. Erst danach gilt die Auslieferung als fertig. Für die
@@ -327,6 +360,10 @@ ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d s
 Ab 0.4.0 läuft die Migration 0004 (Einsätze) beim Start des Servers von selbst. Alle vorhandenen
 Flüge, Kartenelemente und Fotos erscheinen danach unter „ohne Einsatz“; die Migration selbst
 verliert nichts (zum Aufräumen ohne Einsatz siehe die Warnung unten). Vor dem Update trotzdem sichern (siehe „Rückweg“).
+
+Ab 0.5.0 läuft die Migration 0005 (Flugmappe) ebenso von selbst. Vorhandene Einsätze gelten danach
+als in Suchlage angelegt und sind mit keiner Flugmappe verknüpft. Die Schnittstelle bleibt aus, bis
+sie unter *Einstellungen → Flugmappe* gesetzt ist (Schritt 11).
 
 **Achtung ab dem Stand mit „Aufräumen ohne Einsatz“ (SUL-78):** Kurz nach dem Start löscht der Server
 alle Kartenelemente ohne Einsatz, die seit mehr als 24 h nicht geändert wurden, auch die aus 0.4.0

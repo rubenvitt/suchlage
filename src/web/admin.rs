@@ -8,8 +8,8 @@ use axum::{Json, Router};
 use crate::app::AppState;
 use crate::auth::session::Admin;
 use crate::contract::{
-    BrokerSettingsInput, DjiSettingsInput, GeneralSettings, KioskTokenCreate, KioskTokenCreated,
-    KioskTokenView, MediaSettings, OidcSettingsInput, PhotoStorageSettingsInput,
+    BrokerSettingsInput, DjiSettingsInput, FlugmappeSettings, GeneralSettings, KioskTokenCreate,
+    KioskTokenCreated, KioskTokenView, MediaSettings, OidcSettingsInput, PhotoStorageSettingsInput,
     RemoteControllerCreate, RemoteControllerCreated, RemoteControllerView, SettingsView,
 };
 use crate::error::AppError;
@@ -21,7 +21,10 @@ use crate::time::now_ms;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/settings", get(settings_view))
-        .route("/settings/{section}", put(settings_update))
+        .route(
+            "/settings/{section}",
+            put(settings_update).delete(settings_remove),
+        )
         .route("/kiosk-tokens", get(list_kiosk).post(create_kiosk))
         .route("/kiosk-tokens/{id}", delete(delete_kiosk))
         .route("/remote-controllers", get(list_rcs).post(create_rc))
@@ -55,9 +58,26 @@ async fn settings_update(
                 .await?
         }
         "general" => s.update_general(parse::<GeneralSettings>(body)?).await?,
+        "flugmappe" => {
+            s.update_flugmappe(parse::<FlugmappeSettings>(body)?)
+                .await?
+        }
         _ => return Err(AppError::NotFound),
     }
     Ok(Json(s.view(&state.boot)))
+}
+
+/// Entfernt einen abschaltbaren Abschnitt (bisher nur die Schnittstelle für die Flugmappe).
+async fn settings_remove(
+    _: Admin,
+    State(state): State<AppState>,
+    Path(section): Path<String>,
+) -> Result<Json<SettingsView>, AppError> {
+    match section.as_str() {
+        "flugmappe" => state.settings.remove_flugmappe().await?,
+        _ => return Err(AppError::NotFound),
+    }
+    Ok(Json(state.settings.view(&state.boot)))
 }
 
 async fn list_kiosk(
@@ -244,6 +264,61 @@ mod tests {
                 .unwrap()
                 .starts_with("Ungültige Anfrage: "),
             "{body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_switches_the_flugmappe_interface_on_and_off() {
+        let app = test_app().await;
+        let admin = app.cookie(Role::Admin).await;
+        let op = app.cookie(Role::Operator).await;
+        let body = serde_json::json!({"client_id": "flugmappe", "allowed_origin": "https://uav.example.org/"});
+        let put = |cookie: &str, body: serde_json::Value| {
+            with_cookie(put_json("/api/settings/flugmappe", body), cookie)
+        };
+        assert_eq!(
+            send(&app.router, put(&op, body.clone())).await.0,
+            StatusCode::FORBIDDEN
+        );
+        let (status, view) = send(&app.router, put(&admin, body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            view["flugmappe"],
+            serde_json::json!({"client_id": "flugmappe", "allowed_origin": "https://uav.example.org"})
+        );
+        let bad = serde_json::json!({"client_id": "flugmappe", "allowed_origin": "https://uav.example.org/pfad"});
+        assert_eq!(
+            send(&app.router, put(&admin, bad)).await.0,
+            StatusCode::BAD_REQUEST
+        );
+
+        let remove = |uri: &str, cookie: &str| {
+            with_cookie(Request::delete(uri).body(Body::empty()).unwrap(), cookie)
+        };
+        assert_eq!(
+            send(&app.router, remove("/api/settings/flugmappe", &op))
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        let (status, view) = send(&app.router, remove("/api/settings/flugmappe", &admin)).await;
+        assert_eq!(
+            (status, &view["flugmappe"]),
+            (StatusCode::OK, &serde_json::Value::Null)
+        );
+        assert_eq!(
+            send(&app.router, remove("/api/settings/oidc", &admin))
+                .await
+                .0,
+            StatusCode::NOT_FOUND,
+            "nur die Flugmappe lässt sich entfernen"
+        );
+        // Ein leeres Formular schaltet ebenfalls aus.
+        let empty = serde_json::json!({"client_id": "", "allowed_origin": " "});
+        let (status, view) = send(&app.router, put(&admin, empty)).await;
+        assert_eq!(
+            (status, &view["flugmappe"]),
+            (StatusCode::OK, &serde_json::Value::Null)
         );
     }
 

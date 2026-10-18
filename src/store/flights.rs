@@ -192,6 +192,24 @@ pub async fn of_mission(
     Ok(rows.iter().map(summary).collect())
 }
 
+/// Alle Flüge eines Einsatzes mit dem Abschnitt, der beim Start aktiv war, älteste zuerst.
+pub async fn of_mission_with_section(
+    pool: &SqlitePool,
+    mission: i64,
+) -> Result<Vec<(FlightSummary, Option<i64>)>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, aircraft_sn, gateway_sn, started_at_ms, ended_at_ms, end_reason, max_elevation_m, \
+         distance_m, section_id FROM flights WHERE mission_id = ? ORDER BY started_at_ms, id",
+    )
+    .bind(mission)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| (summary(r), r.get("section_id")))
+        .collect())
+}
+
 /// Alle Flüge einer Fernsteuerung, auch laufende.
 pub async fn of_gateway(
     pool: &SqlitePool,

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { useLocation } from 'react-router';
 import { deletedHere, queryKeys } from '../api/queries';
-import { meAdmin, meKiosk } from '../contract/fixtures.generated';
+import { meAdmin, meKiosk, missionList } from '../contract/fixtures.generated';
 import type { Mission } from '../contract/generated/Mission';
 import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
@@ -14,7 +14,13 @@ import { SKIP_KEY } from './entry';
 import { MissionHeader } from './MissionHeader';
 
 const [running, prepared] = missionFixtures() as [Mission, Mission];
-const closed: Mission = { ...running, id: 5, name: 'Brand Celle', state: 'closed', closed_at_ms: 1792160000000 };
+const closed: Mission = {
+  ...running,
+  id: 5,
+  name: 'Brand Celle',
+  state: 'closed',
+  closed_at_ms: 1792160000000,
+};
 
 afterEach(() => {
   sessionStorage.clear();
@@ -52,7 +58,12 @@ test('laufend: Name, „Laufend“ mit Dauer, aktiver Abschnitt und das Menü', 
   await openMenu();
   expect(trigger).toHaveAttribute('aria-expanded', 'true');
   const menu = within(await screen.findByRole('menu'));
-  for (const item of ['Neuer Abschnitt …', 'Einsatz bearbeiten', 'Flüge dieses Einsatzes', 'Einsatz abschließen …'])
+  for (const item of [
+    'Neuer Abschnitt …',
+    'Einsatz bearbeiten',
+    'Flüge dieses Einsatzes',
+    'Einsatz abschließen …',
+  ])
     expect(menu.getByText(item)).toBeInTheDocument();
 });
 
@@ -265,4 +276,51 @@ test('verschwindet der angezeigte Einsatz, geht es zurück zum Einstieg', async 
 test('eine unbekannte Einsatznummer in der Flugliste führt zur Flugliste', async () => {
   show('/flights?einsatz=99');
   await vi.waitFor(() => expect(address()).toHaveTextContent(/^\/flights$/));
+});
+
+/** Laufend, aus der Flugmappe angelegt und verknüpft; der zweite Abschnitt hat ein Kartenfoto. */
+const linked = missionList.find((m) => m.origin === 'flugmappe')!;
+
+test('verknüpft: „· Flugmappe“ im Kopf, kein „Neuer Abschnitt …“, Herkunft und Erklärung im Menü', async () => {
+  show('/', [linked]);
+  const note = await screen.findByText('· Flugmappe');
+  expect(note).toHaveAttribute(
+    'title',
+    expect.stringMatching(
+      /^aus der Flugmappe · mit Flugmappe verknüpft · Gruppenführer I&K · \d\d\.\d\d\., \d\d:\d\d$/,
+    ),
+  );
+  await userEvent.click(screen.getByRole('button', { name: /Vermisste Person Waldweg/ }));
+  const menu = within(await screen.findByRole('menu'));
+  expect(menu.queryByText('Neuer Abschnitt …')).not.toBeInTheDocument();
+  expect(menu.getByText('Abschnitte kommen aus der Flugmappe').closest('li')).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+  expect(
+    menu.getByText(/^aus der Flugmappe · mit Flugmappe verknüpft · Gruppenführer I&K/),
+  ).toBeInTheDocument();
+});
+
+test('„Kartenfotos …“ zeigt das Kartenfoto des Abschnitts mit Versionszeichen, groß im neuen Tab', async () => {
+  show('/', [linked]);
+  await userEvent.click(await screen.findByRole('button', { name: /Vermisste Person Waldweg/ }));
+  await userEvent.click(await screen.findByText('Kartenfotos …'));
+  const dialog = within(await screen.findByRole('dialog'));
+  const url = '/api/missions/3/sections/5/map-photo?v=1792149100000';
+  const open = dialog.getByRole('link', { name: 'Kartenfoto Verlegung Waldrand in voller Größe öffnen' });
+  expect(open).toHaveAttribute('href', url);
+  expect(open).toHaveAttribute('target', '_blank');
+  expect(dialog.getByRole('img', { name: 'Kartenfoto Verlegung Waldrand' })).toHaveAttribute('src', url);
+  // Abschnitt 1 hat kein Kartenfoto.
+  expect(dialog.queryByText('Abschnitt Abschnitt 1')).not.toBeInTheDocument();
+});
+
+test('ohne Flugmappe: kein Hinweis und keine Kartenfotos im Menü', async () => {
+  show();
+  await openMenu();
+  const menu = within(await screen.findByRole('menu'));
+  expect(menu.queryByText('Kartenfotos …')).not.toBeInTheDocument();
+  expect(menu.queryByText(/Flugmappe/)).not.toBeInTheDocument();
+  expect(screen.queryByText('· Flugmappe')).not.toBeInTheDocument();
 });

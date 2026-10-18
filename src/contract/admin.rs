@@ -163,6 +163,17 @@ pub struct PhotoStorageSettingsInput {
     pub admin_token: Option<String>,
 }
 
+/// Schnittstelle für die Flugmappe (SUL-66). Keine Geheimnisse. Fehlt sie, ist die Schnittstelle
+/// aus (503); ein leeres Formular entfernt sie.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FlugmappeSettings {
+    /// Client-ID der Flugmappe in Pocket ID; ihre Zugriffstokens tragen sie in `aud`.
+    pub client_id: String,
+    /// Adresse der Flugmappe für CORS, z. B. `https://uav.example.org` (ohne Pfad).
+    pub allowed_origin: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct GeneralSettings {
@@ -180,6 +191,7 @@ pub struct SettingsView {
     pub broker: Option<BrokerSettingsView>,
     pub media: Option<MediaSettings>,
     pub photo_storage: Option<PhotoStorageSettingsView>,
+    pub flugmappe: Option<FlugmappeSettings>,
     pub general: GeneralSettings,
 }
 

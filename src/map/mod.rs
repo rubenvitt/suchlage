@@ -1,12 +1,13 @@
 //! Kartenelemente (M2): ein Ort, der prüft, speichert und jede Änderung an Browser (SSE) und Pilots
 //! (WebSocket) verteilt. Das DJI-Format kennt nur `dji::map`.
 
+pub mod geojson;
 pub mod rules;
 
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tokio::sync::{Mutex, broadcast, watch};
+use tokio::sync::{Mutex, MutexGuard, broadcast, watch};
 
 use crate::contract::{MapElement, MapElementKind, MapElementOrigin, MapPoint, MissionState};
 use crate::error::AppError;
@@ -81,6 +82,12 @@ impl MapHub {
         }
     }
 
+    /// Die Schreibsperre der Karte, für Anlagen am Hub vorbei (mehrere Elemente in einer
+    /// Transaktion). Wer sie hält, verteilt selbst (`publish`) und ruft keine sperrende Methode.
+    pub(crate) async fn serial(&self) -> MutexGuard<'_, ()> {
+        self.writes.lock().await
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<MapChange> {
         self.changes.subscribe()
     }
@@ -126,23 +133,7 @@ impl MapHub {
                 None => return Err(AppError::Unprocessable("Einsatz unbekannt".into())),
             }
         }
-        let id = match new.id {
-            Some(id) => valid_id(id)?,
-            None => uuid::Uuid::new_v4().to_string(),
-        };
-        let element = MapElement {
-            id,
-            name: rules::name(&new.name).map_err(AppError::Validation)?,
-            kind: new.kind,
-            points: rules::shape(new.kind, new.points).map_err(AppError::Validation)?,
-            color: new.color,
-            clamp_to_ground: new.clamp_to_ground,
-            author: new.author,
-            origin: new.origin,
-            created_at_ms: now_ms,
-            updated_at_ms: now_ms,
-            mission_id: new.mission_id,
-        };
+        let element = element(new, now_ms)?;
         if store::insert(&self.pool, &element).await? {
             self.publish(MapChange::Created(element.clone()));
             return Ok(element);
@@ -268,6 +259,27 @@ impl MapHub {
         // Ohne Empfänger (kein Browser, kein Pilot) geht die Änderung nur in die Datenbank.
         let _ = self.changes.send(change);
     }
+}
+
+/// Prüft ein neues Element und vergibt die ID, ohne zu speichern.
+pub fn element(new: NewElement, now_ms: i64) -> Result<MapElement, AppError> {
+    let id = match new.id {
+        Some(id) => valid_id(id)?,
+        None => uuid::Uuid::new_v4().to_string(),
+    };
+    Ok(MapElement {
+        id,
+        name: rules::name(&new.name).map_err(AppError::Validation)?,
+        kind: new.kind,
+        points: rules::shape(new.kind, new.points).map_err(AppError::Validation)?,
+        color: new.color,
+        clamp_to_ground: new.clamp_to_ground,
+        author: new.author,
+        origin: new.origin,
+        created_at_ms: now_ms,
+        updated_at_ms: now_ms,
+        mission_id: new.mission_id,
+    })
 }
 
 /// Räumt Elemente ohne Einsatz nach 24 h auf, bis der Server stoppt; der erste Lauf folgt gleich.

@@ -28,7 +28,18 @@ export const missionFixtures = (): Mission[] => [
     created_at_ms: 1792150000000,
     started_at_ms: 1792150600000,
     closed_at_ms: null,
-    sections: [{ id: 1, label: 'Nord', location: null, created_at_ms: 1792150700000 }],
+    sections: [
+      {
+        id: 1,
+        label: 'Nord',
+        location: null,
+        created_at_ms: 1792150700000,
+        has_map_photo: false,
+        map_photo_at_ms: null,
+      },
+    ],
+    origin: 'web',
+    flugmappe: null,
   },
   {
     id: 2,
@@ -40,6 +51,8 @@ export const missionFixtures = (): Mission[] => [
     started_at_ms: null,
     closed_at_ms: null,
     sections: [],
+    origin: 'web',
+    flugmappe: null,
   },
 ];
 
@@ -61,6 +74,8 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         started_at_ms: null,
         closed_at_ms: null,
         sections: [],
+        origin: 'web',
+        flugmappe: null,
       };
       missions.push(created);
       return HttpResponse.json(created);
@@ -89,39 +104,64 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
     }),
     // Feste Mengen: Die Vorschau zählt keine echten Flüge und Fotos.
     http.get('/api/missions/:id/contents', () =>
-      HttpResponse.json({ flights: 3, photos: 41, map_elements: 4, video_segments: 2 } satisfies MissionContents),
+      HttpResponse.json({
+        flights: 3,
+        photos: 41,
+        map_elements: 4,
+        video_segments: 2,
+      } satisfies MissionContents),
     ),
     http.delete('/api/missions/:id', ({ params }) => {
       const m = find(params.id);
       if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
       if (m.state === 'running')
-        return HttpResponse.json({ error: 'Ein laufender Einsatz lässt sich nicht löschen' }, { status: 422 });
+        return HttpResponse.json(
+          { error: 'Ein laufender Einsatz lässt sich nicht löschen' },
+          { status: 422 },
+        );
       missions.splice(missions.indexOf(m), 1);
       return new HttpResponse(null, { status: 204 });
     }),
     http.post('/api/missions/:id/sections', async ({ params, request }) => {
       const m = find(params.id);
       if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      if (m.flugmappe)
+        return HttpResponse.json(
+          { error: 'Abschnitte kommen bei diesem Einsatz aus der Flugmappe' },
+          { status: 422 },
+        );
       const input = (await request.json()) as SectionCreate;
       m.sections.push({
         id: m.sections.length + 1,
         label: input.label,
         location: input.location,
         created_at_ms: Date.now(),
+        has_map_photo: false,
+        map_photo_at_ms: null,
       });
       return HttpResponse.json(m);
     }),
+    // Vorschau-Modus: eine skizzierte Papierkarte statt eines echten Kartenfotos.
+    http.get('/api/missions/:id/sections/:section/map-photo', ({ params }) => {
+      const s = find(params.id)?.sections.find((x) => x.id === Number(params.section));
+      if (!s?.has_map_photo) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      return new HttpResponse(MAP_PHOTO_SVG, { headers: { 'content-type': 'image/svg+xml' } });
+    }),
   ];
 };
+
+const MAP_PHOTO_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#e8e1cf"/><path d="M60 480 C200 360 320 420 460 300 S700 160 760 120" stroke="#5a6b3a" stroke-width="10" fill="none"/><path d="M220 140 L560 140 L600 420 L180 440 Z" stroke="#c0392b" stroke-width="6" fill="none" stroke-dasharray="18 10"/></svg>';
 
 const noContent = () => new HttpResponse(null, { status: 204 });
 
 /**
  * Standard-Antworten aus den erzeugten Beispieldaten. `me` wählt die Rolle (Tests: Bedienung, Vorschau:
- * Verwaltung). Die schreibenden Antworten tragen den Vorschau-Modus; Tests, die eine Anfrage prüfen,
- * setzen ihre eigene per `server.use`.
+ * Verwaltung), `missions` die Einsätze (die Vorschau hat zusätzlich einen aus der Flugmappe). Die
+ * schreibenden Antworten tragen den Vorschau-Modus; Tests, die eine Anfrage prüfen, setzen ihre
+ * eigene per `server.use`.
  */
-export const handlersFor = (me: Me) => {
+export const handlersFor = (me: Me, missions: Mission[] = missionFixtures()) => {
   // Im Vorschau-Modus gezeichnete Elemente, damit Umbenennen ihre Form behält.
   const drawn = new Map<string, MapElement>(demoElements.map((e) => [e.id, e]));
   const flightMissions = demoFlightMissions();
@@ -158,9 +198,10 @@ export const handlersFor = (me: Me) => {
           { headers: { 'content-type': 'image/svg+xml' } },
         ),
     ),
-    ...missionHandlers(),
+    ...missionHandlers(missions),
     http.get('/api/settings', () => HttpResponse.json(fx.settingsView)),
     http.put('/api/settings/:section', () => HttpResponse.json(fx.settingsView)),
+    http.delete('/api/settings/flugmappe', () => HttpResponse.json({ ...fx.settingsView, flugmappe: null })),
     http.get('/api/remote-controllers', () => HttpResponse.json(fx.remoteControllers)),
     http.post('/api/remote-controllers', async ({ request }) => {
       const { label } = (await request.json()) as RemoteControllerCreate;

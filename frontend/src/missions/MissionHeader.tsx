@@ -17,6 +17,7 @@ import type { Mission } from '../contract/generated/Mission';
 import { useServerNow } from '../live/LiveProvider';
 import { DeleteMissionDialog } from './DeleteMissionDialog';
 import { useSkip } from './entry';
+import { flugmappeHint, MapPhotoThumb, SECTIONS_FROM_FLUGMAPPE } from './flugmappe';
 import './missions.css';
 import { useMissionScope } from './useMissionScope';
 
@@ -131,6 +132,7 @@ function Prepared({ mission, admin }: { mission: Mission; admin: boolean }) {
     <div className="sl-mission-status" data-state="vorbereitung">
       {holder}
       <span>Vorbereitung:</span> <strong>{mission.name}</strong>
+      <FlugmappeShort mission={mission} />
       <Button type="primary" size="small" loading={start.isPending} onClick={() => void run()}>
         Einsatz starten
       </Button>
@@ -144,6 +146,7 @@ function Archived({ mission, admin }: { mission: Mission; admin: boolean }) {
   return (
     <div className="sl-mission-status" data-state="archiv">
       <span>Archiv:</span> <strong>{mission.name}</strong> <span>· abgeschlossen</span>
+      <FlugmappeShort mission={mission} />
       <Link to={`/flights?einsatz=${mission.id}`}>Flüge</Link>
       {admin && <DeleteAction mission={mission} />}
       <Link to="/einsaetze">Zurück</Link>
@@ -151,7 +154,20 @@ function Archived({ mission, admin }: { mission: Mission; admin: boolean }) {
   );
 }
 
-type Dialog = 'section' | 'edit' | 'close';
+/**
+ * „· Flugmappe“ im Kopf, der ganze Hinweis als Tooltip. Schmal ausgeblendet; dort nennt ihn beim
+ * laufenden Einsatz das Menü.
+ */
+function FlugmappeShort({ mission }: { mission: Mission }) {
+  const hint = flugmappeHint(mission);
+  return hint ? (
+    <span className="sl-mission-note sl-mission-fm-short" title={hint}>
+      · Flugmappe
+    </span>
+  ) : null;
+}
+
+type Dialog = 'section' | 'edit' | 'close' | 'map-photos';
 
 function Running({ mission }: { mission: Mission }) {
   const now = useServerNow(15_000);
@@ -159,18 +175,35 @@ function Running({ mission }: { mission: Mission }) {
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [open, setOpen] = useState(false);
   const section = mission.sections.at(-1);
+  const hint = flugmappeHint(mission);
   const items: MenuProps['items'] = [
     {
       type: 'group',
       key: 'einsatz',
       label: 'Einsatz',
       children: [
-        { key: 'section', label: 'Neuer Abschnitt …' },
+        // Verknüpft: Abschnitte legt die Flugmappe an (Server: 422).
+        ...(mission.flugmappe ? [] : [{ key: 'section', label: 'Neuer Abschnitt …' }]),
+        ...(mission.sections.some((s) => s.has_map_photo) ? [{ key: 'map-photos', label: 'Kartenfotos …' }] : []),
         { key: 'edit', label: 'Einsatz bearbeiten' },
         { key: 'flights', label: 'Flüge dieses Einsatzes' },
         { key: 'close', label: 'Einsatz abschließen …', danger: true },
       ],
     },
+    // Nur Anzeige: Herkunft und Verknüpfung, schmal steht das nicht im Kopf.
+    ...(hint
+      ? [
+          {
+            type: 'group' as const,
+            key: 'flugmappe',
+            label: 'Flugmappe',
+            children: [
+              { key: 'fm-hint', label: hint, disabled: true },
+              ...(mission.flugmappe ? [{ key: 'fm-sections', label: SECTIONS_FROM_FLUGMAPPE, disabled: true }] : []),
+            ],
+          },
+        ]
+      : []),
   ];
   const onClick: MenuProps['onClick'] = ({ key }) => {
     setOpen(false);
@@ -185,10 +218,12 @@ function Running({ mission }: { mission: Mission }) {
           <strong>{mission.name}</strong>
           <StatusChip ton="normal" wort={`Laufend · ${since(mission.started_at_ms, now)}`} />
           {section && <span className="sl-mission-note">· Abschnitt {section.label}</span>}
+          <FlugmappeShort mission={mission} />
           <span aria-hidden="true">▾</span>
         </button>
       </Dropdown>
       {dialog === 'section' && <SectionDialog mission={mission} onClose={close} />}
+      {dialog === 'map-photos' && <MapPhotosDialog mission={mission} onClose={close} />}
       {dialog === 'edit' && <EditDialog mission={mission} onClose={close} />}
       {dialog === 'close' && <CloseDialog mission={mission} onClose={close} />}
     </div>
@@ -221,6 +256,25 @@ function SectionDialog({ mission, onClose }: { mission: Mission; onClose: () => 
         </Form.Item>
       </Form>
       {add.isError && <Alert type="error" title={errorText(add.error)} />}
+    </Modal>
+  );
+}
+
+/** Kartenfotos der Abschnitte (aus der Flugmappe), neueste Abschnitte zuletzt wie überall. */
+function MapPhotosDialog({ mission, onClose }: { mission: Mission; onClose: () => void }) {
+  return (
+    <Modal open title={`Kartenfotos · ${mission.name}`} footer={null} onCancel={onClose}>
+      <p className="sl-mission-fm-sections">Ein Klick öffnet das Foto in voller Größe in einem neuen Tab.</p>
+      <ul className="sl-map-photos">
+        {mission.sections
+          .filter((s) => s.has_map_photo)
+          .map((s) => (
+            <li key={s.id}>
+              <span>Abschnitt {s.label}</span>
+              <MapPhotoThumb missionId={mission.id} section={s} />
+            </li>
+          ))}
+      </ul>
     </Modal>
   );
 }

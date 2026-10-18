@@ -2,6 +2,8 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
+import { missionList } from '../contract/fixtures.generated';
+import type { Mission } from '../contract/generated/Mission';
 import { missionHandlers, missionFixtures } from '../test/handlers';
 import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
@@ -115,4 +117,35 @@ test('„Ohne Einsatz“ führt zur Lage und zu den Flügen ohne Einsatz', async
     'href',
     '/flights?einsatz=ohne',
   );
+});
+
+test('aus der Flugmappe und verknüpft: Hinweis, Kartenfoto am Abschnitt, kein „Abschnitt anlegen“', async () => {
+  const [, prepared] = missionFixtures();
+  const fm = missionList.find((m) => m.origin === 'flugmappe')!;
+  // Vorbereitet, damit die Seite ihn zeigt; der laufende stünde in der Kopfleiste.
+  const linked: Mission = { ...fm, state: 'prepared', started_at_ms: null };
+  server.use(...missionHandlers([linked, prepared!]));
+  renderWithApp(<MissionsPage />);
+  await screen.findByText(linked.name);
+  const row = within(screen.getByText(linked.name).closest('li')!);
+  expect(row.getByText('aus der Flugmappe')).toBeInTheDocument();
+  expect(
+    row.getByText(/^mit Flugmappe verknüpft · Gruppenführer I&K · \d\d\.\d\d\., \d\d:\d\d$/),
+  ).toBeInTheDocument();
+  expect(row.getByText('Abschnitte kommen aus der Flugmappe')).toBeInTheDocument();
+  expect(row.queryByRole('button', { name: /Abschnitt anlegen/ })).not.toBeInTheDocument();
+  expect(row.queryByLabelText(/Abschnitt zu/)).not.toBeInTheDocument();
+
+  const sections = within(row.getByRole('list', { name: `Abschnitte von ${linked.name}` }));
+  expect(sections.getByText('Abschnitt 1')).toBeInTheDocument();
+  expect(sections.getAllByRole('link')).toHaveLength(1);
+  const url = '/api/missions/3/sections/5/map-photo?v=1792149100000';
+  expect(
+    sections.getByRole('link', { name: 'Kartenfoto Verlegung Waldrand in voller Größe öffnen' }),
+  ).toHaveAttribute('href', url);
+  expect(sections.getByRole('img', { name: 'Kartenfoto Verlegung Waldrand' })).toHaveAttribute('src', url);
+
+  // Der Einsatz aus Suchlage bleibt wie gehabt.
+  expect(screen.queryAllByText('aus der Flugmappe')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Abschnitt anlegen: Hochwasser Aller' })).toBeInTheDocument();
 });

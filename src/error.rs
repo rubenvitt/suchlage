@@ -24,6 +24,9 @@ pub enum AppError {
     /// Konflikt mit dem Lebenszyklus (409).
     #[error("{0}")]
     Conflict(String),
+    /// Body über der Grenze der Route (413).
+    #[error("{0}")]
+    TooLarge(String),
     /// Abhängiger Dienst (Broker, MediaMTX, IdP) nicht erreichbar oder nicht eingerichtet (503).
     #[error("{0}")]
     Unavailable(String),
@@ -41,6 +44,7 @@ impl AppError {
             AppError::Validation(_) => StatusCode::BAD_REQUEST,
             AppError::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::Conflict(_) => StatusCode::CONFLICT,
+            AppError::TooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
             AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

@@ -40,6 +40,15 @@ pub async fn put<T: Serialize>(
     Ok(())
 }
 
+/// Löscht den Schlüssel, falls vorhanden.
+pub async fn delete(pool: &SqlitePool, key: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM settings WHERE key = ?")
+        .bind(key)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Löscht den Schlüssel nur, wenn er noch genau diesen Wert trägt (Vergleichen und Löschen in einem
 /// Schritt). `true`, wenn diese Anfrage ihn gelöscht hat.
 pub async fn delete_if<T: Serialize>(
@@ -79,6 +88,9 @@ mod tests {
         super::put(&pool, "x", &1u32, 0).await.unwrap();
         super::put(&pool, "x", &2u32, 1).await.unwrap();
         assert_eq!(super::get::<u32>(&pool, "x").await.unwrap(), Some(2));
+        super::delete(&pool, "x").await.unwrap();
+        super::delete(&pool, "x").await.unwrap();
+        assert_eq!(super::get::<u32>(&pool, "x").await.unwrap(), None);
     }
 
     #[tokio::test]

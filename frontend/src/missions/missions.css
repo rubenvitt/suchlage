@@ -36,6 +36,49 @@
   margin: 0;
   padding-left: 18px;
 }
+/* Flugmappe (SUL-66): Herkunft und Verknüpfung unter dem Einsatz, Kartenfoto am Abschnitt. */
+.sl-mission-fm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--lfh-gedaempft);
+}
+.sl-mission-fm-sections {
+  margin: 0;
+  color: var(--lfh-gedaempft);
+}
+.sl-map-photo {
+  display: block;
+  width: 120px;
+  margin: 4px 0;
+  border: 1px solid var(--lfh-linie);
+  background: var(--lfh-grund);
+}
+.sl-map-photo img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+.sl-map-photos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.sl-map-photos li {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.sl-map-photos .sl-map-photo {
+  width: 100%;
+  margin: 0;
+}
 
 /* Startseite ohne laufenden Einsatz: links neu anlegen, rechts vorbereitet; mobil untereinander. */
 .sl-welcome {
@@ -122,6 +165,10 @@
 }
 .sl-mission-note {
   color: var(--lfh-rahmen-gedaempft);
+}
+/* Kurzer Flugmappe-Hinweis im Kopf; schmal ist dafür kein Platz, das Menü nennt es ganz. */
+.sl-frame[data-mode='mobile'] .sl-mission-fm-short {
+  display: none;
 }
 .sl-mission-trigger {
   display: flex;

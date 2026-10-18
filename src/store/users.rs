@@ -81,6 +81,27 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<User>, sqlx::Error
     }))
 }
 
+/// Konto zu Aussteller und Subjekt, ohne es anzulegen. Der Aussteller zählt ohne Schrägstrich am
+/// Ende (Anmeldung und Zugriffstoken schreiben ihn nicht zwingend gleich).
+pub async fn find_by_oidc(
+    pool: &SqlitePool,
+    issuer: &str,
+    subject: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT id, display_name, role FROM users WHERE rtrim(oidc_issuer, '/') = ? AND oidc_subject = ?",
+    )
+    .bind(issuer.trim_end_matches('/'))
+    .bind(subject)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| User {
+        id: r.get("id"),
+        display_name: r.get("display_name"),
+        role: role(r.get("role")),
+    }))
+}
+
 pub async fn count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
@@ -109,7 +130,19 @@ mod tests {
             (a2.id, a2.role, a2.display_name.as_str()),
             (a.id, Role::Admin, "Erika Musterfrau")
         );
-        assert_eq!(get(&pool, b.id).await.unwrap(), Some(b));
+        assert_eq!(get(&pool, b.id).await.unwrap(), Some(b.clone()));
         assert_eq!(count(&pool).await.unwrap(), 2);
+        assert_eq!(
+            find_by_oidc(&pool, "https://id/", "sub-b").await.unwrap(),
+            Some(b)
+        );
+        assert_eq!(
+            find_by_oidc(&pool, "https://id", "sub-x").await.unwrap(),
+            None
+        );
+        assert_eq!(
+            find_by_oidc(&pool, "https://other", "sub-a").await.unwrap(),
+            None
+        );
     }
 }

@@ -1,10 +1,10 @@
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { settingsView } from '../contract/fixtures.generated';
+import { settingsEmpty, settingsView } from '../contract/fixtures.generated';
 import { server } from '../test/server';
 import { renderWithApp } from '../test/render';
-import { BrokerForm, PhotoStorageForm, secretOrNull } from './SettingsForms';
+import { BrokerForm, FlugmappeForm, PhotoStorageForm, secretOrNull } from './SettingsForms';
 
 test('leeres Geheimnis behält den gespeicherten Wert', () => {
   expect(secretOrNull('')).toBeNull();
@@ -96,4 +96,65 @@ test('Fotospeicher speichern behält beide Geheimnisse, wenn die Felder leer ble
     secret_access_key: null,
     admin_token: null,
   });
+});
+
+const chip = (wort: string) => screen.getByText(wort, { selector: '[data-lfh="status-chip"] span' });
+
+test('Flugmappe: aus, einschalten mit Client-ID und Adresse, der Server bereinigt die Adresse', async () => {
+  let body: unknown;
+  server.use(
+    http.put('/api/settings/flugmappe', async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({
+        ...settingsEmpty,
+        flugmappe: { client_id: 'flugmappe-pwa', allowed_origin: 'https://uav.iuk-ue.de' },
+      });
+    }),
+  );
+  renderWithApp(<FlugmappeForm view={null} />);
+  expect(chip('aus')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Ausschalten' })).not.toBeInTheDocument();
+  expect(
+    screen.getByText('Client-ID der Flugmappe aus Pocket ID – nicht die von Suchlage'),
+  ).toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText('Client-ID'), 'flugmappe-pwa');
+  await userEvent.type(screen.getByLabelText('Adresse der Flugmappe'), 'https://uav.iuk-ue.de/');
+  await userEvent.click(screen.getByRole('button', { name: 'Flugmappe speichern' }));
+  expect(await screen.findByText('Gespeichert.')).toBeInTheDocument();
+  expect(body).toEqual({ client_id: 'flugmappe-pwa', allowed_origin: 'https://uav.iuk-ue.de/' });
+  expect(chip('an')).toBeInTheDocument();
+  expect(screen.getByLabelText('Adresse der Flugmappe')).toHaveValue('https://uav.iuk-ue.de');
+});
+
+test('Flugmappe ausschalten: DELETE, Zustand aus, die Felder bleiben zum Wiedereinschalten', async () => {
+  let removed = false;
+  server.use(
+    http.delete('/api/settings/flugmappe', () => {
+      removed = true;
+      return HttpResponse.json(settingsEmpty);
+    }),
+  );
+  renderWithApp(<FlugmappeForm view={settingsView.flugmappe} />);
+  expect(chip('an')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Ausschalten' }));
+  expect(await screen.findByText('Ausgeschaltet.')).toBeInTheDocument();
+  expect(removed).toBe(true);
+  expect(chip('aus')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Ausschalten' })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Adresse der Flugmappe')).toHaveValue('https://uav.example.org');
+});
+
+test('Flugmappe: Fehler des Servers stehen am Formular, der Zustand bleibt', async () => {
+  server.use(
+    http.put('/api/settings/flugmappe', () =>
+      HttpResponse.json({ error: 'Adresse der Flugmappe: ohne Pfad angeben' }, { status: 400 }),
+    ),
+  );
+  renderWithApp(<FlugmappeForm view={null} />);
+  await userEvent.type(screen.getByLabelText('Client-ID'), 'fm');
+  await userEvent.type(screen.getByLabelText('Adresse der Flugmappe'), 'https://uav.iuk-ue.de/pfad');
+  await userEvent.click(screen.getByRole('button', { name: 'Flugmappe speichern' }));
+  expect(await screen.findByText('Adresse der Flugmappe: ohne Pfad angeben')).toBeInTheDocument();
+  expect(screen.queryByText('Gespeichert.')).not.toBeInTheDocument();
+  expect(chip('aus')).toBeInTheDocument();
 });
