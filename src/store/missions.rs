@@ -386,6 +386,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn photo_of_an_unassigned_flight_stays_unassigned() {
+        let pool = test_pool().await;
+        flights::insert(&pool, &flight(1, "AC1")).await.unwrap();
+        let b = create(&pool, &mc("B"), "u", 1).await.unwrap();
+        set_state(&pool, b.id, MissionState::Running, 2)
+            .await
+            .unwrap();
+        upsert(&pool, &photo("p", Some(1))).await.unwrap();
+        assert_eq!(since_unassigned(&pool, 0).await.unwrap().len(), 1);
+        assert!(in_mission(&pool, b.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn existing_rows_are_unassigned_after_migration() {
         let pool = test_pool().await;
         flights::insert(&pool, &flight(1, "AC1")).await.unwrap();

@@ -98,7 +98,7 @@ pub async fn upsert(pool: &SqlitePool, p: &NewPhoto) -> Result<i64, sqlx::Error>
          gateway_sn, aircraft_sn, flight_id, taken_at_ms, uploaded_at_ms, lat, lon, \
          absolute_altitude_m, relative_altitude_m, gimbal_yaw_deg, payload_model_key, mission_id) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
-         COALESCE((SELECT mission_id FROM flights WHERE id = ?), (SELECT id FROM missions WHERE state = 'running'))) \
+         (SELECT CASE WHEN ?18 IS NULL THEN (SELECT id FROM missions WHERE state = 'running') ELSE (SELECT mission_id FROM flights WHERE id = ?18) END)) \
          ON CONFLICT (object_key) DO UPDATE SET name = excluded.name, \
          fingerprint = excluded.fingerprint, tiny_fingerprint = excluded.tiny_fingerprint, \
          shot_key = excluded.shot_key, lens = excluded.lens, aircraft_sn = excluded.aircraft_sn, \
