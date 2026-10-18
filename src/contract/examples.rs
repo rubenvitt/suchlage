@@ -356,6 +356,7 @@ pub fn live_events() -> Vec<LiveEvent> {
         LiveEvent::PhotoShot {
             shot: photo_shots()[0].clone(),
         },
+        LiveEvent::MissionsChanged,
     ]
 }
 

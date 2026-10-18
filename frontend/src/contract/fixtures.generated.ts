@@ -646,6 +646,9 @@ export const liveEvents: LiveEvent[] = [
       "taken_at_ms": 1792142900000
     },
     "type": "photo_shot"
+  },
+  {
+    "type": "missions_changed"
   }
 ];
 

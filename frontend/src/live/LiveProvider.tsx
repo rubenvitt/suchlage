@@ -24,6 +24,7 @@ export function LiveProvider({ store, url = '/api/live', children }: { store?: L
       }
       // Fotos aus einer Lücke im Strom holt die Liste nach; neue Fotos eines Flugs auch sein Detail.
       if (e.type === 'snapshot') void client.invalidateQueries({ queryKey: queryKeys.photos });
+      if (e.type === 'missions_changed') void client.invalidateQueries({ queryKey: queryKeys.missions });
       if (e.type === 'photo_shot' && e.shot.flight_id != null) {
         void client.invalidateQueries({ queryKey: queryKeys.flightPhotos(e.shot.flight_id) });
       }

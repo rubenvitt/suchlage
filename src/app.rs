@@ -33,6 +33,7 @@ pub struct AppState {
     pub map: crate::map::MapHub,
     /// Fotos aus Pilot 2 (M3).
     pub photos: crate::photos::PhotoHub,
+    pub missions: crate::missions::MissionHub,
     /// Für die Proxies zu MediaMTX (`media::http_client`).
     pub http: reqwest::Client,
     /// Funkprotokoll der Fernsteuerungen für die Systemseite.
@@ -66,6 +67,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::live::routes())
         .merge(crate::web::flights::routes())
         .merge(crate::web::map::routes())
+        .merge(crate::web::missions::routes())
         .merge(crate::web::photos::routes())
         .merge(crate::web::streams::routes())
         .merge(crate::web::media::routes())
@@ -195,6 +197,9 @@ pub async fn run(
         crate::media::http_client(),
         boot.thumbs_dir(),
     );
+    let missions = crate::missions::MissionHub::start_up(pool.clone(), map.clone())
+        .await
+        .map_err(startup_error)?;
     let state = AppState {
         boot: Arc::new(boot),
         pool: pool.clone(),
@@ -205,6 +210,7 @@ pub async fn run(
         streams,
         map,
         photos,
+        missions,
         http: crate::media::http_client(),
         devlog,
     };

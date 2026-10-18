@@ -20,6 +20,7 @@ export const queryKeys = {
   kioskTokens: ['kiosk-tokens'] as const,
   health: ['health'] as const,
   /** Fotos der Lagekarte (letzte 24 h) und je Flug; der Live-Strom ergänzt beide. */
+  missions: ['missions'] as const,
   photos: ['photos'] as const,
   recentPhotos: ['photos', 'recent'] as const,
   flightPhotos: (id: number | null) => ['photos', 'flight', id] as const,

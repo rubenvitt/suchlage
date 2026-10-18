@@ -72,6 +72,10 @@ impl MapHub {
         self.changes.subscribe()
     }
 
+    /// Welche Elemente Pilot 2 sieht: die des laufenden Einsatzes, sonst die „ohne Einsatz“.
+    /// Wirksam ab Task 4.
+    pub fn set_pilot_scope(&self, _mission: Option<i64>) {}
+
     pub fn stop_signal(&self) -> watch::Receiver<bool> {
         self.stop.clone()
     }

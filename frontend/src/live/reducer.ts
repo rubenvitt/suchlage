@@ -130,6 +130,8 @@ export function applyEvent(s: LiveState, e: LiveEvent, clientNowMs: number): Liv
     case 'photo_shot':
       // Dieselbe Auslösung kommt zweimal: beim Upload und mit fertigem Vorschaubild.
       return { ...s, photoShots: { ...s.photoShots, [e.shot.id]: e.shot } };
+    case 'missions_changed':
+      return s;
     default:
       // Ein lange offener Tab kann einen neueren Server erleben; dessen neue Ereignisse lassen den Stand stehen.
       console.warn('Unbekanntes Live-Ereignis – übersprungen');
