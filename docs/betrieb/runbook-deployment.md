@@ -346,20 +346,30 @@ ssh <host> 'docker tag suchlage:<alte Version> suchlage:m1 && cd /srv/suchlage/d
 Fehlt der alte Tag am Host, holt ihn Schritt 3 aus GHCR. Hat ein neuerer Stand die Datenbank
 migriert, hilft der Rückweg nur mit der Sicherung von davor.
 
-**Sicherung.** Der Server wird kurz gestoppt, damit SQLite konsistent ist:
+**Sicherung.** Server und Fotospeicher werden kurz gestoppt, damit beide SQLite-Datenbanken
+(Suchlage und die Metadaten von Garage) konsistent sind. Nicht während eines Flugs:
 
 ```sh
-ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server &&
-  docker run --rm -v suchlage-m1_server-data:/d:ro -v /srv/suchlage/backup:/b busybox:1.37.0-uclibc tar czf /b/server-data-$(date +%F).tgz -C /d . &&
-  docker compose -f compose.m1.yaml start server'
+ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos &&
+  for v in server-data fotos-meta fotos-data; do
+    docker run --rm -v suchlage-m1_$v:/d:ro -v /srv/suchlage/backup:/b busybox:1.37.0-uclibc tar czf /b/$v-$(date +%F).tgz -C /d .
+  done &&
+  docker run --rm -v /srv/suchlage/garage-secrets:/d:ro -v /srv/suchlage/backup:/b busybox:1.37.0-uclibc tar czf /b/garage-secrets-$(date +%F).tgz -C /d . &&
+  docker compose -f compose.m1.yaml start fotos server'
 ```
 
+Die Flugvideos (`video`) sind groß und fehlen deshalb in der Schleife. Wer sie mitsichern will,
+nimmt `video` dazu und stoppt zusätzlich `media`.
+
 Was in welchem Volume liegt:
-- `suchlage-m1_server-data`: Datenbank mit Einstellungen, Konten und Flügen, dazu Rohmitschnitte.
+- `suchlage-m1_server-data`: Datenbank mit Einstellungen, Konten, Einsätzen, Flügen und
+  Kartenelementen, dazu Rohmitschnitte.
+- `suchlage-m1_fotos-meta`, `suchlage-m1_fotos-data`: Fotospeicher (Garage), nur zusammen
+  brauchbar. Das RPC-Geheimnis liegt außerhalb unter `/srv/suchlage/garage-secrets`.
 - `suchlage-m1_video`: Flugvideos.
 - `suchlage-m1_mqtt-data`: Broker-Zugänge, lassen sich neu aufbauen (siehe unten).
 
-`docker compose … down -v` löscht alle drei.
+`docker compose … down -v` löscht alle fünf.
 
 **Videoablage gemeinsam.** Der Server hängt `suchlage-m1_video` unter `/data/video` ein und löscht
 dort die Aufzeichnungen gelöschter Flüge. Dafür läuft MediaMTX als derselbe Nutzer wie der Server
