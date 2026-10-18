@@ -199,6 +199,7 @@ async fn update(
         patch.clamp_to_ground = shape.clamp_to_ground;
         patch.shape = Some((shape.kind, shape.points));
     }
+    in_scope(&state, &id).await?;
     let element = state.map.update(&id, patch, now_ms()).await?;
     Ok(Json(dji::ok(json!({ "id": element.id }))))
 }
@@ -211,8 +212,19 @@ async fn remove(
 ) -> DjiResult {
     pilot(&state, &headers, query.as_deref()).await?;
     workspace(&state, &workspace_id)?;
+    in_scope(&state, &id).await?;
     state.map.delete(&id).await?;
     Ok(Json(dji::ok(json!({ "id": id }))))
+}
+
+/// Pilot 2 ändert nur Elemente, die er sieht; alle anderen sind für ihn unbekannt (404). Die Prüfung
+/// liegt vor der Schreibsperre: Ein Element verlässt die Sicht nur durch Zuordnung oder Einsatzwechsel,
+/// und ein abgeschlossener Einsatz bleibt über `ensure_open` gesperrt.
+async fn in_scope(state: &AppState, id: &str) -> Result<(), DjiError> {
+    match state.map.get(id).await? {
+        Some(e) if e.mission_id == state.map.pilot_scope() => Ok(()),
+        _ => Err(AppError::NotFound.into()),
+    }
 }
 
 /// Pilot 2 verbindet sich mit `?x-auth-token=…`. Der Token wird vor dem Upgrade geprüft.
@@ -798,6 +810,42 @@ mod tests {
         // `assign` verteilt vor der Rückkehr; was fehlt, kommt nicht mehr.
         assert!(matches!(changes.try_recv().unwrap(), MapChange::Updated(_)));
         assert_eq!(changes.try_recv().unwrap(), MapChange::Refresh);
+    }
+
+    /// Sicherheitsbefund: Pilot 2 ändert, löscht oder überschreibt per Anlegen kein Element eines
+    /// anderen Einsatzes, auch wenn er dessen ID kennt.
+    #[tokio::test]
+    async fn pilot_cannot_touch_elements_outside_its_scope() {
+        let app = paired().await;
+        let (a, b) = (mission(&app, "A").await, mission(&app, "B").await);
+        app.state.missions.start(a, 1).await.unwrap();
+        let id = "5f0c8a1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
+        let in_b = app
+            .state
+            .map
+            .create(
+                NewElement {
+                    id: Some(id.into()),
+                    ..pin_in(Some(b))
+                },
+                1,
+            )
+            .await
+            .unwrap();
+
+        for req in [
+            request("PUT", &element_uri(id), Some(json!({"name": "Fremd"}))),
+            request("DELETE", &element_uri(id), None),
+            request("POST", &create_uri(), Some(pin_body(id))),
+        ] {
+            let (status, body) = send(&app.router, req).await;
+            assert_eq!(
+                (status, &body["code"]),
+                (StatusCode::NOT_FOUND, &json!(404)),
+                "{body}"
+            );
+        }
+        assert_eq!(app.state.map.get(id).await.unwrap(), Some(in_b));
     }
 
     /// Eine gelöschte Fernsteuerung verliert auch einen schon offenen Kartenabgleich.

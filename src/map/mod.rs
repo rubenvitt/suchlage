@@ -110,7 +110,8 @@ impl MapHub {
         Ok(store::get(&self.pool, id).await?)
     }
 
-    /// Legt an. Gibt es die ID schon (Pilot 2 wiederholt eine Anfrage), wird der Stand überschrieben.
+    /// Legt an. Gibt es die ID schon (Pilot 2 wiederholt eine Anfrage), wird der Stand überschrieben –
+    /// aber nur im selben Einsatz; ein Element eines anderen Einsatzes ist für den Absender unbekannt.
     pub async fn create(&self, new: NewElement, now_ms: i64) -> Result<MapElement, AppError> {
         let _serial = self.writes.lock().await;
         if let Some(mission) = new.mission_id {
@@ -141,6 +142,10 @@ impl MapHub {
         if store::insert(&self.pool, &element).await? {
             self.publish(MapChange::Created(element.clone()));
             return Ok(element);
+        }
+        match store::get(&self.pool, &element.id).await? {
+            Some(existing) if existing.mission_id == element.mission_id => {}
+            _ => return Err(AppError::NotFound),
         }
         let patch = ElementPatch {
             name: Some(element.name),
