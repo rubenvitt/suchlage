@@ -143,6 +143,17 @@ pub async fn delete(pool: &SqlitePool, id: &str) -> Result<bool, sqlx::Error> {
     Ok(done.rows_affected() == 1)
 }
 
+/// IDs der Elemente ohne Einsatz, zuletzt geändert vor `cutoff_ms`.
+pub async fn unassigned_older_than(
+    pool: &SqlitePool,
+    cutoff_ms: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar("SELECT id FROM map_elements WHERE mission_id IS NULL AND updated_at_ms < ?")
+        .bind(cutoff_ms)
+        .fetch_all(pool)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

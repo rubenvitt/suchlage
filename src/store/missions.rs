@@ -2,7 +2,9 @@
 
 use sqlx::{Row, SqlitePool};
 
-use crate::contract::{Mission, MissionCreate, MissionSection, MissionState, SectionCreate};
+use crate::contract::{
+    Mission, MissionCreate, MissionSection, MissionState, MissionUpdate, SectionCreate,
+};
 
 fn state_str(s: MissionState) -> &'static str {
     match s {
@@ -214,6 +216,50 @@ pub async fn assign_element(
             .bind(element_id)
             .execute(pool)
             .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Name und Ort ändern. `false`, wenn es den Einsatz nicht gibt.
+pub async fn update(pool: &SqlitePool, id: i64, u: &MissionUpdate) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query("UPDATE missions SET name = ?, location = ? WHERE id = ?")
+        .bind(&u.name)
+        .bind(&u.location)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Anzahl Flüge, Fotodateien (Zeilen, nicht Auslösungen) und Kartenelemente.
+pub async fn counts(pool: &SqlitePool, id: i64) -> Result<(u32, u32, u32), sqlx::Error> {
+    let (f, p, e): (u32, u32, u32) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM flights WHERE mission_id = ?1), \
+         (SELECT COUNT(*) FROM photos WHERE mission_id = ?1), \
+         (SELECT COUNT(*) FROM map_elements WHERE mission_id = ?1)",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    Ok((f, p, e))
+}
+
+/// Löscht den Einsatz mit allem, was an ihm hängt, in einer Transaktion. `false`, wenn er fehlt.
+pub async fn delete_rows(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    // Fotos zuerst: ihre flight_id zeigt auf Flüge (SET NULL), mission_id hat keine Kaskade.
+    for sql in [
+        "DELETE FROM photos WHERE mission_id = ?1 OR flight_id IN (SELECT id FROM flights WHERE mission_id = ?1)",
+        "DELETE FROM flights WHERE mission_id = ?1",
+        "DELETE FROM map_elements WHERE mission_id = ?1",
+        "DELETE FROM mission_sections WHERE mission_id = ?1",
+    ] {
+        sqlx::query(sql).bind(id).execute(&mut *tx).await?;
+    }
+    let done = sqlx::query("DELETE FROM missions WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(done.rows_affected() == 1)
 }
 
@@ -476,5 +522,145 @@ mod tests {
         map_elements::insert(&pool, &pin).await.unwrap();
         assert!(assign_element(&pool, &pin.id, m.id).await.unwrap());
         assert!(!assign_element(&pool, &pin.id, m.id).await.unwrap());
+    }
+
+    /// Einsatz mit Flug `fid`, Spur, Foto am Flug, Foto ohne Flug, Element und zweitem Abschnitt.
+    async fn filled(pool: &SqlitePool, name: &str, fid: i64) -> i64 {
+        let m = create(pool, &mc(name), "u", 1).await.unwrap();
+        set_state(pool, m.id, MissionState::Running, 2)
+            .await
+            .unwrap();
+        flights::insert(pool, &flight(fid, &format!("AC{fid}")))
+            .await
+            .unwrap();
+        let pt = crate::contract::TrackPoint {
+            t_ms: 1,
+            lat: 52.0,
+            lon: 10.0,
+            elevation_m: None,
+        };
+        flights::append_points(pool, fid, &[(0, pt)]).await.unwrap();
+        upsert(pool, &photo(&format!("{name}-f"), Some(fid)))
+            .await
+            .unwrap();
+        upsert(pool, &photo(&format!("{name}-n"), None))
+            .await
+            .unwrap();
+        let mut e = examples::map_elements().remove(1);
+        e.id = format!("el-{name}");
+        e.mission_id = Some(m.id);
+        map_elements::insert(pool, &e).await.unwrap();
+        add_section(
+            pool,
+            m.id,
+            &SectionCreate {
+                label: "Nord".into(),
+                location: None,
+            },
+            3,
+        )
+        .await
+        .unwrap();
+        set_state(pool, m.id, MissionState::Closed, 4)
+            .await
+            .unwrap();
+        m.id
+    }
+
+    async fn rows(pool: &SqlitePool, table: &str) -> i64 {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn counts_match_contents() {
+        let pool = test_pool().await;
+        let a = filled(&pool, "A", 1).await;
+        assert_eq!(counts(&pool, a).await.unwrap(), (1, 2, 1));
+        assert_eq!(counts(&pool, 999).await.unwrap(), (0, 0, 0));
+    }
+
+    #[tokio::test]
+    async fn delete_rows_removes_everything_of_the_mission_and_nothing_else() {
+        let pool = test_pool().await;
+        let a = filled(&pool, "A", 1).await;
+        let b = filled(&pool, "B", 2).await;
+        assert!(delete_rows(&pool, a).await.unwrap());
+        assert!(!delete_rows(&pool, a).await.unwrap());
+        assert_eq!(get(&pool, a).await.unwrap(), None);
+        assert_eq!(counts(&pool, b).await.unwrap(), (1, 2, 1));
+        assert_eq!(get(&pool, b).await.unwrap().unwrap().sections.len(), 2);
+        assert_eq!(flights::segments(&pool, 2).await.unwrap().len(), 1);
+        for (t, n) in [
+            ("missions", 1),
+            ("flights", 1),
+            ("photos", 2),
+            ("map_elements", 1),
+            ("mission_sections", 2),
+            ("track_points", 1),
+        ] {
+            assert_eq!(rows(&pool, t).await, n, "{t}");
+        }
+    }
+
+    #[tokio::test]
+    async fn flight_delete_takes_its_photos_only() {
+        let pool = test_pool().await;
+        let a = filled(&pool, "A", 1).await;
+        assert_eq!(flights::of_mission(&pool, a).await.unwrap().len(), 1);
+        assert!(flights::delete_rows(&pool, 1).await.unwrap());
+        assert!(!flights::delete_rows(&pool, 1).await.unwrap());
+        let left = crate::store::photos::of_mission_all(&pool, a)
+            .await
+            .unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].name, "A-n.JPG");
+        assert_eq!(rows(&pool, "track_points").await, 0);
+        assert_eq!(
+            crate::store::photos::delete_shot_rows(&pool, "RC1/A-n")
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn unassigned_older_than_ignores_assigned_and_fresh() {
+        let pool = test_pool().await;
+        let mut old = examples::map_elements().remove(1);
+        old.id = "old".into();
+        old.updated_at_ms = 100;
+        let mut fresh = old.clone();
+        fresh.id = "fresh".into();
+        fresh.updated_at_ms = 900;
+        let m = create(&pool, &mc("A"), "u", 1).await.unwrap();
+        let mut assigned = old.clone();
+        assigned.id = "assigned".into();
+        assigned.mission_id = Some(m.id);
+        for e in [&old, &fresh, &assigned] {
+            map_elements::insert(&pool, e).await.unwrap();
+        }
+        assert_eq!(
+            map_elements::unassigned_older_than(&pool, 500)
+                .await
+                .unwrap(),
+            vec!["old"]
+        );
+    }
+
+    #[tokio::test]
+    async fn update_changes_name_and_location() {
+        let pool = test_pool().await;
+        let m = create(&pool, &mc("A"), "u", 1).await.unwrap();
+        let u = MissionUpdate {
+            name: "Neu".into(),
+            location: None,
+        };
+        assert!(update(&pool, m.id, &u).await.unwrap());
+        let g = get(&pool, m.id).await.unwrap().unwrap();
+        assert_eq!((g.name.as_str(), g.location), ("Neu", None));
+        assert!(!update(&pool, 999, &u).await.unwrap());
     }
 }

@@ -212,6 +212,20 @@ pub async fn since_unassigned(
     Ok(rows.iter().map(row).collect())
 }
 
+/// Alle Fotodateien eines Einsatzes, mit und ohne Flug.
+pub async fn of_mission_all(pool: &SqlitePool, mission: i64) -> Result<Vec<PhotoRow>, sqlx::Error> {
+    in_mission(pool, mission).await
+}
+
+/// Löscht alle Zeilen einer Auslösung; Anzahl gelöschter Zeilen.
+pub async fn delete_shot_rows(pool: &SqlitePool, shot_key: &str) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query("DELETE FROM photos WHERE shot_key = ?")
+        .bind(shot_key)
+        .execute(pool)
+        .await?;
+    Ok(done.rows_affected())
+}
+
 pub async fn of_flight(pool: &SqlitePool, flight_id: i64) -> Result<Vec<PhotoRow>, sqlx::Error> {
     let rows = sqlx::query(concat!(
         "SELECT ",
