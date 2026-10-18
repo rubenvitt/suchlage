@@ -123,17 +123,21 @@ async fn map_photo(
     Path((id, section_id)): Path<(i64, i64)>,
 ) -> Result<Response, AppError> {
     let mission = state.missions.get(id).await?;
-    if !mission
+    // Der Dateipfad entsteht aus der ID der gespeicherten Abschnittszeile, nicht aus dem URL-Pfad.
+    let section = mission
         .sections
         .iter()
-        .any(|s| s.id == section_id && s.has_map_photo)
-    {
-        return Err(AppError::NotFound);
-    }
-    let bytes = match tokio::fs::read(state.missions.map_photo_path(section_id)).await {
+        .find(|s| s.id == section_id && s.has_map_photo)
+        .ok_or(AppError::NotFound)?;
+    let bytes = match tokio::fs::read(state.missions.map_photo_path(section.id)).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
-        Err(e) => return Err(AppError::Internal(format!("Kartenfoto {section_id}: {e}"))),
+        Err(e) => {
+            return Err(AppError::Internal(format!(
+                "Kartenfoto {}: {e}",
+                section.id
+            )));
+        }
     };
     Response::builder()
         .header(header::CONTENT_TYPE, "image/jpeg")
