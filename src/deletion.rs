@@ -20,6 +20,16 @@ use crate::store;
 /// Länger darf ein Objekt im Fotospeicher nicht brauchen: Die Einsatzsperre bleibt gehalten.
 const S3_TIMEOUT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 10 });
 
+/// Führt eine Löschung als eigene Aufgabe zu Ende, auch wenn der Browser die Verbindung trennt.
+/// Axum bricht sonst die Anfrage zwischen Dateien und Datenbank ab: Dateien weg, Zeilen noch da.
+pub async fn detached(
+    deletion: impl Future<Output = Result<(), AppError>> + Send + 'static,
+) -> Result<(), AppError> {
+    tokio::spawn(deletion)
+        .await
+        .map_err(|e| AppError::Internal(format!("Löschen abgebrochen: {e}")))?
+}
+
 #[derive(Clone)]
 pub struct Deleter {
     pub pool: SqlitePool,
@@ -240,6 +250,7 @@ async fn remove_file(path: &Path) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
     use axum::http::StatusCode;
     use serde_json::json;
@@ -776,5 +787,24 @@ mod tests {
             send(&app.router, put(&uri, "B")).await.0,
             StatusCode::UNPROCESSABLE_ENTITY
         );
+    }
+
+    #[tokio::test]
+    async fn detached_deletion_finishes_after_the_request_is_dropped() {
+        let (go, wait) = tokio::sync::oneshot::channel::<()>();
+        let (done, finished) = tokio::sync::oneshot::channel::<()>();
+        let request = super::detached(async move {
+            let _ = wait.await;
+            let _ = done.send(());
+            Ok(())
+        });
+        // Der Browser trennt: Die Anfrage fällt weg, bevor die Löschung fertig ist.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), request)
+                .await
+                .is_err()
+        );
+        go.send(()).unwrap();
+        finished.await.expect("Löschung lief zu Ende");
     }
 }

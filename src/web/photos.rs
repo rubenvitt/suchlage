@@ -84,7 +84,8 @@ async fn delete_shot(
     State(state): State<AppState>,
     Path(shot_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    state.deleter.delete_shot(&shot_id).await?;
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_shot(&shot_id).await }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

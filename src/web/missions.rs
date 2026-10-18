@@ -79,7 +79,8 @@ async fn delete(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    state.deleter.delete_mission(id).await?;
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_mission(id).await }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

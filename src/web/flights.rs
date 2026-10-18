@@ -66,7 +66,8 @@ async fn delete_flight(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    state.deleter.delete_flight(id).await?;
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_flight(id).await }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -75,7 +76,8 @@ async fn delete_video(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    state.deleter.delete_flight_video(id).await?;
+    let d = state.deleter.clone();
+    crate::deletion::detached(async move { d.delete_flight_video(id).await }).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
