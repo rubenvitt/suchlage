@@ -805,6 +805,10 @@ export const settingsView: SettingsView = {
     "has_license": true,
     "workspace_id": "00000000-0000-4000-8000-000000000001"
   },
+  "flugmappe": {
+    "allowed_origin": "https://uav.example.org",
+    "client_id": "3c1f8a2e-7b4d-4e6a-9c5b-1d2e3f4a5b6c"
+  },
   "general": {
     "auto_live_on_takeoff": true,
     "record_raw_mqtt": true
@@ -836,6 +840,7 @@ export const settingsView: SettingsView = {
 export const settingsEmpty: SettingsView = {
   "broker": null,
   "dji": null,
+  "flugmappe": null,
   "general": {
     "auto_live_on_takeoff": true,
     "record_raw_mqtt": true

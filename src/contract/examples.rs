@@ -632,6 +632,10 @@ pub fn settings_view() -> SettingsView {
             has_secret_access_key: true,
             has_admin_token: true,
         }),
+        flugmappe: Some(FlugmappeSettings {
+            client_id: "3c1f8a2e-7b4d-4e6a-9c5b-1d2e3f4a5b6c".into(),
+            allowed_origin: "https://uav.example.org".into(),
+        }),
         general: GeneralSettings {
             auto_live_on_takeoff: true,
             record_raw_mqtt: true,
@@ -646,6 +650,7 @@ pub fn settings_empty() -> SettingsView {
         broker: None,
         media: None,
         photo_storage: None,
+        flugmappe: None,
         general: GeneralSettings {
             auto_live_on_takeoff: true,
             record_raw_mqtt: true,
