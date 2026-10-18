@@ -159,6 +159,7 @@ pub async fn run(
         })
         .await;
     let map = crate::map::MapHub::new(pool.clone(), stop_rx.clone());
+    tokio::spawn(crate::map::cleanup_loop(map.clone(), stop_rx.clone()));
     let (mqtt, link_requests) = crate::mqtt::MqttLink::channel();
     let devlog = crate::devlog::DeviceLog::new(stop_rx.clone());
     // Upload-Schlüssel der Fotos (M3) laufen nach einer Stunde ab; der Lauf löscht sie danach.

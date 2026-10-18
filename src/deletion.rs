@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sqlx::SqlitePool;
 
@@ -15,6 +16,9 @@ use crate::media::recordings;
 use crate::missions::MissionHub;
 use crate::photos::PhotoHub;
 use crate::store;
+
+/// Länger darf ein Objekt im Fotospeicher nicht brauchen: Die Einsatzsperre bleibt gehalten.
+const S3_TIMEOUT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 10 });
 
 #[derive(Clone)]
 pub struct Deleter {
@@ -169,7 +173,9 @@ impl Deleter {
     /// Fotospeicher, Vorschaubilder, Video – in dieser Reihenfolge, beim ersten Fehler Schluss.
     async fn remove(&self, files: &Files) -> Result<(), AppError> {
         for (_, key) in &files.photos {
-            self.photos.delete_object(key).await?;
+            tokio::time::timeout(S3_TIMEOUT, self.photos.delete_object(key))
+                .await
+                .map_err(|_| AppError::Unavailable("Fotospeicher antwortet nicht".into()))??;
         }
         for (id, _) in &files.photos {
             remove_file(&self.photos.thumb_path(*id)).await?;
@@ -522,6 +528,21 @@ mod tests {
         assert!(changed.try_recv().is_ok(), "missions_changed");
         let (status, _) = del(&app, &admin, &format!("/api/missions/{}", f.mission)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn hanging_storage_is_503_and_deletes_nothing() {
+        let (app, seen, admin) = as_admin().await;
+        let f = filled(&app, &seen).await;
+        seen.lock().unwrap().hang = true;
+        let (status, _) = del(&app, &admin, &format!("/api/missions/{}", f.mission)).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            crate::store::missions::counts(&app.state.pool, f.mission)
+                .await
+                .unwrap(),
+            (1, 2, 1)
+        );
     }
 
     #[tokio::test]
