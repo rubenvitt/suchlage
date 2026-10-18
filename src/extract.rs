@@ -2,6 +2,7 @@
 
 use axum::Json;
 use axum::extract::{FromRequest, Request};
+use axum::http::StatusCode;
 use serde::de::DeserializeOwned;
 
 use crate::error::AppError;
@@ -18,6 +19,9 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
             Ok(Json(value)) => Ok(Self(value)),
+            Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+                Err(AppError::TooLarge("Anfrage zu groß".into()))
+            }
             Err(rejection) => Err(AppError::Validation(format!(
                 "Ungültige Anfrage: {}",
                 rejection.body_text()
@@ -31,7 +35,6 @@ mod tests {
     use super::*;
     use crate::testing::{post_json, send};
     use axum::Router;
-    use axum::http::StatusCode;
     use axum::routing::post;
 
     #[derive(serde::Deserialize)]
@@ -55,6 +58,18 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, "Trupp");
+    }
+
+    #[tokio::test]
+    async fn too_large_body_is_413() {
+        let router = echo().layer(axum::extract::DefaultBodyLimit::max(16));
+        let (status, body) = send(
+            &router,
+            post_json("/echo", serde_json::json!({ "name": "x".repeat(32) })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(body["error"], "Anfrage zu groß");
     }
 
     #[tokio::test]

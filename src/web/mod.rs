@@ -3,6 +3,7 @@ pub mod admin;
 pub mod auth;
 pub mod devlog;
 pub mod flights;
+pub mod flugmappe;
 pub mod live;
 pub mod map;
 pub mod media;

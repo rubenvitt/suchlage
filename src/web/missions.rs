@@ -1,8 +1,10 @@
 //! Einsätze für den Browser. Lesen darf jede Sitzung, auch das Großbild; ändern nur Operator
 //! und Admin. Änderungen erreichen die Browser über `/api/live` (`missions_changed`).
 
+use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
+use axum::response::Response;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 
@@ -23,6 +25,10 @@ pub fn routes() -> Router<AppState> {
         .route("/missions/{id}/start", post(start))
         .route("/missions/{id}/close", post(close))
         .route("/missions/{id}/sections", post(add_section))
+        .route(
+            "/missions/{id}/sections/{section_id}/map-photo",
+            get(map_photo),
+        )
         .route("/flights/{id}/mission", put(assign_flight))
 }
 
@@ -107,6 +113,33 @@ async fn add_section(
     JsonBody(input): JsonBody<SectionCreate>,
 ) -> Result<Json<Mission>, AppError> {
     Ok(Json(state.missions.add_section(id, input, now_ms()).await?))
+}
+
+/// Foto der Papierkarte eines Abschnitts (aus der Flugmappe). Die Flugmappe kann es ersetzen;
+/// `map_photo_at_ms` am Abschnitt taugt als Versionszeichen für die URL.
+async fn map_photo(
+    _: Viewer,
+    State(state): State<AppState>,
+    Path((id, section_id)): Path<(i64, i64)>,
+) -> Result<Response, AppError> {
+    let mission = state.missions.get(id).await?;
+    if !mission
+        .sections
+        .iter()
+        .any(|s| s.id == section_id && s.has_map_photo)
+    {
+        return Err(AppError::NotFound);
+    }
+    let bytes = match tokio::fs::read(state.missions.map_photo_path(section_id)).await {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
+        Err(e) => return Err(AppError::Internal(format!("Kartenfoto {section_id}: {e}"))),
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, "image/jpeg")
+        .header(header::CACHE_CONTROL, "private, no-cache")
+        .body(Body::from(bytes))
+        .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 async fn assign_flight(

@@ -1,6 +1,11 @@
 //! Zugriffstokens der Flugmappe (SUL-66): JWT nach RFC 9068 von Pocket ID, lokal geprüft gegen den
 //! JWKS des in den OIDC-Einstellungen stehenden Ausstellers. Kein Rückfall über Userinfo.
 
+use std::sync::Arc;
+
+use axum::extract::{FromRef, FromRequestParts};
+use axum::http::header::AUTHORIZATION;
+use axum::http::request::Parts;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use openidconnect::core::{
@@ -8,9 +13,13 @@ use openidconnect::core::{
 };
 use openidconnect::{JsonWebKey, JsonWebKeyAlgorithm};
 use serde::Deserialize;
+use sqlx::SqlitePool;
 
 use crate::auth::oidc::OidcState;
 use crate::error::AppError;
+use crate::settings::SettingsHandle;
+use crate::store::users::{self, User};
+use crate::time::now_ms;
 
 /// Spielraum für Uhren, die nicht genau gehen (Ablauf und Ausstellungszeit).
 pub const CLOCK_SKEW_S: i64 = 60;
@@ -253,6 +262,56 @@ pub async fn verify(
         tracing::info!(?reason, "Zugriffstoken der Flugmappe abgelehnt");
         AppError::UnauthorizedWith(reason.message().into())
     })
+}
+
+/// Konto zu einem geprüften Token. Die einzige Stelle, an der die Schnittstelle der Flugmappe das
+/// Konto nachschlägt – eine Kontosperre (SUL-52) gehört hierher. Konten entstehen hier nie.
+pub async fn account(pool: &SqlitePool, claims: &AccessClaims) -> Result<User, AppError> {
+    // Alle Konten haben `operator` oder `admin`; beide dürfen die Schnittstelle nutzen.
+    users::find_by_oidc(pool, &claims.issuer, &claims.subject)
+        .await?
+        .ok_or(AppError::Forbidden)
+}
+
+/// `Authorization: Bearer <Token>`, Schema ohne Rücksicht auf Groß- und Kleinschreibung.
+fn bearer_token(parts: &Parts) -> Option<&str> {
+    let value = parts.headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then_some(token)
+}
+
+/// Konto hinter dem Zugriffstoken der Flugmappe. Schnittstelle aus → 503 (vor allem anderen),
+/// Token fehlt oder ungültig → 401, kein Konto in Suchlage → 403.
+pub struct FlugmappeUser(pub User);
+
+impl<S: Send + Sync> FromRequestParts<S> for FlugmappeUser
+where
+    SqlitePool: FromRef<S>,
+    SettingsHandle: FromRef<S>,
+    Arc<OidcState>: FromRef<S>,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, AppError> {
+        let settings = SettingsHandle::from_ref(state).current();
+        let flugmappe = settings.flugmappe.ok_or_else(|| {
+            AppError::Unavailable("Die Schnittstelle für die Flugmappe ist aus".into())
+        })?;
+        let oidc = settings.oidc.ok_or_else(|| {
+            AppError::Unavailable("Die Anmeldung über Pocket ID ist nicht eingerichtet".into())
+        })?;
+        let token = bearer_token(parts).ok_or(AppError::Unauthorized)?;
+        let expected = Expected {
+            issuer: &oidc.issuer,
+            audience: &flugmappe.client_id,
+            now_s: now_ms().div_euclid(1000),
+        };
+        let claims = verify(&Arc::<OidcState>::from_ref(state), token, &expected).await?;
+        Ok(FlugmappeUser(
+            account(&SqlitePool::from_ref(state), &claims).await?,
+        ))
+    }
 }
 
 #[cfg(test)]
