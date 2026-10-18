@@ -49,6 +49,9 @@ pub struct PhotoShot {
     /// Höhe über dem Startpunkt laut Pilot 2 (DJI `relative_altitude`).
     pub relative_altitude_m: Option<f64>,
     pub gimbal_yaw_deg: Option<f64>,
+    /// `null`: ohne Einsatz.
+    #[ts(type = "number | null")]
+    pub mission_id: Option<i64>,
     /// Wärmebild zuerst, dann Weit, Zoom, sichtbar, unbekannt.
     pub photos: Vec<Photo>,
 }

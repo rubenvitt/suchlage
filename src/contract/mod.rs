@@ -7,6 +7,7 @@ pub mod examples;
 pub mod flights;
 pub mod live;
 pub mod map;
+pub mod missions;
 pub mod photos;
 
 #[cfg(test)]
@@ -17,6 +18,7 @@ pub use devicelog::*;
 pub use flights::*;
 pub use live::*;
 pub use map::*;
+pub use missions::*;
 pub use photos::*;
 
 /// Ab hier gilt ein Wert als verzögert (3 verpasste osd-Nachrichten bei 0,5 Hz).

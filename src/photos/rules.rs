@@ -164,6 +164,7 @@ pub fn shots(photos: &[PhotoRow]) -> Vec<PhotoShot> {
                 absolute_altitude_m: lead.absolute_altitude_m,
                 relative_altitude_m: lead.relative_altitude_m,
                 gimbal_yaw_deg: lead.gimbal_yaw_deg,
+                mission_id: members.iter().find_map(|p| p.mission_id),
                 photos: members.iter().map(|p| photo(p)).collect(),
             }
         })
@@ -300,6 +301,7 @@ mod tests {
             gateway_sn: "RC1".into(),
             aircraft_sn: Some("AC1".into()),
             flight_id: Some(6),
+            mission_id: None,
             taken_at_ms: Some(1_000 + id),
             uploaded_at_ms: 5_000,
             lat: at.map(|p| p.lat),

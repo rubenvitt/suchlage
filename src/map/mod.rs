@@ -102,6 +102,7 @@ impl MapHub {
             origin: new.origin,
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
+            mission_id: None,
         };
         if store::insert(&self.pool, &element).await? {
             self.publish(MapChange::Created(element.clone()));

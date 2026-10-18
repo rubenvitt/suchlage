@@ -12,6 +12,7 @@ pub struct PhotoRow {
     pub gateway_sn: String,
     pub aircraft_sn: Option<String>,
     pub flight_id: Option<i64>,
+    pub mission_id: Option<i64>,
     pub taken_at_ms: Option<i64>,
     pub uploaded_at_ms: i64,
     pub lat: Option<f64>,
@@ -47,7 +48,7 @@ pub struct NewPhoto {
 macro_rules! columns {
     () => {
         "id, name, shot_key, lens, gateway_sn, aircraft_sn, flight_id, taken_at_ms, uploaded_at_ms, \
-         lat, lon, absolute_altitude_m, relative_altitude_m, gimbal_yaw_deg, thumb_ready"
+         lat, lon, absolute_altitude_m, relative_altitude_m, gimbal_yaw_deg, thumb_ready, mission_id"
     };
 }
 
@@ -77,6 +78,7 @@ fn row(r: &sqlx::sqlite::SqliteRow) -> PhotoRow {
         gateway_sn: r.get("gateway_sn"),
         aircraft_sn: r.get("aircraft_sn"),
         flight_id: r.get("flight_id"),
+        mission_id: r.get("mission_id"),
         taken_at_ms: r.get("taken_at_ms"),
         uploaded_at_ms: r.get("uploaded_at_ms"),
         lat: r.get("lat"),
@@ -94,15 +96,17 @@ pub async fn upsert(pool: &SqlitePool, p: &NewPhoto) -> Result<i64, sqlx::Error>
     sqlx::query_scalar(
         "INSERT INTO photos (object_key, name, fingerprint, tiny_fingerprint, shot_key, lens, \
          gateway_sn, aircraft_sn, flight_id, taken_at_ms, uploaded_at_ms, lat, lon, \
-         absolute_altitude_m, relative_altitude_m, gimbal_yaw_deg, payload_model_key) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+         absolute_altitude_m, relative_altitude_m, gimbal_yaw_deg, payload_model_key, mission_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+         COALESCE((SELECT mission_id FROM flights WHERE id = ?), (SELECT id FROM missions WHERE state = 'running'))) \
          ON CONFLICT (object_key) DO UPDATE SET name = excluded.name, \
          fingerprint = excluded.fingerprint, tiny_fingerprint = excluded.tiny_fingerprint, \
          shot_key = excluded.shot_key, lens = excluded.lens, aircraft_sn = excluded.aircraft_sn, \
          flight_id = excluded.flight_id, taken_at_ms = excluded.taken_at_ms, lat = excluded.lat, \
          lon = excluded.lon, absolute_altitude_m = excluded.absolute_altitude_m, \
          relative_altitude_m = excluded.relative_altitude_m, \
-         gimbal_yaw_deg = excluded.gimbal_yaw_deg, payload_model_key = excluded.payload_model_key \
+         gimbal_yaw_deg = excluded.gimbal_yaw_deg, payload_model_key = excluded.payload_model_key, \
+         mission_id = excluded.mission_id \
          RETURNING id",
     )
     .bind(&p.object_key)
@@ -122,6 +126,7 @@ pub async fn upsert(pool: &SqlitePool, p: &NewPhoto) -> Result<i64, sqlx::Error>
     .bind(p.relative_altitude_m)
     .bind(p.gimbal_yaw_deg)
     .bind(&p.payload_model_key)
+    .bind(p.flight_id)
     .fetch_one(pool)
     .await
 }
@@ -169,6 +174,37 @@ pub async fn since(
     ))
     .bind(since_ms)
     .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(row).collect())
+}
+
+/// Alle Fotos eines Einsatzes, neueste zuerst.
+pub async fn in_mission(pool: &SqlitePool, mission: i64) -> Result<Vec<PhotoRow>, sqlx::Error> {
+    let rows = sqlx::query(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM photos WHERE mission_id IS ? \
+         ORDER BY COALESCE(taken_at_ms, uploaded_at_ms) DESC, id DESC"
+    ))
+    .bind(mission)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(row).collect())
+}
+
+/// Fotos ohne Einsatz mit Aufnahme- oder Uploadzeit ab `since_ms`, neueste zuerst.
+pub async fn since_unassigned(
+    pool: &SqlitePool,
+    since_ms: i64,
+) -> Result<Vec<PhotoRow>, sqlx::Error> {
+    let rows = sqlx::query(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM photos WHERE mission_id IS NULL AND COALESCE(taken_at_ms, uploaded_at_ms) >= ? \
+         ORDER BY COALESCE(taken_at_ms, uploaded_at_ms) DESC, id DESC"
+    ))
+    .bind(since_ms)
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(row).collect())

@@ -77,6 +77,7 @@ export const handlersFor = (me: Me) => {
         origin: 'web',
         created_at_ms: now,
         updated_at_ms: now,
+        mission_id: input.mission_id,
       };
       drawn.set(created.id, created);
       return HttpResponse.json(created);

@@ -189,6 +189,7 @@ test('Operator zeichnet eine Fläche, benennt sie und legt sie an', async () => 
       { lat: 52.44, lon: 10.01 },
     ],
     color: ELEMENT_COLORS.find((c) => c.label === 'Gelb')!.wert,
+    mission_id: null,
   });
   // Die Antwort steht sofort in der Lage, ausgewählt; der Live-Strom bestätigt sie später.
   expect(karte.props!.elements!.map((e) => e.id)).toContain('neu-1');

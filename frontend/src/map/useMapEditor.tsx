@@ -135,7 +135,7 @@ export function useMapEditor(
         cancelLabel="Verwerfen"
         busy={create.isPending}
         error={errorText(create.error)}
-        onSubmit={(name, color) => create.mutate({ name, kind: pending.kind, points: pending.points, color })}
+        onSubmit={(name, color) => create.mutate({ name, kind: pending.kind, points: pending.points, color, mission_id: null })}
         onCancel={() => setPending(null)}
       />
     );

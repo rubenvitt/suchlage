@@ -49,6 +49,9 @@ pub struct MapElement {
     pub created_at_ms: i64,
     #[ts(type = "number")]
     pub updated_at_ms: i64,
+    /// `null`: ohne Einsatz.
+    #[ts(type = "number | null")]
+    pub mission_id: Option<i64>,
 }
 
 /// Neues Element aus dem Browser. Die ID vergibt der Server.
@@ -60,6 +63,8 @@ pub struct MapElementInput {
     pub points: Vec<GeoPoint>,
     /// Eine der `MAP_COLORS`.
     pub color: String,
+    #[ts(type = "number | null")]
+    pub mission_id: Option<i64>,
 }
 
 /// Umbenennen und Umfärben im Browser. Die Form ändert nur Pilot 2.
