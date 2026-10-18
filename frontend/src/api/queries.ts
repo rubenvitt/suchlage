@@ -1,4 +1,4 @@
-import { skipToken, useQuery } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AuthOptions } from '../contract/generated/AuthOptions';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
@@ -6,11 +6,12 @@ import type { Health } from '../contract/generated/Health';
 import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
+import type { MissionCreate } from '../contract/generated/MissionCreate';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
 import type { SettingsView } from '../contract/generated/SettingsView';
 import { scopeQuery, type MissionScope } from '../missions/scope';
-import { ApiError, apiGet } from './client';
+import { ApiError, apiGet, apiSend } from './client';
 
 export const queryKeys = {
   me: ['me'] as const,
@@ -100,3 +101,27 @@ export const useFlightPhotos = (id: number | null) =>
     queryKey: queryKeys.flightPhotos(id),
     queryFn: id == null ? skipToken : () => apiGet<PhotoShot[]>(`/api/flights/${id}/photos`),
   });
+
+/**
+ * Einsatz anlegen, mit `start` gleich starten. Danach laden die Einsätze neu, auch nach einem
+ * Fehler: Ein angelegter Einsatz, dessen Start scheitert, steht dann unter „Vorbereitet“.
+ */
+export function useCreateMission() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ input, start }: { input: MissionCreate; start: boolean }) => {
+      const created = await apiSend<Mission>('POST', '/api/missions', input);
+      return start ? apiSend<Mission>('POST', `/api/missions/${created.id}/start`) : created;
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
+  });
+}
+
+/** Vorbereiteten Einsatz starten; 409, wenn schon einer läuft. */
+export function useStartMission() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend<Mission>('POST', `/api/missions/${id}/start`),
+    onSettled: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
+  });
+}

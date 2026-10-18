@@ -42,3 +42,66 @@
   margin: 0;
   padding-left: 18px;
 }
+
+/* Startseite ohne laufenden Einsatz: links neu anlegen, rechts vorbereitet; mobil untereinander. */
+.sl-welcome {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-content: start;
+  box-sizing: border-box;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 40px 16px;
+}
+[data-mode='mobile'] .sl-welcome {
+  grid-template-columns: 1fr;
+  gap: 24px;
+  padding: 16px;
+}
+.sl-welcome-new,
+.sl-welcome-side {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-width: 0;
+}
+.sl-welcome-new h1 {
+  font-size: 30px;
+  margin: 0;
+}
+.sl-welcome-new p,
+.sl-welcome-side p {
+  margin: 0;
+  color: var(--lfh-gedaempft);
+}
+.sl-welcome-prepare {
+  margin-top: 10px;
+}
+.sl-welcome-item {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.sl-welcome-item a {
+  font-weight: 600;
+}
+.sl-welcome-item span,
+.sl-welcome-skip small {
+  color: var(--lfh-schwach);
+}
+.sl-welcome-empty {
+  padding: 12px;
+}
+.sl-welcome-skip {
+  padding-top: 20px;
+  border-top: 1px solid var(--lfh-linie);
+  color: var(--lfh-gedaempft);
+}
+.sl-welcome-skip .ant-btn {
+  padding-inline: 0;
+}
+.sl-welcome-skip small {
+  display: block;
+}
