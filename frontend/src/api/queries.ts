@@ -5,6 +5,7 @@ import type { FlightSummary } from '../contract/generated/FlightSummary';
 import type { Health } from '../contract/generated/Health';
 import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
+import type { Mission } from '../contract/generated/Mission';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { RemoteControllerView } from '../contract/generated/RemoteControllerView';
 import type { SettingsView } from '../contract/generated/SettingsView';
@@ -67,6 +68,9 @@ export const useRemoteControllers = () =>
     queryKey: queryKeys.remoteControllers,
     queryFn: () => apiGet<RemoteControllerView[]>('/api/remote-controllers'),
   });
+/** Alle Einsätze; der Live-Strom erneuert die Liste bei `missions_changed`. */
+export const useMissions = () =>
+  useQuery({ queryKey: queryKeys.missions, queryFn: () => apiGet<Mission[]>('/api/missions') });
 export const useKioskTokens = () =>
   useQuery({ queryKey: queryKeys.kioskTokens, queryFn: () => apiGet<KioskTokenView[]>('/api/kiosk-tokens') });
 /** Laufender Stand des Servers. Ohne `staleTime`: Nach einem Update zeigt die offene Seite beim nächsten Blick den neuen. */

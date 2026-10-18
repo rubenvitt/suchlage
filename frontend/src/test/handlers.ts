@@ -5,10 +5,92 @@ import type { MapElement } from '../contract/generated/MapElement';
 import type { MapElementInput } from '../contract/generated/MapElementInput';
 import type { MapElementUpdate } from '../contract/generated/MapElementUpdate';
 import type { Me } from '../contract/generated/Me';
+import type { Mission } from '../contract/generated/Mission';
+import type { MissionCreate } from '../contract/generated/MissionCreate';
+import type { SectionCreate } from '../contract/generated/SectionCreate';
 import type { RemoteControllerCreate } from '../contract/generated/RemoteControllerCreate';
 import type { RemoteControllerCreated } from '../contract/generated/RemoteControllerCreated';
 import type { SetupResult } from '../contract/generated/SetupResult';
 import * as fx from '../contract/fixtures.generated';
+
+/** Ein laufender und ein vorbereiteter Beispiel-Einsatz. */
+export const missionFixtures = (): Mission[] => [
+  {
+    id: 1,
+    name: 'Übung Wietze',
+    location: 'Wietze',
+    state: 'running',
+    created_by: 'Vorschau',
+    created_at_ms: 1792150000000,
+    started_at_ms: 1792150600000,
+    closed_at_ms: null,
+    sections: [{ id: 1, label: 'Nord', location: null, created_at_ms: 1792150700000 }],
+  },
+  {
+    id: 2,
+    name: 'Hochwasser Aller',
+    location: null,
+    state: 'prepared',
+    created_by: 'Vorschau',
+    created_at_ms: 1792151000000,
+    started_at_ms: null,
+    closed_at_ms: null,
+    sections: [],
+  },
+];
+
+/** Zustandsbehaftete Einsatz-Routen mit den Regeln des Servers (ein laufender Einsatz, 409 beim Starten). */
+export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
+  const missions = initial.map((m) => ({ ...m }));
+  const find = (id: unknown) => missions.find((m) => m.id === Number(id));
+  return [
+    http.get('/api/missions', () => HttpResponse.json(missions)),
+    http.post('/api/missions', async ({ request }) => {
+      const input = (await request.json()) as MissionCreate;
+      const created: Mission = {
+        id: Math.max(0, ...missions.map((m) => m.id)) + 1,
+        name: input.name,
+        location: input.location,
+        state: 'prepared',
+        created_by: 'Vorschau',
+        created_at_ms: Date.now(),
+        started_at_ms: null,
+        closed_at_ms: null,
+        sections: [],
+      };
+      missions.push(created);
+      return HttpResponse.json(created);
+    }),
+    http.post('/api/missions/:id/start', ({ params }) => {
+      const m = find(params.id);
+      if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      if (missions.some((o) => o.state === 'running'))
+        return HttpResponse.json({ error: 'Es läuft schon ein Einsatz' }, { status: 409 });
+      m.state = 'running';
+      m.started_at_ms = Date.now();
+      return HttpResponse.json(m);
+    }),
+    http.post('/api/missions/:id/close', ({ params }) => {
+      const m = find(params.id);
+      if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      m.state = 'closed';
+      m.closed_at_ms = Date.now();
+      return HttpResponse.json(m);
+    }),
+    http.post('/api/missions/:id/sections', async ({ params, request }) => {
+      const m = find(params.id);
+      if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      const input = (await request.json()) as SectionCreate;
+      m.sections.push({
+        id: m.sections.length + 1,
+        label: input.label,
+        location: input.location,
+        created_at_ms: Date.now(),
+      });
+      return HttpResponse.json(m);
+    }),
+  ];
+};
 
 const noContent = () => new HttpResponse(null, { status: 204 });
 
@@ -39,6 +121,7 @@ export const handlersFor = (me: Me) => {
           { headers: { 'content-type': 'image/svg+xml' } },
         ),
     ),
+    ...missionHandlers(),
     http.get('/api/settings', () => HttpResponse.json(fx.settingsView)),
     http.put('/api/settings/:section', () => HttpResponse.json(fx.settingsView)),
     http.get('/api/remote-controllers', () => HttpResponse.json(fx.remoteControllers)),

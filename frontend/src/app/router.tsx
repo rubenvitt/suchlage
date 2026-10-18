@@ -6,6 +6,7 @@ import KioskEnrollPage from '../auth/KioskEnrollPage';
 import LoginPage from '../auth/LoginPage';
 import { FlightDetailPage } from '../flights/FlightDetailPage';
 import { FlightsPage } from '../flights/FlightsPage';
+import { MissionsPage } from '../missions/MissionsPage';
 import { Frame } from '../shell/Frame';
 import { LagePage } from '../views/LagePage';
 import { RequireRole } from './RequireRole';
@@ -25,6 +26,14 @@ export const routes = [
         element: <SessionLayout />,
         children: [
           { path: '/', element: <LagePage /> },
+          {
+            path: '/einsaetze',
+            element: (
+              <RequireRole roles={['admin', 'operator']}>
+                <MissionsPage />
+              </RequireRole>
+            ),
+          },
           {
             path: '/flights',
             element: (
