@@ -18,8 +18,15 @@ const ORDER: MissionState[] = ['running', 'prepared', 'closed'];
 
 /** Kopfleiste mit dem gewählten Einsatz, seinem Zustand, dem aktiven Abschnitt und der Auswahl. */
 export function MissionBar() {
-  const { data: missions = [] } = useMissions();
-  const { scope, setScope } = useMissionScope();
+  const { data: missions = [], isError } = useMissions();
+  const { scope, setScope, ready } = useMissionScope();
+  // Ohne bekannte Einsätze keine Auswahl: „ohne Einsatz“ wäre hier geraten.
+  if (!ready)
+    return (
+      <div className="sl-mission-bar">
+        <span>{isError ? 'Einsätze nicht geladen' : 'Einsätze werden geladen …'}</span>
+      </div>
+    );
   const options = [
     ...ORDER.filter((s) => s !== 'closed').flatMap((s) =>
       missions.filter((m) => m.state === s).map((m) => ({ value: String(m.id), label: m.name })),

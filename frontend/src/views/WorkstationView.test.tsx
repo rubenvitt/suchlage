@@ -9,7 +9,7 @@ import {
 import type { LiveEvent } from '../contract/generated/LiveEvent';
 import type { MapElementInput } from '../contract/generated/MapElementInput';
 import type { MapElementUpdate } from '../contract/generated/MapElementUpdate';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { ELEMENT_COLORS } from '../map/elementColors';
 import type { SituationMap } from '../map/SituationMap';
 import { server } from '../test/server';
@@ -351,4 +351,47 @@ test('ein Element ohne Einsatz lässt sich einem Einsatz zuordnen', async () => 
   await userEvent.click(await screen.findByTitle('Hochwasser Aller'));
   await vi.waitFor(() => expect(sent).toEqual(['frei', { mission_id: 2 }]));
   await vi.waitFor(() => expect(karte.props!.elements).toHaveLength(0));
+});
+
+test('solange die Einsätze laden, bleibt das Zeichnen aus und die Karte leer', async () => {
+  server.use(http.get('/api/missions', () => delay('infinite')));
+  const { client } = show(snapshotFlying, [elementsEvent(elementOf('frei', null))]);
+  expect(await screen.findByText('Einsätze werden geladen …')).toBeInTheDocument();
+  // Erst mit bekannter Rolle wäre das Zeichnen überhaupt möglich.
+  await vi.waitFor(() => expect(client.getQueryData(['me'])).toBeDefined());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
+  expect(karte.props!.elements).toEqual([]);
+});
+
+test('scheitern die Einsätze, bleibt das Zeichnen aus', async () => {
+  server.use(http.get('/api/missions', () => new HttpResponse(null, { status: 500 })));
+  const { client } = show(snapshotFlying);
+  expect(await screen.findByText('Einsätze nicht geladen')).toBeInTheDocument();
+  await vi.waitFor(() => expect(client.getQueryData(['me'])).toBeDefined());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(screen.queryByRole('toolbar', { name: 'Zeichnen' })).not.toBeInTheDocument();
+});
+
+test('fragt die Fotos erst, wenn die Einsätze bekannt sind, nie „ohne Einsatz“', async () => {
+  const urls: string[] = [];
+  let release!: () => void;
+  const missionsKnown = new Promise<void>((r) => (release = r));
+  server.use(
+    http.get('/api/missions', async () => {
+      await missionsKnown;
+      return HttpResponse.json(missionFixtures());
+    }),
+    http.get('/api/photos', ({ request }) => {
+      urls.push(new URL(request.url).search);
+      return HttpResponse.json([]);
+    }),
+  );
+  show(snapshotFlying);
+  expect(await screen.findByText('Einsätze werden geladen …')).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 20));
+  expect(urls).toEqual([]);
+  release();
+  await screen.findByRole('toolbar', { name: 'Zeichnen' });
+  await vi.waitFor(() => expect(urls).toEqual(['?mission=1']));
 });

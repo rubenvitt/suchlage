@@ -160,6 +160,12 @@ export function MissionsPage() {
             </ul>
           </Paneel>
         ))}
+        <Paneel titel="Ohne Einsatz">
+          <p>
+            Was ohne laufenden Einsatz entstanden ist, lässt sich dort einem Einsatz zuordnen.{' '}
+            <Link to="/?einsatz=ohne">Lage ohne Einsatz</Link> · <Link to="/flights?einsatz=ohne">Flüge ohne Einsatz</Link>
+          </p>
+        </Paneel>
       </div>
     </Frame>
   );

@@ -21,8 +21,8 @@ export const queryKeys = {
   remoteControllers: ['remote-controllers'] as const,
   kioskTokens: ['kiosk-tokens'] as const,
   health: ['health'] as const,
-  /** Fotos der Lagekarte (letzte 24 h) und je Flug; der Live-Strom ergänzt beide. */
   missions: ['missions'] as const,
+  /** Fotos der Lagekarte je Einsatz und je Flug; der Live-Strom ergänzt beide. */
   photos: ['photos'] as const,
   mapPhotos: (scope: string) => ['photos', 'map', scope] as const,
   flightPhotos: (id: number | null) => ['photos', 'flight', id] as const,
@@ -54,11 +54,12 @@ export function useMe() {
 export const useAuthOptions = () =>
   useQuery({ queryKey: queryKeys.authOptions, queryFn: () => apiGet<AuthOptions>('/api/auth/options') });
 // Kein Polling: der LiveProvider (F2) erneuert die Liste bei `flight_started` und `flight_ended`.
-export const useFlights = (scope: MissionScope) => {
+/** Ohne `enabled` (Einsätze noch unbekannt) fragt die Abfrage nicht: Der Scope wäre sonst „ohne“. */
+export const useFlights = (scope: MissionScope, enabled = true) => {
   const mission = scopeQuery(scope);
   return useQuery({
     queryKey: [...queryKeys.flights, mission],
-    queryFn: () => apiGet<FlightSummary[]>(`/api/flights?mission=${mission}`),
+    queryFn: enabled ? () => apiGet<FlightSummary[]>(`/api/flights?mission=${mission}`) : skipToken,
   });
 };
 /** `null` steht für eine Adresse ohne gültige Flugnummer: Dann fragt die Abfrage gar nicht erst. */
@@ -82,12 +83,15 @@ export const useKioskTokens = () =>
 /** Laufender Stand des Servers. Ohne `staleTime`: Nach einem Update zeigt die offene Seite beim nächsten Blick den neuen. */
 export const useHealth = () =>
   useQuery({ queryKey: queryKeys.health, queryFn: () => apiGet<Health>('/api/health') });
-/** Auslösungen der letzten 24 h im gewählten Einsatz; neue bringt der Live-Strom (`photo_shot`). */
-export const useMapPhotos = (scope: MissionScope) => {
+/**
+ * Auslösungen der Lagekarte: im Einsatz alle, „ohne Einsatz“ die der letzten 24 h; neue bringt der
+ * Live-Strom (`photo_shot`). Ohne `enabled` fragt die Abfrage nicht.
+ */
+export const useMapPhotos = (scope: MissionScope, enabled = true) => {
   const mission = scopeQuery(scope);
   return useQuery({
     queryKey: queryKeys.mapPhotos(mission),
-    queryFn: () => apiGet<PhotoShot[]>(`/api/photos?mission=${mission}`),
+    queryFn: enabled ? () => apiGet<PhotoShot[]>(`/api/photos?mission=${mission}`) : skipToken,
   });
 };
 /** Alle Fotos eines Flugs; `null` fragt nicht. */

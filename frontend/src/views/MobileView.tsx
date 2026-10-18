@@ -18,8 +18,8 @@ const MOBILE_VALUES = ['elevation', 'speed', 'battery', 'distance', 'gnss', 'mod
 export function MobileView() {
   const { state, focus } = useFocus();
   const serverNow = useServerNow();
-  const { scope } = useMissionScope();
-  const map = useLiveMapData(state, focus, scope);
+  const { scope, ready } = useMissionScope();
+  const map = useLiveMapData(state, focus, scope, ready);
   // Wer die Karte mit dem Finger verschiebt, beendet das Folgen; der Knopf holt es zurück.
   const [follow, setFollow] = useState(true);
   const notice = viewerNoticeOf(state, focus);

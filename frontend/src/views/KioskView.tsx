@@ -22,8 +22,8 @@ export function KioskView() {
   const { state, focus } = useFocus();
   const serverNow = useServerNow();
   // Das Großbild folgt immer dem laufenden Einsatz (`useMissionScope` ignoriert `?einsatz=`).
-  const { scope } = useMissionScope();
-  const map = useLiveMapData(state, focus, scope);
+  const { scope, ready } = useMissionScope();
+  const map = useLiveMapData(state, focus, scope, ready);
   const notice = viewerNoticeOf(state, focus);
 
   return (

@@ -78,3 +78,15 @@ test('nach erfolgreichem Anlegen ist das Abschnittsfeld leer', async () => {
   expect(await screen.findByText('Süd')).toBeInTheDocument();
   await vi.waitFor(() => expect(screen.getByLabelText('Abschnitt zu Übung Wietze')).toHaveValue(''));
 });
+
+test('„Ohne Einsatz“ führt zur Lage und zu den Flügen ohne Einsatz', async () => {
+  await setup();
+  expect(group('Ohne Einsatz').getByRole('link', { name: 'Lage ohne Einsatz' })).toHaveAttribute(
+    'href',
+    '/?einsatz=ohne',
+  );
+  expect(group('Ohne Einsatz').getByRole('link', { name: 'Flüge ohne Einsatz' })).toHaveAttribute(
+    'href',
+    '/flights?einsatz=ohne',
+  );
+});

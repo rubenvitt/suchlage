@@ -45,12 +45,12 @@ export function WorkstationView() {
   const { data: me } = useMe();
   const [follow, setFollow] = useState(true);
   const [swapped, setSwapped] = useState(false);
-  const { scope } = useMissionScope();
-  const map = useLiveMapData(state, focus, scope);
+  const { scope, ready } = useMissionScope();
+  const map = useLiveMapData(state, focus, scope, ready);
   const { gateways } = map;
   const canControl = me?.role === 'admin' || me?.role === 'operator';
   const editor = useMapEditor(map.elements, {
-    enabled: canControl,
+    enabled: canControl && ready,
     scope,
     onStartDrawing: () => setFollow(false),
   });

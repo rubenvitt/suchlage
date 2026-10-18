@@ -3,8 +3,16 @@ import { useSearchParams } from 'react-router';
 import { useMe, useMissions } from '../api/queries';
 import { resolveScope, type MissionScope } from './scope';
 
-/** Gewählter Einsatz aus `?einsatz=`. Das Großbild folgt immer dem laufenden Einsatz. */
-export function useMissionScope(): { scope: MissionScope; setScope: (param: string) => void } {
+/**
+ * Gewählter Einsatz aus `?einsatz=`. Das Großbild folgt immer dem laufenden Einsatz. `ready`: Die
+ * Einsätze sind bekannt; vorher wäre der Scope stillschweigend „ohne Einsatz“. Ein gescheiterter
+ * Neuabruf behält die alten Daten und bleibt `ready`.
+ */
+export function useMissionScope(): {
+  scope: MissionScope;
+  setScope: (param: string) => void;
+  ready: boolean;
+} {
   const [params, setParams] = useSearchParams();
   const kiosk = useMe().data?.role === 'kiosk';
   const { data } = useMissions();
@@ -17,5 +25,5 @@ export function useMissionScope(): { scope: MissionScope; setScope: (param: stri
       next.set('einsatz', param);
       return next;
     });
-  return { scope, setScope };
+  return { scope, setScope, ready: data !== undefined };
 }

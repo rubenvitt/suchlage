@@ -6,7 +6,7 @@ import { LiveProvider } from '../live/LiveProvider';
 import { createLiveStore } from '../live/situationStore';
 import userEvent from '@testing-library/user-event';
 import { server } from '../test/server';
-import { missionHandlers } from '../test/handlers';
+import { missionFixtures, missionHandlers } from '../test/handlers';
 import { renderWithApp } from '../test/render';
 import { FlightCards } from './FlightCards';
 import { flightRow } from './flightRow';
@@ -91,7 +91,7 @@ test('ohne Flüge sagt die Liste, dass sie sich selbst füllt', async () => {
 test('am Arbeitsplatz eine Tabelle mit allen Flügen', async () => {
   page();
   expect(await screen.findByRole('table')).toBeInTheDocument();
-  expect(screen.getByText('3 aufgezeichnet')).toBeInTheDocument();
+  expect(screen.getByText('Übung Wietze · 3 aufgezeichnet')).toBeInTheDocument();
 });
 
 test('unter 768 px Karten statt Tabelle', async () => {
@@ -135,4 +135,55 @@ test('unter „ohne Einsatz“ lässt sich jeder Flug zuordnen', async () => {
   await userEvent.click(selects[1]!);
   await userEvent.click(await screen.findByTitle('Hochwasser Aller'));
   await vi.waitFor(() => expect(sent).toEqual([['6', { mission_id: 2 }]]));
+});
+
+test('leere Liste und Kopf passen zum gewählten Einsatz', async () => {
+  server.use(http.get('/api/flights', () => HttpResponse.json([])));
+  page('/?einsatz=2');
+  expect(await screen.findByText('Keine Flüge in diesem Einsatz.')).toBeInTheDocument();
+  expect(screen.getByText('Hochwasser Aller · 0 aufgezeichnet')).toBeInTheDocument();
+});
+
+test('leere Liste ohne Einsatz', async () => {
+  server.use(http.get('/api/flights', () => HttpResponse.json([])));
+  page('/?einsatz=ohne');
+  expect(await screen.findByText('Keine Flüge ohne Einsatz.')).toBeInTheDocument();
+  expect(screen.getByText('ohne Einsatz · 0 aufgezeichnet')).toBeInTheDocument();
+});
+
+test('fragt die Flüge erst, wenn die Einsätze bekannt sind', async () => {
+  const urls: string[] = [];
+  let release!: () => void;
+  const missionsKnown = new Promise<void>((r) => (release = r));
+  server.use(
+    http.get('/api/missions', async () => {
+      await missionsKnown;
+      return HttpResponse.json(missionFixtures());
+    }),
+    http.get('/api/flights', ({ request }) => {
+      urls.push(new URL(request.url).search);
+      return HttpResponse.json(flightList);
+    }),
+  );
+  page();
+  expect(await screen.findByText('Einsätze werden geladen …')).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 20));
+  expect(urls).toEqual([]);
+  release();
+  await vi.waitFor(() => expect(urls).toEqual(['?mission=1']));
+});
+
+test('scheitern die Einsätze, meldet die Liste einen Fehler statt Flügen ohne Einsatz', async () => {
+  const urls: string[] = [];
+  server.use(
+    http.get('/api/missions', () => new HttpResponse(null, { status: 500 })),
+    http.get('/api/flights', ({ request }) => {
+      urls.push(new URL(request.url).search);
+      return HttpResponse.json(flightList);
+    }),
+  );
+  page();
+  expect(await screen.findByText('Einsätze nicht geladen')).toBeInTheDocument();
+  expect(screen.getByText('Daten nicht abrufbar')).toBeInTheDocument();
+  expect(urls).toEqual([]);
 });
