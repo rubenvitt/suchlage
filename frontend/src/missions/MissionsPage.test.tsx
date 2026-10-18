@@ -69,3 +69,12 @@ test('409 bei einer anderen Aktion als Starten zeigt die Serverantwort', async (
   expect(await screen.findByText('Einsatz ist nicht mehr offen')).toBeInTheDocument();
   expect(screen.queryByText('Es läuft schon ein Einsatz')).not.toBeInTheDocument();
 });
+
+test('nach erfolgreichem Anlegen ist das Abschnittsfeld leer', async () => {
+  await setup();
+  const input = screen.getByLabelText('Abschnitt zu Übung Wietze');
+  await userEvent.type(input, 'Süd');
+  await userEvent.click(screen.getByRole('button', { name: 'Abschnitt anlegen: Übung Wietze' }));
+  expect(await screen.findByText('Süd')).toBeInTheDocument();
+  await vi.waitFor(() => expect(screen.getByLabelText('Abschnitt zu Übung Wietze')).toHaveValue(''));
+});

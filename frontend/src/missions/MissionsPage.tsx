@@ -33,7 +33,7 @@ function SectionForm({ mission, act }: { mission: Mission; act: Act }) {
             label: v.label,
             location: null,
           } satisfies SectionCreate,
-          () => () => form.resetFields(),
+          () => form.resetFields(),
         );
       }}
     >
