@@ -100,6 +100,11 @@ grep -q '^thing/product/ACX/osd' "$TMP/acl34"; check $? "RC A darf Fluggeräte-T
 ffmpeg -loglevel error -re -f lavfi -i testsrc=size=320x180:rate=10 -t 2 -c:v libx264 -preset ultrafast -f flv "rtmp://127.0.0.1:1935/live/RCA?user=rc-RCA&pass=falsch" 2>/dev/null
 [ $? -ne 0 ]; check $? "RTMP mit falschem Schlüssel abgelehnt"
 
+# Einsätze: Der Flug gehört zu dem Einsatz, der beim Start läuft.
+MISSION=$(api -X POST -d '{"name":"Smoke-Einsatz","location":null}' http://127.0.0.1:8080/api/missions | jq -r .id)
+api -X POST "http://127.0.0.1:8080/api/missions/$MISSION/start" | jq -e '.state == "running"' >/dev/null
+check $? "Einsatz angelegt und gestartet"
+
 # Ganzer Flug im Zeitraffer, mit Livebild (Auto-Start beim Abheben)
 "$BIN/suchlage-sim" --server http://127.0.0.1:8080 --code "$CODE_A" --rc-sn RCA --speed 10 >"$TMP/sim.log" 2>&1
 check $? "Simulator spielt den Flug ab"
@@ -107,6 +112,10 @@ sleep 3
 FLIGHT=$(api http://127.0.0.1:8080/api/flights | jq '.[0]')
 [ "$(printf '%s' "$FLIGHT" | jq -r .end_reason)" = landed ]; check $? "Flug erkannt und gelandet"
 ID=$(printf '%s' "$FLIGHT" | jq -r .id)
+api "http://127.0.0.1:8080/api/flights?mission=$MISSION" | jq -e --arg id "$ID" 'map(select(.id == $id)) | length == 1' >/dev/null
+check $? "Flug steht in der Flugliste des Einsatzes"
+api "http://127.0.0.1:8080/api/flights?mission=none" | jq -e --arg id "$ID" 'map(select(.id == $id)) | length == 0' >/dev/null
+check $? "Flug fehlt unter „ohne Einsatz“"
 api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.segments | length >= 1' >/dev/null; check $? "Spur gespeichert"
 api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.video != null' >/dev/null; check $? "Flugvideo aufgezeichnet"
 SIZE=$(curl -sf -b "$JAR" "http://127.0.0.1:8080/api/flights/$ID/video?download=1" | wc -c)
