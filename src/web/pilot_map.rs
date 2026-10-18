@@ -127,7 +127,7 @@ async fn groups(
     if query_param(query.as_deref(), "group_id").is_some_and(|g| g != SHARED_GROUP_ID) {
         return Ok(Json(dji::ok(json!([]))));
     }
-    let elements = state.map.list().await?;
+    let elements = state.map.list_in(state.map.pilot_scope()).await?;
     Ok(Json(dji::ok(dji::groups(&elements))))
 }
 
@@ -171,6 +171,8 @@ async fn create(
         clamp_to_ground: shape.clamp_to_ground.unwrap_or(false),
         author,
         origin: MapElementOrigin::Pilot,
+        // Pilot 2 zeichnet in den Einsatz, den er sieht.
+        mission_id: state.map.pilot_scope(),
     };
     let element = state.map.create(new, now_ms()).await?;
     Ok(Json(dji::ok(json!({ "id": element.id }))))
@@ -197,6 +199,7 @@ async fn update(
         patch.clamp_to_ground = shape.clamp_to_ground;
         patch.shape = Some((shape.kind, shape.points));
     }
+    in_scope(&state, &id).await?;
     let element = state.map.update(&id, patch, now_ms()).await?;
     Ok(Json(dji::ok(json!({ "id": element.id }))))
 }
@@ -209,8 +212,19 @@ async fn remove(
 ) -> DjiResult {
     pilot(&state, &headers, query.as_deref()).await?;
     workspace(&state, &workspace_id)?;
+    in_scope(&state, &id).await?;
     state.map.delete(&id).await?;
     Ok(Json(dji::ok(json!({ "id": id }))))
+}
+
+/// Pilot 2 ändert nur Elemente, die er sieht; alle anderen sind für ihn unbekannt (404). Die Prüfung
+/// liegt vor der Schreibsperre: Ein Element verlässt die Sicht nur durch Zuordnung oder Einsatzwechsel,
+/// und ein abgeschlossener Einsatz bleibt über `ensure_open` gesperrt.
+async fn in_scope(state: &AppState, id: &str) -> Result<(), DjiError> {
+    match state.map.get(id).await? {
+        Some(e) if e.mission_id == state.map.pilot_scope() => Ok(()),
+        _ => Err(AppError::NotFound.into()),
+    }
 }
 
 /// Pilot 2 verbindet sich mit `?x-auth-token=…`. Der Token wird vor dem Upgrade geprüft.
@@ -238,18 +252,22 @@ async fn still_valid(pool: &sqlx::SqlitePool, token: &str, rc_id: i64) -> bool {
     }
 }
 
-fn push_for(change: &MapChange, at_ms: i64) -> String {
+/// `None`: Das Element liegt außerhalb der Sicht von Pilot 2. Gelöscht wird immer – ein Löschen,
+/// das Pilot 2 nicht kennt, ist harmlos.
+fn push_for(change: &MapChange, scope: Option<i64>, at_ms: i64) -> Option<String> {
     match change {
-        MapChange::Created(e) => dji::push_created(e, at_ms),
-        MapChange::Updated(e) => dji::push_updated(e, at_ms),
-        MapChange::Deleted { id } => dji::push_deleted(id, at_ms),
+        MapChange::Created(e) | MapChange::Updated(e) if e.mission_id != scope => None,
+        MapChange::Created(e) => Some(dji::push_created(e, at_ms)),
+        MapChange::Updated(e) => Some(dji::push_updated(e, at_ms)),
+        MapChange::Deleted { id } => Some(dji::push_deleted(id, at_ms)),
+        MapChange::Refresh => Some(dji::push_group_refresh(at_ms)),
     }
 }
 
-/// Jede Änderung geht an jeden Pilot, auch an den, der sie gemacht hat (wie in der DJI-Demo).
-/// Wer Änderungen verpasst, lädt die Gruppe neu. Endet mit dem Server, der Verbindung oder dem
-/// Token: Eine gelöschte oder neu gekoppelte Fernsteuerung bekommt nach spätestens `TOKEN_RECHECK`
-/// nichts mehr.
+/// Jede Änderung im Sichtbereich geht an jeden Pilot, auch an den, der sie gemacht hat (wie in der
+/// DJI-Demo). Wer Änderungen verpasst, lädt die Gruppe neu. Endet mit dem Server, der Verbindung
+/// oder dem Token: Eine gelöschte oder neu gekoppelte Fernsteuerung bekommt nach spätestens
+/// `TOKEN_RECHECK` nichts mehr.
 async fn push_to_pilot(
     mut socket: WebSocket,
     hub: MapHub,
@@ -275,7 +293,10 @@ async fn push_to_pilot(
         tokio::select! {
             change = changes.recv() => {
                 let text = match change {
-                    Ok(change) => push_for(&change, now_ms()),
+                    Ok(change) => match push_for(&change, hub.pilot_scope(), now_ms()) {
+                        Some(text) => text,
+                        None => continue,
+                    },
                     Err(RecvError::Lagged(missed)) => {
                         tracing::debug!(missed, rc = %rc_label, "Kartenabgleich überholt – Gruppe neu laden");
                         dji::push_group_refresh(now_ms())
@@ -605,6 +626,7 @@ mod tests {
             clamp_to_ground: true,
             author: "Gruppenführer".into(),
             origin: MapElementOrigin::Web,
+            mission_id: None,
         };
         let created = app.state.map.create(area, 1).await.unwrap();
         let push = tokio::time::timeout(std::time::Duration::from_secs(5), next_text(&mut socket))
@@ -632,6 +654,198 @@ mod tests {
         })
         .await;
         assert!(closed.is_ok(), "Verbindung endet mit dem Server");
+    }
+
+    type PilotSocket = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
+
+    /// Echter Server, Pilot 2 verbunden; das erste „Gruppe neu laden“ ist schon gelesen.
+    async fn pilot_socket(app: &TestApp) -> PilotSocket {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(axum::serve(listener, app.router.clone()).into_future());
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/pilot/ws?x-auth-token={TOKEN}"))
+                .await
+                .unwrap();
+        assert_eq!(
+            next_text(&mut socket).await["biz_code"],
+            "map_group_refresh"
+        );
+        socket
+    }
+
+    async fn next_text(socket: &mut PilotSocket) -> Value {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let tungstenite::Message::Text(text) = socket.next().await.unwrap().unwrap() {
+                    break serde_json::from_str::<Value>(&text).unwrap();
+                }
+            }
+        })
+        .await
+        .expect("Push innerhalb von 5 s")
+    }
+
+    async fn mission(app: &TestApp, name: &str) -> i64 {
+        let input = crate::contract::MissionCreate {
+            name: name.into(),
+            location: None,
+        };
+        app.state
+            .missions
+            .create(input, "test", 0)
+            .await
+            .unwrap()
+            .id
+    }
+
+    fn pin_in(mission_id: Option<i64>) -> NewElement {
+        let e = crate::contract::examples::map_elements().remove(1);
+        NewElement {
+            id: None,
+            name: e.name,
+            kind: e.kind,
+            points: e.points,
+            color: e.color,
+            clamp_to_ground: e.clamp_to_ground,
+            author: e.author,
+            origin: MapElementOrigin::Web,
+            mission_id,
+        }
+    }
+
+    async fn group_ids(app: &TestApp) -> Vec<String> {
+        let (status, body) = send(&app.router, request("GET", &groups_uri(), None)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["data"][0]["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn groups_show_the_running_mission_or_the_unassigned() {
+        let app = paired().await;
+        let (a, b) = (mission(&app, "A").await, mission(&app, "B").await);
+        let map = &app.state.map;
+        let in_a = map.create(pin_in(Some(a)), 1).await.unwrap();
+        map.create(pin_in(Some(b)), 1).await.unwrap();
+        let unassigned = map.create(pin_in(None), 1).await.unwrap();
+
+        assert_eq!(group_ids(&app).await, vec![unassigned.id]);
+        app.state.missions.start(a, 2).await.unwrap();
+        assert_eq!(group_ids(&app).await, vec![in_a.id]);
+    }
+
+    #[tokio::test]
+    async fn pilot_draws_into_the_running_mission() {
+        let app = paired().await;
+        let a = mission(&app, "A").await;
+        app.state.missions.start(a, 1).await.unwrap();
+        let id = "0b7e4a52-1c7f-4d43-9a43-3f1f1d6f6c11";
+        let (status, body) = send(
+            &app.router,
+            request("POST", &create_uri(), Some(pin_body(id))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let stored = app.state.map.get(id).await.unwrap().unwrap();
+        assert_eq!(stored.mission_id, Some(a));
+    }
+
+    #[tokio::test]
+    async fn prepared_mission_elements_are_not_pushed_to_pilot() {
+        let app = paired().await;
+        let (a, b) = (mission(&app, "A").await, mission(&app, "B").await);
+        app.state.missions.start(a, 1).await.unwrap();
+        let mut socket = pilot_socket(&app).await;
+
+        app.state.map.create(pin_in(Some(b)), 2).await.unwrap();
+        let in_a = app.state.map.create(pin_in(Some(a)), 3).await.unwrap();
+        // Der Push aus A ist der nächste: B wurde übersprungen.
+        let push = next_text(&mut socket).await;
+        assert_eq!(
+            (push["biz_code"].as_str(), push["data"]["id"].as_str()),
+            (Some("map_element_create"), Some(in_a.id.as_str()))
+        );
+    }
+
+    #[tokio::test]
+    async fn starting_a_mission_sends_group_refresh() {
+        let app = paired().await;
+        let a = mission(&app, "A").await;
+        let mut socket = pilot_socket(&app).await;
+        app.state.missions.start(a, 1).await.unwrap();
+        assert_eq!(
+            next_text(&mut socket).await["biz_code"],
+            "map_group_refresh"
+        );
+    }
+
+    #[tokio::test]
+    async fn pilot_scope_survives_restart() {
+        let app = paired().await;
+        let a = mission(&app, "A").await;
+        app.state.missions.start(a, 1).await.unwrap();
+
+        let (_stop, stop_rx) = tokio::sync::watch::channel(false);
+        let map = crate::map::MapHub::new(app.state.pool.clone(), stop_rx);
+        crate::missions::MissionHub::start_up(app.state.pool.clone(), map.clone())
+            .await
+            .unwrap();
+        assert_eq!(map.pilot_scope(), Some(a));
+    }
+
+    #[tokio::test]
+    async fn assigning_an_element_refreshes_the_pilot() {
+        let app = paired().await;
+        let a = mission(&app, "A").await;
+        let element = app.state.map.create(pin_in(None), 1).await.unwrap();
+        let mut changes = app.state.map.subscribe();
+        app.state.map.assign(&element.id, a).await.unwrap();
+        // `assign` verteilt vor der Rückkehr; was fehlt, kommt nicht mehr.
+        assert!(matches!(changes.try_recv().unwrap(), MapChange::Updated(_)));
+        assert_eq!(changes.try_recv().unwrap(), MapChange::Refresh);
+    }
+
+    /// Sicherheitsbefund: Pilot 2 ändert, löscht oder überschreibt per Anlegen kein Element eines
+    /// anderen Einsatzes, auch wenn er dessen ID kennt.
+    #[tokio::test]
+    async fn pilot_cannot_touch_elements_outside_its_scope() {
+        let app = paired().await;
+        let (a, b) = (mission(&app, "A").await, mission(&app, "B").await);
+        app.state.missions.start(a, 1).await.unwrap();
+        let id = "5f0c8a1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
+        let in_b = app
+            .state
+            .map
+            .create(
+                NewElement {
+                    id: Some(id.into()),
+                    ..pin_in(Some(b))
+                },
+                1,
+            )
+            .await
+            .unwrap();
+
+        for req in [
+            request("PUT", &element_uri(id), Some(json!({"name": "Fremd"}))),
+            request("DELETE", &element_uri(id), None),
+            request("POST", &create_uri(), Some(pin_body(id))),
+        ] {
+            let (status, body) = send(&app.router, req).await;
+            assert_eq!(
+                (status, &body["code"]),
+                (StatusCode::NOT_FOUND, &json!(404)),
+                "{body}"
+            );
+        }
+        assert_eq!(app.state.map.get(id).await.unwrap(), Some(in_b));
     }
 
     /// Eine gelöschte Fernsteuerung verliert auch einen schon offenen Kartenabgleich.

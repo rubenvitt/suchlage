@@ -324,6 +324,10 @@ den Server, auch mobil ohne Tailnet.
 ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d server'
 ```
 
+Ab 0.4.0 läuft die Migration 0004 (Einsätze) beim Start des Servers von selbst. Alle vorhandenen
+Flüge, Kartenelemente und Fotos erscheinen danach unter „ohne Einsatz“; es geht nichts verloren und
+nichts muss von Hand angefasst werden. Vor dem Update trotzdem sichern (siehe „Rückweg“).
+
 Haben sich Dateien in `deploy/` geändert, zuerst das `rsync` aus Schritt 4 laufen lassen und dann
 `up -d` für alle Dienste. Die Daten bleiben in den Volumes.
 

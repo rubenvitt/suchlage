@@ -1,11 +1,21 @@
 import { Link } from 'react-router';
 import { StatusChip } from '../components/instrument';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
+import { AssignFlight } from './AssignFlight';
 import { flightRow } from './flightRow';
 import './flights.css';
 
 /** Flugliste ab 768 px. `nowMs` ist die Serverzeit, damit laufende Flüge mitzählen. */
-export function FlightTable({ flights, nowMs }: { flights: FlightSummary[]; nowMs: number }) {
+export function FlightTable({
+  flights,
+  nowMs,
+  assignable = false,
+}: {
+  flights: FlightSummary[];
+  nowMs: number;
+  /** Flüge ohne Einsatz: je Zeile „Einsatz zuordnen“. */
+  assignable?: boolean;
+}) {
   return (
     <table className="sl-table">
       <thead>
@@ -19,6 +29,11 @@ export function FlightTable({ flights, nowMs }: { flights: FlightSummary[]; nowM
           <th scope="col">
             <span className="sl-sr">Öffnen</span>
           </th>
+          {assignable && (
+            <th scope="col">
+              <span className="sl-sr">Zuordnen</span>
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -39,6 +54,11 @@ export function FlightTable({ flights, nowMs }: { flights: FlightSummary[]; nowM
                   Flug {f.id} ansehen
                 </Link>
               </td>
+              {assignable && (
+                <td>
+                  <AssignFlight flightId={f.id} />
+                </td>
+              )}
             </tr>
           );
         })}

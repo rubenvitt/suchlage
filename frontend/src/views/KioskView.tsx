@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useMissionScope } from '../missions/useMissionScope';
 import { useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
 import { TelemetryStrip } from '../telemetry/TelemetryStrip';
@@ -20,13 +21,16 @@ export function KioskView() {
   useEffect(() => setDichte('komfortabel'), [setDichte]);
   const { state, focus } = useFocus();
   const serverNow = useServerNow();
-  const map = useLiveMapData(state, focus);
+  // Das Großbild folgt immer dem laufenden Einsatz (`useMissionScope` ignoriert `?einsatz=`).
+  const { scope, ready } = useMissionScope();
+  const map = useLiveMapData(state, focus, scope, ready);
   const notice = viewerNoticeOf(state, focus);
 
   return (
     <div className="sl-kiosk">
       <div className="sl-kiosk-map">
         <SituationMap {...map} serverNow={serverNow} thresholds={state.thresholds} follow showTools={false} />
+        {scope.kind === 'mission' && <div className="sl-kiosk-mission">{scope.mission.name}</div>}
         {notice && <div className="sl-view-notice">{notice}</div>}
       </div>
       <div className="sl-kiosk-video">

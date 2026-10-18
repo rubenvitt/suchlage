@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useMe } from '../api/queries';
+import { MissionBar } from '../missions/MissionBar';
+import { useMissionScope } from '../missions/useMissionScope';
 import { useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
 import { usePhotoSelection } from '../photos/usePhotoSelection';
@@ -16,7 +18,8 @@ const MOBILE_VALUES = ['elevation', 'speed', 'battery', 'distance', 'gnss', 'mod
 export function MobileView() {
   const { state, focus } = useFocus();
   const serverNow = useServerNow();
-  const map = useLiveMapData(state, focus);
+  const { scope, ready } = useMissionScope();
+  const map = useLiveMapData(state, focus, scope, ready);
   // Wer die Karte mit dem Finger verschiebt, beendet das Folgen; der Knopf holt es zurück.
   const [follow, setFollow] = useState(true);
   const notice = viewerNoticeOf(state, focus);
@@ -25,6 +28,9 @@ export function MobileView() {
 
   return (
     <div className="sl-mobile">
+      <div className="sl-mobile-mission">
+        <MissionBar />
+      </div>
       {notice}
       {focus.gateway && <VideoSlot focus={focus} ready={state.ready} canControl={false} />}
       <TelemetryStrip

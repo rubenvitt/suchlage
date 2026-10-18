@@ -10,6 +10,7 @@ pub mod error;
 pub mod extract;
 pub mod map;
 pub mod media;
+pub mod missions;
 pub mod mqtt;
 pub mod photos;
 pub mod runtime;

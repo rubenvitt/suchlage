@@ -1,0 +1,44 @@
+/* Einsatzseite und Einsatzleiste. */
+.sl-mission-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sl-mission-select {
+  min-width: 200px;
+}
+.sl-missions {
+  display: grid;
+  gap: 16px;
+}
+.sl-mission-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--lfh-linie);
+}
+.sl-mission {
+  background: var(--lfh-paneel);
+  padding: 8px 12px;
+  display: grid;
+  gap: 6px;
+}
+.sl-mission-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sl-mission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+.sl-mission-sections {
+  margin: 0;
+  padding-left: 18px;
+}

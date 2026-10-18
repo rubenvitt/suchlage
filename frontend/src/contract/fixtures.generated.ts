@@ -531,6 +531,7 @@ export const liveEvents: LiveEvent[] = [
         "created_at_ms": 1792149700000,
         "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
         "kind": "polygon",
+        "mission_id": null,
         "name": "Suchgebiet Nord",
         "origin": "web",
         "points": [
@@ -564,6 +565,7 @@ export const liveEvents: LiveEvent[] = [
         "created_at_ms": 1792149940000,
         "id": "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10",
         "kind": "point",
+        "mission_id": null,
         "name": "Pilot 1",
         "origin": "pilot",
         "points": [
@@ -586,6 +588,7 @@ export const liveEvents: LiveEvent[] = [
       "created_at_ms": 1792149940000,
       "id": "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10",
       "kind": "point",
+      "mission_id": null,
       "name": "Pilot 1",
       "origin": "pilot",
       "points": [
@@ -611,6 +614,7 @@ export const liveEvents: LiveEvent[] = [
       "gateway_sn": "RCSIM0001",
       "gimbal_yaw_deg": 87.4,
       "id": "RCSIM0001/DJI_20261017143012_0001",
+      "mission_id": null,
       "photos": [
         {
           "id": 11,
@@ -642,6 +646,9 @@ export const liveEvents: LiveEvent[] = [
       "taken_at_ms": 1792142900000
     },
     "type": "photo_shot"
+  },
+  {
+    "type": "missions_changed"
   }
 ];
 
@@ -864,6 +871,7 @@ export const mapElements: MapElement[] = [
     "created_at_ms": 1792149700000,
     "id": "3f0c1a52-6d1e-4c39-9a51-0b7e2f4d8c11",
     "kind": "polygon",
+    "mission_id": null,
     "name": "Suchgebiet Nord",
     "origin": "web",
     "points": [
@@ -897,6 +905,7 @@ export const mapElements: MapElement[] = [
     "created_at_ms": 1792149940000,
     "id": "9b2e4f60-1c3d-4e5f-8a7b-6c5d4e3f2a10",
     "kind": "point",
+    "mission_id": null,
     "name": "Pilot 1",
     "origin": "pilot",
     "points": [
@@ -918,6 +927,7 @@ export const photoShots: PhotoShot[] = [
     "gateway_sn": "RCSIM0001",
     "gimbal_yaw_deg": 87.4,
     "id": "RCSIM0001/DJI_20261017143012_0001",
+    "mission_id": null,
     "photos": [
       {
         "id": 11,
@@ -955,6 +965,7 @@ export const photoShots: PhotoShot[] = [
     "gateway_sn": "RCSIM0001",
     "gimbal_yaw_deg": null,
     "id": "RCSIM0001/DJI_20261017143140_0002",
+    "mission_id": null,
     "photos": [
       {
         "id": 14,

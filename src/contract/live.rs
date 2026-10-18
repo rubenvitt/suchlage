@@ -264,4 +264,6 @@ pub enum LiveEvent {
     PhotoShot {
         shot: PhotoShot,
     },
+    /// Einsätze haben sich geändert; der Browser lädt `/api/missions` neu.
+    MissionsChanged,
 }

@@ -3,6 +3,7 @@ import type { Role } from '../contract/generated/Role';
 
 const ENTRIES: { to: string; label: string; roles: Role[] }[] = [
   { to: '/', label: 'Lage', roles: ['admin', 'operator'] },
+  { to: '/einsaetze', label: 'Einsätze', roles: ['admin', 'operator'] },
   { to: '/flights', label: 'Flüge', roles: ['admin', 'operator'] },
   { to: '/system', label: 'System', roles: ['admin'] },
   { to: '/settings', label: 'Einstellungen', roles: ['admin'] },

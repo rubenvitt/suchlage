@@ -9,4 +9,4 @@ export type MapElementInput = { name: string, kind: MapElementKind, points: Arra
 /**
  * Eine der `MAP_COLORS`.
  */
-color: string, };
+color: string, mission_id: number | null, };

@@ -46,7 +46,8 @@ if [ "$part" != --frontend ]; then
 
   if [ -d src/dji/pilot ]; then
     echo "→ Pilot-Seite"
-    node --test src/dji/pilot/
+    # Mit Glob: Node 26 lädt ein Verzeichnis als Modul statt nach Tests zu suchen.
+    node --test 'src/dji/pilot/*.test.mjs'
   fi
 fi
 

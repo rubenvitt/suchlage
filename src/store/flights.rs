@@ -39,7 +39,9 @@ macro_rules! select_flights {
 
 pub async fn insert(pool: &SqlitePool, f: &FlightSummary) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO flights (id, aircraft_sn, gateway_sn, started_at_ms, ended_at_ms, end_reason, max_elevation_m, distance_m) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO flights (id, aircraft_sn, gateway_sn, started_at_ms, ended_at_ms, end_reason, max_elevation_m, distance_m, mission_id, section_id) \
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, m.id, (SELECT MAX(s.id) FROM mission_sections s WHERE s.mission_id = m.id) \
+         FROM (SELECT (SELECT id FROM missions WHERE state = 'running') AS id) m",
     )
     .bind(f.id)
     .bind(&f.aircraft_sn)
@@ -95,6 +97,22 @@ pub async fn list(pool: &SqlitePool, limit: i64) -> Result<Vec<FlightSummary>, s
     let rows = sqlx::query(select_flights!(
         "ORDER BY started_at_ms DESC, id DESC LIMIT ?"
     ))
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(summary).collect())
+}
+
+/// Flüge eines Einsatzes, mit `None` die ohne Einsatz.
+pub async fn list_in(
+    pool: &SqlitePool,
+    mission: Option<i64>,
+    limit: i64,
+) -> Result<Vec<FlightSummary>, sqlx::Error> {
+    let rows = sqlx::query(select_flights!(
+        "WHERE mission_id IS ? ORDER BY started_at_ms DESC, id DESC LIMIT ?"
+    ))
+    .bind(mission)
     .bind(limit)
     .fetch_all(pool)
     .await?;

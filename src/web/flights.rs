@@ -12,6 +12,7 @@ use crate::contract::{FlightDetail, FlightSummary, FlightVideo, TrackPoint};
 use crate::error::AppError;
 use crate::situation::track::TrackBuilder;
 use crate::store;
+use crate::web::missions::parse_scope;
 
 const LIST_LIMIT: i64 = 200;
 
@@ -22,11 +23,20 @@ pub fn routes() -> Router<AppState> {
         .route("/flights/{id}/video", get(video))
 }
 
+#[derive(serde::Deserialize)]
+struct ListQuery {
+    mission: Option<String>,
+}
+
 async fn list(
     _: Operator,
     State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
 ) -> Result<Json<Vec<FlightSummary>>, AppError> {
-    let mut flights = store::flights::list(&state.pool, LIST_LIMIT).await?;
+    let mut flights = match parse_scope(q.mission.as_deref())? {
+        Some(mission) => store::flights::list_in(&state.pool, mission, LIST_LIMIT).await?,
+        None => store::flights::list(&state.pool, LIST_LIMIT).await?,
+    };
     for f in flights.iter_mut().filter(|f| f.ended_at_ms.is_none()) {
         let segments = store::flights::segments(&state.pool, f.id).await?;
         with_track_so_far(f, &segments);
@@ -130,6 +140,60 @@ mod tests {
         let (status, list) = send(&app.router, with_cookie(get("/api/flights"), &admin)).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(list[0]["id"], 3);
+    }
+
+    #[tokio::test]
+    async fn flights_are_filtered_by_mission() {
+        let app = test_app().await;
+        let mission = app
+            .state
+            .missions
+            .create(
+                crate::contract::MissionCreate {
+                    name: "A".into(),
+                    location: None,
+                },
+                "Operator",
+                1,
+            )
+            .await
+            .unwrap()
+            .id;
+        for id in [1, 2] {
+            let f = examples::flight_landed(id, 1_000 * id);
+            store::flights::insert(&app.state.pool, &f).await.unwrap();
+        }
+        assert!(
+            store::missions::assign_flight(&app.state.pool, 1, mission)
+                .await
+                .unwrap()
+        );
+        let admin = app.cookie(Role::Admin).await;
+        let ids = |uri: String| {
+            let router = app.router.clone();
+            let admin = admin.clone();
+            async move {
+                let (status, list) = send(&router, with_cookie(get(&uri), &admin)).await;
+                assert_eq!(status, StatusCode::OK, "{list}");
+                let mut ids: Vec<i64> = list
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|f| f["id"].as_i64().unwrap())
+                    .collect();
+                ids.sort();
+                ids
+            }
+        };
+        assert_eq!(ids(format!("/api/flights?mission={mission}")).await, [1]);
+        assert_eq!(ids("/api/flights?mission=none".into()).await, [2]);
+        assert_eq!(ids("/api/flights".into()).await, [1, 2]);
+        let (status, _) = send(
+            &app.router,
+            with_cookie(get("/api/flights?mission=abc"), &admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

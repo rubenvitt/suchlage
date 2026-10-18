@@ -4,7 +4,7 @@ use crate::contract::{MapElement, MapElementKind, MapElementOrigin, MapPoint};
 
 macro_rules! columns {
     () => {
-        "id, name, kind, points, color, clamp_to_ground, author, origin, created_at_ms, updated_at_ms"
+        "id, name, kind, points, color, clamp_to_ground, author, origin, created_at_ms, updated_at_ms, mission_id"
     };
 }
 
@@ -47,6 +47,7 @@ fn row(r: &sqlx::sqlite::SqliteRow) -> Result<MapElement, sqlx::Error> {
         origin,
         created_at_ms: r.get("created_at_ms"),
         updated_at_ms: r.get("updated_at_ms"),
+        mission_id: r.get("mission_id"),
     })
 }
 
@@ -61,6 +62,22 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<MapElement>, sqlx::Error> {
         columns!(),
         " FROM map_elements ORDER BY created_at_ms, id"
     ))
+    .fetch_all(pool)
+    .await?;
+    rows.iter().map(row).collect()
+}
+
+/// Elemente eines Einsatzes, mit `None` die ohne Einsatz.
+pub async fn list_in(
+    pool: &SqlitePool,
+    mission: Option<i64>,
+) -> Result<Vec<MapElement>, sqlx::Error> {
+    let rows = sqlx::query(concat!(
+        "SELECT ",
+        columns!(),
+        " FROM map_elements WHERE mission_id IS ? ORDER BY created_at_ms, id"
+    ))
+    .bind(mission)
     .fetch_all(pool)
     .await?;
     rows.iter().map(row).collect()
@@ -83,7 +100,7 @@ pub async fn insert(pool: &SqlitePool, e: &MapElement) -> Result<bool, sqlx::Err
     let done = sqlx::query(concat!(
         "INSERT INTO map_elements (",
         columns!(),
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING"
     ))
     .bind(&e.id)
     .bind(&e.name)
@@ -95,6 +112,7 @@ pub async fn insert(pool: &SqlitePool, e: &MapElement) -> Result<bool, sqlx::Err
     .bind(origin_str(e.origin))
     .bind(e.created_at_ms)
     .bind(e.updated_at_ms)
+    .bind(e.mission_id)
     .execute(pool)
     .await?;
     Ok(done.rows_affected() == 1)

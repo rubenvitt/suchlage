@@ -96,3 +96,16 @@ test('Mobil: Rückfall auf HLS über den Server-Proxy', async ({ page }, info) =
   expect(hls.every((s) => s === 200)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('Arbeitsplatz: Einsatz anlegen', async ({ page }, info) => {
+  test.skip(info.project.name !== 'arbeitsplatz');
+  const errors = pageErrors(page);
+  await devLogin(page);
+  await page.goto('/einsaetze');
+  const name = `E2E-Einsatz ${Date.now()}`;
+  await page.getByLabel('Name').fill(name);
+  await page.getByRole('button', { name: 'Einsatz anlegen' }).click();
+  // Vorbereitet, noch nicht gestartet: Der Simulator-Flug der anderen Tests bleibt unberührt.
+  await expect(page.getByRole('button', { name: `Starten: ${name}` })).toBeVisible();
+  expect(errors).toEqual([]);
+});

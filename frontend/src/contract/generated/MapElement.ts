@@ -15,4 +15,8 @@ color: string, clamp_to_ground: boolean,
 /**
  * Bezeichnung der Fernsteuerung oder Name des Kontos.
  */
-author: string, origin: MapElementOrigin, created_at_ms: number, updated_at_ms: number, };
+author: string, origin: MapElementOrigin, created_at_ms: number, updated_at_ms: number, 
+/**
+ * `null`: ohne Einsatz.
+ */
+mission_id: number | null, };
