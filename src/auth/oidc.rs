@@ -22,9 +22,11 @@ pub const STATE_COOKIE: &str = "suchlage_oidc";
 /// So lange gilt eine begonnene Anmeldung, und so lange lebt das Bindungscookie.
 pub const PENDING_TTL: Duration = Duration::from_secs(600);
 const PENDING_MAX: usize = 200;
+/// So lange gelten Discovery und JWKS, bevor sie neu geladen werden.
 const DISCOVERY_TTL: Duration = Duration::from_secs(3600);
-/// Kennt der JWKS einen `kid` nicht, wird er neu geladen – aber nicht öfter als so.
-const JWKS_MIN_REFRESH: Duration = Duration::from_secs(60);
+/// Höchstens so oft fragt Suchlage den Anbieter erneut: nach einem unbekannten `kid`, nach Ablauf
+/// des JWKS und nach einem fehlgeschlagenen Abruf (auch der Discovery).
+const MIN_REFRESH: Duration = Duration::from_secs(60);
 
 type Client = CoreClient<
     EndpointSet,
@@ -49,18 +51,45 @@ struct Pending {
     created: Instant,
 }
 
+struct CachedDiscovery {
+    issuer: String,
+    /// Zuletzt geladene Metadaten und wann.
+    meta: Option<(CoreProviderMetadata, Instant)>,
+    /// Letzter Fehlschlag: Bis `min_refresh` vergangen ist, fragt niemand erneut.
+    failed_at: Option<Instant>,
+}
+
+/// JWKS eines Ausstellers. Abrufe sind gedrosselt (`attempted`), auch nach einem Fehlschlag; bis
+/// dahin und bei einem Fehlschlag gelten die zuletzt geladenen Schlüssel weiter.
+#[derive(Default)]
 struct CachedJwks {
     issuer: String,
-    keys: CoreJsonWebKeySet,
-    fetched: Instant,
+    /// Zuletzt erfolgreich geladene Schlüssel und wann.
+    keys: Option<(CoreJsonWebKeySet, Instant)>,
+    /// Beginn des letzten Abrufs, ob er geklappt hat oder nicht.
+    attempted: Option<Instant>,
+}
+
+/// Was eine Anfrage nach dem JWKS tun muss.
+enum JwksStep<'a> {
+    Use(CoreJsonWebKeySet),
+    /// Diese Anfrage ruft ab; die Sperre zeigt anderen, dass ein Abruf läuft.
+    Fetch(tokio::sync::MutexGuard<'a, ()>),
+    /// Keine Schlüssel und kein Abruf erlaubt: auf einen laufenden warten, sonst 503.
+    Wait,
 }
 
 pub struct OidcState {
     pending: Mutex<HashMap<String, Pending>>,
-    discovery: tokio::sync::Mutex<Option<(String, CoreProviderMetadata, Instant)>>,
-    /// Schlüssel für die Zugriffstokens der Flugmappe (`auth::bearer`).
-    jwks: tokio::sync::Mutex<Option<CachedJwks>>,
-    jwks_min_refresh: Duration,
+    /// Die Sperre hält über den Abruf, damit gleichzeitige Anmeldungen den Anbieter nur einmal
+    /// fragen. Zugriffstokens warten nur darauf, wenn sie selbst gerade abrufen.
+    discovery: tokio::sync::Mutex<Option<CachedDiscovery>>,
+    /// Schlüssel für die Zugriffstokens der Flugmappe (`auth::bearer`). Die Sperre ist kurz und
+    /// hält nie über einen Abruf: Ein Treffer im Cache wartet nicht auf einen langsamen Anbieter.
+    jwks: Mutex<CachedJwks>,
+    /// Gehalten, solange ein JWKS-Abruf läuft (höchstens einer zugleich).
+    jwks_fetch: tokio::sync::Mutex<()>,
+    min_refresh: Duration,
     https: Http,
     loopback: Http,
 }
@@ -119,6 +148,14 @@ fn unavailable() -> AppError {
     AppError::Unavailable("Anmeldedienst nicht erreichbar".into())
 }
 
+fn discovery_failed() -> AppError {
+    AppError::Unavailable("Anmeldedienst nicht erreichbar oder Issuer falsch".into())
+}
+
+fn keys_unavailable() -> AppError {
+    AppError::Unavailable("Schlüssel des Anmeldedienstes nicht abrufbar".into())
+}
+
 /// Nur lokale Pfade als Rücksprungziel, nie `//host` oder absolute URLs.
 pub fn safe_next(next: &str) -> String {
     // Browser entfernen Tab und Zeilenumbruch aus URLs: `/\t/evil` würde sonst zu `//evil`.
@@ -143,8 +180,9 @@ impl OidcState {
         Self {
             pending: Mutex::new(HashMap::new()),
             discovery: tokio::sync::Mutex::new(None),
-            jwks: tokio::sync::Mutex::new(None),
-            jwks_min_refresh: JWKS_MIN_REFRESH,
+            jwks: Mutex::new(CachedJwks::default()),
+            jwks_fetch: tokio::sync::Mutex::new(()),
+            min_refresh: MIN_REFRESH,
             https: Http::new(true),
             loopback: Http::new(false),
         }
@@ -159,80 +197,170 @@ impl OidcState {
         }
     }
 
-    /// Discovery mit Cache je Issuer. Die Sperre hält über den Abruf, damit gleichzeitige
-    /// Anmeldungen den Anbieter nur einmal fragen.
-    async fn metadata(&self, issuer: &str) -> Result<CoreProviderMetadata, AppError> {
+    /// Discovery mit Cache je Issuer; der zweite Wert sagt, ob sie eben erst geladen wurde. Ein
+    /// Fehlschlag gilt `min_refresh` lang, ohne den Anbieter erneut zu fragen – außer mit `retry`
+    /// (Prüfung beim Einrichten).
+    async fn metadata(
+        &self,
+        issuer: &str,
+        now: Instant,
+        retry: bool,
+    ) -> Result<(CoreProviderMetadata, bool), AppError> {
         if !issuer_allowed(issuer) {
             return Err(AppError::Validation(
                 "Issuer muss mit https:// beginnen (http nur für localhost)".into(),
             ));
         }
         let mut cache = self.discovery.lock().await;
-        if let Some((cached_issuer, meta, at)) = cache.as_ref()
-            && cached_issuer == issuer
-            && at.elapsed() < DISCOVERY_TTL
-        {
-            return Ok(meta.clone());
+        if let Some(c) = cache.as_ref().filter(|c| c.issuer == issuer) {
+            if let Some((meta, at)) = &c.meta
+                && now.saturating_duration_since(*at) < DISCOVERY_TTL
+            {
+                return Ok((meta.clone(), false));
+            }
+            if !retry
+                && c.failed_at
+                    .is_some_and(|at| now.saturating_duration_since(at) < self.min_refresh)
+            {
+                return Err(discovery_failed());
+            }
         }
         let url = IssuerUrl::new(issuer.to_string())
             .map_err(|_| AppError::Validation("Issuer ist keine gültige URL".into()))?;
-        let meta = CoreProviderMetadata::discover_async(url, self.http(issuer))
-            .await
-            .map_err(|e| {
+        let result = CoreProviderMetadata::discover_async(url, self.http(issuer)).await;
+        let entry = match cache.take().filter(|c| c.issuer == issuer) {
+            Some(c) => cache.insert(c),
+            None => cache.insert(CachedDiscovery {
+                issuer: issuer.to_string(),
+                meta: None,
+                failed_at: None,
+            }),
+        };
+        match result {
+            Ok(meta) => {
+                entry.meta = Some((meta.clone(), now));
+                entry.failed_at = None;
+                Ok((meta, true))
+            }
+            Err(e) => {
                 tracing::warn!(error = %e, issuer, "OIDC-Discovery fehlgeschlagen");
-                AppError::Unavailable("Anmeldedienst nicht erreichbar oder Issuer falsch".into())
-            })?;
-        *cache = Some((issuer.to_string(), meta.clone(), Instant::now()));
-        Ok(meta)
+                entry.failed_at = Some(now);
+                Err(discovery_failed())
+            }
+        }
     }
 
-    /// Tests laden den JWKS ohne Wartezeit neu.
+    /// Tests fragen den Anbieter ohne Drosselung erneut.
     #[cfg(test)]
-    pub fn with_jwks_min_refresh(mut self, every: Duration) -> Self {
-        self.jwks_min_refresh = every;
+    pub fn with_min_refresh(mut self, every: Duration) -> Self {
+        self.min_refresh = every;
         self
     }
 
-    /// JWKS des Ausstellers mit Cache je Aussteller. `refresh` (unbekannter `kid`) lädt neu, aber
-    /// höchstens alle 60 s; sonst gilt der Cache so lange wie die Discovery.
-    pub async fn jwks(&self, issuer: &str, refresh: bool) -> Result<CoreJsonWebKeySet, AppError> {
+    /// JWKS des Ausstellers mit Cache je Aussteller; `now` kommt herein, damit Tests die Zeit
+    /// vorstellen können. Abgerufen wird nach Ablauf (1 h) oder mit `refresh` (unbekannter `kid`),
+    /// aber höchstens alle 60 s, auch nach einem Fehlschlag. Scheitert der Abruf, gelten die alten
+    /// Schlüssel weiter; 503 nur, wenn es nie welche gab.
+    pub async fn jwks(
+        &self,
+        issuer: &str,
+        refresh: bool,
+        now: Instant,
+    ) -> Result<CoreJsonWebKeySet, AppError> {
         let issuer = issuer.trim_end_matches('/');
-        let mut cache = self.jwks.lock().await;
-        if let Some(c) = cache.as_ref()
-            && c.issuer == issuer
-            && c.fetched.elapsed() < DISCOVERY_TTL
-            && (!refresh || c.fetched.elapsed() < self.jwks_min_refresh)
-        {
-            return Ok(c.keys.clone());
-        }
-        let meta = self.metadata(issuer).await?;
-        // Die Discovery bringt den JWKS schon mit; erst ein unbekannter `kid` lädt ihn eigens.
-        let keys = if refresh {
-            CoreJsonWebKeySet::fetch_async(meta.jwks_uri(), self.http(issuer))
-                .await
-                .map_err(|e| {
-                    tracing::warn!(error = %e, issuer, "JWKS nicht abrufbar");
-                    AppError::Unavailable("Schlüssel des Anmeldedienstes nicht abrufbar".into())
-                })?
-        } else {
-            meta.jwks().clone()
+        let step = {
+            let mut cache = self.jwks.lock().unwrap();
+            if cache.issuer != issuer {
+                *cache = CachedJwks {
+                    issuer: issuer.to_string(),
+                    ..CachedJwks::default()
+                };
+            }
+            let fresh = cache
+                .keys
+                .as_ref()
+                .is_some_and(|(_, at)| now.saturating_duration_since(*at) < DISCOVERY_TTL);
+            let may_fetch = (refresh || !fresh)
+                && cache
+                    .attempted
+                    .is_none_or(|at| now.saturating_duration_since(at) >= self.min_refresh);
+            match (
+                may_fetch.then(|| self.jwks_fetch.try_lock().ok()).flatten(),
+                &cache.keys,
+            ) {
+                (Some(guard), _) => {
+                    cache.attempted = Some(now);
+                    JwksStep::Fetch(guard)
+                }
+                (None, Some((keys, _))) => JwksStep::Use(keys.clone()),
+                (None, None) => JwksStep::Wait,
+            }
         };
-        *cache = Some(CachedJwks {
-            issuer: issuer.to_string(),
-            keys: keys.clone(),
-            fetched: Instant::now(),
-        });
-        Ok(keys)
+        let _fetching = match step {
+            JwksStep::Use(keys) => return Ok(keys),
+            JwksStep::Fetch(guard) => guard,
+            JwksStep::Wait => {
+                // Die erste Ladung läuft vielleicht gerade: auf sie warten statt 503.
+                drop(self.jwks_fetch.lock().await);
+                return self.cached_jwks(issuer).ok_or_else(keys_unavailable);
+            }
+        };
+        let result = self.fetch_jwks(issuer, now).await;
+        let mut cache = self.jwks.lock().unwrap();
+        let same = cache.issuer == issuer;
+        match result {
+            Ok(keys) => {
+                if same {
+                    cache.keys = Some((keys.clone(), now));
+                }
+                Ok(keys)
+            }
+            Err(e) => match cache.keys.as_ref().filter(|_| same) {
+                Some((keys, _)) => {
+                    tracing::warn!(
+                        error = %e,
+                        issuer,
+                        "JWKS nicht abrufbar – die bisherigen Schlüssel gelten weiter"
+                    );
+                    Ok(keys.clone())
+                }
+                None => Err(e),
+            },
+        }
+    }
+
+    fn cached_jwks(&self, issuer: &str) -> Option<CoreJsonWebKeySet> {
+        let cache = self.jwks.lock().unwrap();
+        cache
+            .keys
+            .as_ref()
+            .filter(|_| cache.issuer == issuer)
+            .map(|(keys, _)| keys.clone())
+    }
+
+    /// Bringt die Discovery den JWKS eben erst mit, gilt er; sonst wird `jwks_uri` direkt abgerufen
+    /// (nie die alte Kopie aus der Discovery, sonst bliebe ein widerrufener Schlüssel gültig).
+    async fn fetch_jwks(&self, issuer: &str, now: Instant) -> Result<CoreJsonWebKeySet, AppError> {
+        let (meta, fresh) = self.metadata(issuer, now, false).await?;
+        if fresh {
+            return Ok(meta.jwks().clone());
+        }
+        CoreJsonWebKeySet::fetch_async(meta.jwks_uri(), self.http(issuer))
+            .await
+            .map_err(|e| {
+                tracing::warn!(error = %e, issuer, "JWKS nicht abrufbar");
+                keys_unavailable()
+            })
     }
 
     pub async fn check_discovery(&self, issuer: &str) -> Result<(), AppError> {
-        self.metadata(issuer.trim_end_matches('/'))
+        self.metadata(issuer.trim_end_matches('/'), Instant::now(), true)
             .await
             .map(|_| ())
     }
 
     async fn client(&self, cfg: &OidcSettings, redirect_url: &str) -> Result<Client, AppError> {
-        let meta = self.metadata(&cfg.issuer).await?;
+        let (meta, _) = self.metadata(&cfg.issuer, Instant::now(), false).await?;
         let redirect = RedirectUrl::new(redirect_url.to_string())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(CoreClient::from_provider_metadata(
@@ -342,10 +470,11 @@ pub mod test_idp {
     //! Redirect-URL prüfen können. Zugriffstokens wie Pocket ID (RFC 9068) stellt er direkt aus.
 
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use axum::extract::{Form, State};
+    use axum::http::StatusCode;
     use axum::routing::{get, post};
     use axum::{Json, Router};
     use base64::Engine;
@@ -429,6 +558,10 @@ pub mod test_idp {
         token_requests: Arc<Mutex<Vec<HashMap<String, String>>>>,
         client_id: &'static str,
         key: Arc<CoreRsaPrivateSigningKey>,
+        /// Ausfall: Discovery und JWKS antworten 503 (gezählt wird trotzdem).
+        down: Arc<AtomicBool>,
+        /// So lange lässt der JWKS-Endpunkt auf sich warten.
+        jwks_delay_ms: Arc<AtomicU64>,
     }
 
     impl TestIdp {
@@ -452,6 +585,15 @@ pub mod test_idp {
 
         pub fn jwks_count(&self) -> usize {
             self.jwks_requests.load(Ordering::SeqCst)
+        }
+
+        pub fn set_down(&self, down: bool) {
+            self.down.store(down, Ordering::SeqCst);
+        }
+
+        pub fn set_jwks_delay(&self, delay: std::time::Duration) {
+            self.jwks_delay_ms
+                .store(delay.as_millis() as u64, Ordering::SeqCst);
         }
 
         /// Zugriffstoken (RS256, `typ: at+jwt`) mit den Claims von Pocket ID.
@@ -499,6 +641,8 @@ pub mod test_idp {
             token_requests: Arc::new(Mutex::new(Vec::new())),
             client_id,
             key: Arc::new(key),
+            down: Arc::new(AtomicBool::new(false)),
+            jwks_delay_ms: Arc::new(AtomicU64::new(0)),
         };
         let app = Router::new()
             .route("/.well-known/openid-configuration", get(discovery))
@@ -509,19 +653,31 @@ pub mod test_idp {
         idp
     }
 
-    async fn discovery(State(idp): State<TestIdp>) -> Json<serde_json::Value> {
+    async fn discovery(State(idp): State<TestIdp>) -> Result<Json<serde_json::Value>, StatusCode> {
         idp.discovery_requests.fetch_add(1, Ordering::SeqCst);
+        if idp.down.load(Ordering::SeqCst) {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
         let i = &idp.issuer;
-        Json(serde_json::json!({
+        Ok(Json(serde_json::json!({
             "issuer": i, "authorization_endpoint": format!("{i}/authorize"), "token_endpoint": format!("{i}/token"),
             "jwks_uri": format!("{i}/jwks"), "response_types_supported": ["code"], "subject_types_supported": ["public"],
             "id_token_signing_alg_values_supported": ["RS256"]
-        }))
+        })))
     }
 
-    async fn jwks(State(idp): State<TestIdp>) -> Json<CoreJsonWebKeySet> {
+    async fn jwks(State(idp): State<TestIdp>) -> Result<Json<CoreJsonWebKeySet>, StatusCode> {
         idp.jwks_requests.fetch_add(1, Ordering::SeqCst);
-        Json(CoreJsonWebKeySet::new(vec![idp.key.as_verification_key()]))
+        let delay = idp.jwks_delay_ms.load(Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
+        if idp.down.load(Ordering::SeqCst) {
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        Ok(Json(CoreJsonWebKeySet::new(vec![
+            idp.key.as_verification_key(),
+        ])))
     }
 
     async fn token(

@@ -18,7 +18,7 @@ Quelle: `pocket-id/pocket-id` `main` @ `acba4e7` (16.10.2026, 2.18.0), Ausgabe �
 **Folge:** Kein Rückfall über Userinfo nötig. Suchlage prüft lokal:
 
 1. Header: `alg` aus der Liste des JWKS-Schlüssels (kein `none`, kein HS*), `typ` ist `at+jwt` oder `application/at+jwt` (Groß/klein egal).
-2. Signatur gegen den JWKS des **in den OIDC-Einstellungen** stehenden Ausstellers (Schlüssel über `kid`; unbekannter `kid` → JWKS einmal neu laden, höchstens alle 60 s).
+2. Signatur gegen den JWKS des **in den OIDC-Einstellungen** stehenden Ausstellers (Schlüssel über `kid`; unbekannter `kid` → JWKS einmal neu laden, höchstens alle 60 s). Geprüft wird in zwei Schritten: erst alles ohne Schlüssel (Form, Kopf, Claims aus 3.–5.), dann die Signatur – nur ein sonst gültiges Token löst einen Abruf aus. Jeder Abruf (auch ein gescheiterter, auch die Discovery) sperrt weitere für 60 s; scheitert er, gelten die alten Schlüssel weiter, 503 nur ohne je geladene Schlüssel. Nach Ablauf (1 h) kommt der JWKS direkt von `jwks_uri`.
 3. `iss` == eingestellter Aussteller (ohne Schrägstrich am Ende verglichen).
 4. `exp` in der Zukunft (60 s Spielraum), `iat` nicht mehr als 60 s in der Zukunft.
 5. `aud` (String oder Array) enthält die **Client-ID der Flugmappe** aus den Einstellungen „Flugmappe“; zusätzlich `client_id`-Claim, falls vorhanden, gleich dieser Client-ID.

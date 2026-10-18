@@ -2,6 +2,7 @@
 //! JWKS des in den OIDC-Einstellungen stehenden Ausstellers. Kein Rückfall über Userinfo.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::extract::{FromRef, FromRequestParts};
 use axum::http::header::AUTHORIZATION;
@@ -148,12 +149,22 @@ fn usable(key: &CoreJsonWebKey, alg: &CoreJwsSigningAlgorithm) -> bool {
     sign && matches
 }
 
-/// Prüft ein Zugriffstoken vollständig gegen den JWKS. Rein: Zeit und Schlüssel kommen herein.
-pub fn verify_access_token(
-    jwt: &str,
-    jwks: &CoreJsonWebKeySet,
-    expected: &Expected,
-) -> Result<AccessClaims, Reason> {
+/// Ein Token, das ohne Schlüssel geprüft ist: Form, Kopf und Claims passen. Nichts davon gilt als
+/// vertraut, bevor `verify_signature` die Signatur bestätigt hat.
+#[derive(Debug)]
+pub struct Unverified<'a> {
+    /// `Kopf.Nutzlast`, wie signiert.
+    message: &'a str,
+    signature: Vec<u8>,
+    alg: CoreJwsSigningAlgorithm,
+    kid: Option<String>,
+    claims: AccessClaims,
+}
+
+/// Erster Schritt, ohne Schlüssel: Zerlegen, Kopf (`crit`, `alg`, `typ`), Nutzlast, `type`, `iss`,
+/// `exp`/`iat`/`nbf`, `aud`, `client_id`, `sub`. Nur was hier besteht, darf einen Abruf des JWKS
+/// auslösen; kaputte, abgelaufene oder fremde Tokens sind 401, auch wenn der Anbieter fehlt.
+pub fn precheck<'a>(jwt: &'a str, expected: &Expected) -> Result<Unverified<'a>, Reason> {
     let mut parts = jwt.split('.');
     let (Some(header_b64), Some(payload_b64), Some(signature_b64), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())
@@ -168,37 +179,6 @@ pub fn verify_access_token(
     let typ = header.typ.unwrap_or_default().to_ascii_lowercase();
     if typ != "at+jwt" && typ != "application/at+jwt" {
         return Err(Reason::Type);
-    }
-
-    let by_kid: Vec<&CoreJsonWebKey> = jwks
-        .keys()
-        .iter()
-        .filter(|k| {
-            header
-                .kid
-                .as_deref()
-                .is_none_or(|kid| k.key_id().is_some_and(|id| id.as_str() == kid))
-        })
-        .collect();
-    if by_kid.is_empty() {
-        return Err(Reason::UnknownKey);
-    }
-    let keys: Vec<_> = by_kid.into_iter().filter(|k| usable(k, &alg)).collect();
-    if keys.is_empty() {
-        return Err(Reason::Algorithm);
-    }
-    let signature = URL_SAFE_NO_PAD
-        .decode(signature_b64)
-        .map_err(|_| Reason::Malformed)?;
-    if signature.is_empty() {
-        return Err(Reason::Signature);
-    }
-    let message = format!("{header_b64}.{payload_b64}");
-    if !keys.iter().any(|k| {
-        k.verify_signature(&alg, message.as_bytes(), &signature)
-            .is_ok()
-    }) {
-        return Err(Reason::Signature);
     }
 
     let claims: Claims = decode(payload_b64)?;
@@ -239,29 +219,88 @@ pub fn verify_access_token(
         .sub
         .filter(|s| !s.is_empty())
         .ok_or(Reason::Malformed)?;
-    Ok(AccessClaims { issuer, subject })
+
+    let signature = URL_SAFE_NO_PAD
+        .decode(signature_b64)
+        .map_err(|_| Reason::Malformed)?;
+    if signature.is_empty() {
+        return Err(Reason::Signature);
+    }
+    Ok(Unverified {
+        message: &jwt[..header_b64.len() + 1 + payload_b64.len()],
+        signature,
+        alg,
+        kid: header.kid,
+        claims: AccessClaims { issuer, subject },
+    })
 }
 
-/// Prüft mit dem JWKS des Ausstellers. Kennt der JWKS den `kid` nicht (Schlüsseltausch), wird er
-/// einmal neu geladen – höchstens alle 60 s. Ein abgelehntes Token ist 401, ein nicht erreichbarer
-/// Anmeldedienst 503.
+impl Unverified<'_> {
+    /// Zweiter Schritt: Signatur gegen den JWKS (Schlüssel über `kid`). Erst danach gelten die
+    /// Claims.
+    pub fn verify_signature(&self, jwks: &CoreJsonWebKeySet) -> Result<AccessClaims, Reason> {
+        let by_kid: Vec<&CoreJsonWebKey> = jwks
+            .keys()
+            .iter()
+            .filter(|k| {
+                self.kid
+                    .as_deref()
+                    .is_none_or(|kid| k.key_id().is_some_and(|id| id.as_str() == kid))
+            })
+            .collect();
+        if by_kid.is_empty() {
+            return Err(Reason::UnknownKey);
+        }
+        let keys: Vec<_> = by_kid
+            .into_iter()
+            .filter(|k| usable(k, &self.alg))
+            .collect();
+        if keys.is_empty() {
+            return Err(Reason::Algorithm);
+        }
+        if !keys.iter().any(|k| {
+            k.verify_signature(&self.alg, self.message.as_bytes(), &self.signature)
+                .is_ok()
+        }) {
+            return Err(Reason::Signature);
+        }
+        Ok(self.claims.clone())
+    }
+}
+
+/// Prüft ein Zugriffstoken vollständig gegen den JWKS. Rein: Zeit und Schlüssel kommen herein.
+pub fn verify_access_token(
+    jwt: &str,
+    jwks: &CoreJsonWebKeySet,
+    expected: &Expected,
+) -> Result<AccessClaims, Reason> {
+    precheck(jwt, expected)?.verify_signature(jwks)
+}
+
+fn rejected(reason: Reason) -> AppError {
+    tracing::info!(?reason, "Zugriffstoken der Flugmappe abgelehnt");
+    AppError::UnauthorizedWith(reason.message().into())
+}
+
+/// Prüft erst ohne, dann mit dem JWKS des Ausstellers. Kennt der JWKS den `kid` nicht
+/// (Schlüsseltausch), wird er einmal neu geladen – höchstens alle 60 s. Ein abgelehntes Token ist
+/// 401; 503 nur, wenn für ein sonst gültiges Token nie Schlüssel geladen werden konnten. `now`
+/// steuert den Cache (Tests stellen die Zeit vor).
 pub async fn verify(
     oidc: &OidcState,
     jwt: &str,
     expected: &Expected<'_>,
+    now: Instant,
 ) -> Result<AccessClaims, AppError> {
-    let jwks = oidc.jwks(expected.issuer, false).await?;
-    let result = match verify_access_token(jwt, &jwks, expected) {
+    let token = precheck(jwt, expected).map_err(rejected)?;
+    let jwks = oidc.jwks(expected.issuer, false, now).await?;
+    let result = match token.verify_signature(&jwks) {
         Err(Reason::UnknownKey) => {
-            let jwks = oidc.jwks(expected.issuer, true).await?;
-            verify_access_token(jwt, &jwks, expected)
+            token.verify_signature(&oidc.jwks(expected.issuer, true, now).await?)
         }
         other => other,
     };
-    result.map_err(|reason| {
-        tracing::info!(?reason, "Zugriffstoken der Flugmappe abgelehnt");
-        AppError::UnauthorizedWith(reason.message().into())
-    })
+    result.map_err(rejected)
 }
 
 /// Konto zu einem geprüften Token. Die einzige Stelle, an der die Schnittstelle der Flugmappe das
@@ -307,7 +346,13 @@ where
             audience: &flugmappe.client_id,
             now_s: now_ms().div_euclid(1000),
         };
-        let claims = verify(&Arc::<OidcState>::from_ref(state), token, &expected).await?;
+        let claims = verify(
+            &Arc::<OidcState>::from_ref(state),
+            token,
+            &expected,
+            Instant::now(),
+        )
+        .await?;
         Ok(FlugmappeUser(
             account(&SqlitePool::from_ref(state), &claims).await?,
         ))
@@ -580,46 +625,225 @@ mod tests {
         assert!(verify_access_token(&rs512_token, &jwks(), &expected()).is_ok());
     }
 
-    #[tokio::test]
-    async fn verify_reloads_the_jwks_for_an_unknown_key_at_most_every_minute() {
+    fn later(t0: Instant, s: u64) -> Instant {
+        t0 + std::time::Duration::from_secs(s)
+    }
+
+    /// Test-IdP mit einem gültigen Token und einem mit unbekanntem `kid` (Schlüsseltausch).
+    async fn live() -> (test_idp::TestIdp, String, String) {
         let idp = test_idp::start("suchlage").await;
         let token = idp.access_token_for(test_idp::SUBJECT, CLIENT, 300);
-        let expected = Expected {
-            issuer: &idp.issuer,
-            audience: CLIENT,
-            now_s: chrono::Utc::now().timestamp(),
-        };
-        let oidc = OidcState::new();
-        assert_eq!(
-            verify(&oidc, &token, &expected).await.unwrap().subject,
-            test_idp::SUBJECT
-        );
-        assert_eq!(idp.jwks_count(), 1);
-        verify(&oidc, &token, &expected).await.unwrap();
-        assert_eq!(idp.jwks_count(), 1, "aus dem Cache");
-
         let rotated = idp.access_token(test_idp::AccessToken {
             kid: "neu".into(),
             ..test_idp::AccessToken::new(test_idp::SUBJECT, CLIENT)
         });
-        let err = verify(&oidc, &rotated, &expected).await.unwrap_err();
-        assert!(matches!(err, AppError::UnauthorizedWith(_)), "{err:?}");
+        (idp, token, rotated)
+    }
+
+    fn live_expected(issuer: &str) -> Expected<'_> {
+        Expected {
+            issuer,
+            audience: CLIENT,
+            now_s: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    fn is_401(r: Result<AccessClaims, AppError>) -> bool {
+        matches!(r, Err(AppError::UnauthorizedWith(_)))
+    }
+
+    #[tokio::test]
+    async fn verify_reloads_the_jwks_for_an_unknown_key_at_most_every_minute() {
+        let (idp, token, rotated) = live().await;
+        let expected = live_expected(&idp.issuer);
+        let oidc = OidcState::new();
+        let t0 = Instant::now();
+        assert_eq!(
+            verify(&oidc, &token, &expected, t0).await.unwrap().subject,
+            test_idp::SUBJECT
+        );
+        assert_eq!(idp.jwks_count(), 1, "mit der Discovery");
+        verify(&oidc, &token, &expected, later(t0, 1))
+            .await
+            .unwrap();
+        assert_eq!(idp.jwks_count(), 1, "aus dem Cache");
+
+        assert!(is_401(
+            verify(&oidc, &rotated, &expected, later(t0, 30)).await
+        ));
         assert_eq!(
             idp.jwks_count(),
             1,
             "innerhalb einer Minute nicht neu geladen"
         );
+        assert!(is_401(
+            verify(&oidc, &rotated, &expected, later(t0, 61)).await
+        ));
+        assert_eq!(idp.jwks_count(), 2, "danach direkt von jwks_uri");
 
-        let eager = OidcState::new().with_jwks_min_refresh(std::time::Duration::ZERO);
-        verify(&eager, &token, &expected).await.unwrap();
-        verify(&eager, &rotated, &expected).await.unwrap_err();
-        assert_eq!(idp.jwks_count(), 3, "einmal geladen, einmal neu");
+        let eager = OidcState::new().with_min_refresh(std::time::Duration::ZERO);
+        verify(&eager, &token, &expected, t0).await.unwrap();
+        assert!(is_401(verify(&eager, &rotated, &expected, t0).await));
+        assert_eq!(idp.jwks_count(), 4, "einmal geladen, einmal neu");
+    }
 
-        let unreachable = Expected {
-            issuer: "http://127.0.0.1:1",
-            ..expected
+    #[tokio::test]
+    async fn a_failed_refresh_is_throttled_and_the_old_keys_stay() {
+        let (idp, token, rotated) = live().await;
+        let expected = live_expected(&idp.issuer);
+        let oidc = OidcState::new();
+        let t0 = Instant::now();
+        verify(&oidc, &token, &expected, t0).await.unwrap();
+        idp.set_down(true);
+
+        assert!(is_401(
+            verify(&oidc, &rotated, &expected, later(t0, 61)).await
+        ));
+        assert_eq!(idp.jwks_count(), 2, "ein Versuch, gescheitert");
+        verify(&oidc, &token, &expected, later(t0, 62))
+            .await
+            .unwrap();
+        assert!(is_401(
+            verify(&oidc, &rotated, &expected, later(t0, 120)).await
+        ));
+        assert_eq!(
+            idp.jwks_count(),
+            2,
+            "kein zweiter Abruf innerhalb von 60 s nach dem Fehlschlag"
+        );
+        assert!(is_401(
+            verify(&oidc, &rotated, &expected, later(t0, 121)).await
+        ));
+        assert_eq!(idp.jwks_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn an_expired_cache_outlives_an_unreachable_idp() {
+        let (idp, token, _) = live().await;
+        let expected = live_expected(&idp.issuer);
+        let oidc = OidcState::new();
+        let t0 = Instant::now();
+        verify(&oidc, &token, &expected, t0).await.unwrap();
+        idp.set_down(true);
+
+        verify(&oidc, &token, &expected, later(t0, 3_601))
+            .await
+            .expect("alte Schlüssel gelten weiter");
+        assert_eq!(idp.discovery_count(), 2, "abgelaufen: neu versucht");
+        verify(&oidc, &token, &expected, later(t0, 3_630))
+            .await
+            .unwrap();
+        assert_eq!(idp.discovery_count(), 2, "gedrosselt");
+
+        idp.set_down(false);
+        verify(&oidc, &token, &expected, later(t0, 3_662))
+            .await
+            .unwrap();
+        assert_eq!(
+            (idp.discovery_count(), idp.jwks_count()),
+            (3, 2),
+            "wieder frisch geladen"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_any_keys_a_valid_token_is_503_and_retried_at_most_every_minute() {
+        let (idp, token, _) = live().await;
+        idp.set_down(true);
+        let expected = live_expected(&idp.issuer);
+        let oidc = OidcState::new();
+        let t0 = Instant::now();
+        for s in [0, 30] {
+            let err = verify(&oidc, &token, &expected, later(t0, s))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, AppError::Unavailable(_)), "{err:?}");
+        }
+        assert_eq!(idp.discovery_count(), 1, "Discovery-Fehler gedrosselt");
+        verify(&oidc, &token, &expected, later(t0, 61))
+            .await
+            .unwrap_err();
+        assert_eq!(idp.discovery_count(), 2);
+        idp.set_down(false);
+        verify(&oidc, &token, &expected, later(t0, 122))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn broken_or_misaddressed_tokens_are_401_without_asking_the_idp() {
+        // Port 1 auf Loopback ist zu; ein Abruf schlüge mit 503 fehl.
+        let issuer = "http://127.0.0.1:1";
+        let expected = Expected {
+            issuer,
+            audience: CLIENT,
+            now_s: NOW,
         };
-        let err = verify(&oidc, &token, &unreachable).await.unwrap_err();
+        let for_issuer = |changes: Value| {
+            test_idp::sign(
+                &header(),
+                &with(claims(), with(json!({"iss": issuer}), changes)),
+            )
+        };
+        let oidc = OidcState::new();
+        for bad in [
+            "kaputt".to_string(),
+            "a.b.c".into(),
+            for_issuer(json!({"exp": NOW - 120})),
+            for_issuer(json!({"aud": ["suchlage"]})),
+            for_issuer(json!({"iss": "https://evil.example.org"})),
+            test_idp::sign(&with(header(), json!({"typ": "JWT"})), &claims()),
+        ] {
+            let result = verify(&oidc, &bad, &expected, Instant::now()).await;
+            assert!(is_401(result), "{bad}");
+        }
+        let err = verify(&oidc, &for_issuer(json!({})), &expected, Instant::now())
+            .await
+            .unwrap_err();
         assert!(matches!(err, AppError::Unavailable(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn cache_hits_do_not_wait_for_a_slow_refresh() {
+        let (idp, token, rotated) = live().await;
+        let oidc = Arc::new(OidcState::new());
+        let t0 = Instant::now();
+        verify(&oidc, &token, &live_expected(&idp.issuer), t0)
+            .await
+            .unwrap();
+        idp.set_jwks_delay(std::time::Duration::from_secs(5));
+        let slow = tokio::spawn({
+            let (oidc, issuer) = (oidc.clone(), idp.issuer.clone());
+            async move {
+                verify(&oidc, &rotated, &live_expected(&issuer), later(t0, 61))
+                    .await
+                    .is_ok()
+            }
+        });
+        while idp.jwks_count() < 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let quick = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            verify(&oidc, &token, &live_expected(&idp.issuer), later(t0, 62)),
+        )
+        .await;
+        assert!(matches!(quick, Ok(Ok(_))), "{quick:?}");
+        slow.abort();
+    }
+
+    #[tokio::test]
+    async fn the_first_load_is_shared_by_concurrent_requests() {
+        let (idp, token, _) = live().await;
+        idp.set_jwks_delay(std::time::Duration::from_millis(200));
+        let oidc = OidcState::new();
+        let expected = live_expected(&idp.issuer);
+        let t0 = Instant::now();
+        let (a, b) = tokio::join!(
+            verify(&oidc, &token, &expected, t0),
+            verify(&oidc, &token, &expected, t0)
+        );
+        assert!(a.is_ok() && b.is_ok(), "{a:?} {b:?}");
+        assert_eq!(idp.jwks_count(), 1);
     }
 }

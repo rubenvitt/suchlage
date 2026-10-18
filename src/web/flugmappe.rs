@@ -450,6 +450,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unreachable_idp_is_503_only_for_otherwise_valid_tokens() {
+        let s = setup().await;
+        s.idp.set_down(true);
+        let expired = s.idp.access_token_for(test_idp::SUBJECT, CLIENT, -120);
+        for token in ["kaputt", &expired] {
+            let (status, body) = send(
+                &s.app.router,
+                request("GET", "/me", Some(token), None, None),
+            )
+            .await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+        }
+        assert_eq!(s.idp.discovery_count(), 0, "Müll fragt den Anbieter nicht");
+        let (status, _) = s.call("GET", "/me", None, None).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
     async fn a_token_without_an_account_is_403() {
         let s = setup().await;
         let stranger = s.idp.access_token_for("niemand", CLIENT, 300);
