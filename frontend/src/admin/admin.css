@@ -140,3 +140,10 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Zustand einer abschaltbaren Schnittstelle (Flugmappe): Wort und Chip in einer Zeile. */
+.sl-form-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

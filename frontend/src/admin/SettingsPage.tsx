@@ -5,7 +5,15 @@ import { Frame } from '../shell/Frame';
 import './admin.css';
 import { KioskTokensPanel } from './KioskTokensPanel';
 import { RemoteControllersPanel } from './RemoteControllersPanel';
-import { BrokerForm, DjiForm, GeneralForm, MediaForm, OidcForm, PhotoStorageForm } from './SettingsForms';
+import {
+  BrokerForm,
+  DjiForm,
+  FlugmappeForm,
+  GeneralForm,
+  MediaForm,
+  OidcForm,
+  PhotoStorageForm,
+} from './SettingsForms';
 import { zustandOf } from './zustand';
 
 const SECTIONS = [
@@ -16,6 +24,7 @@ const SECTIONS = [
   { wert: 'broker', label: 'Broker' },
   { wert: 'media', label: 'Video' },
   { wert: 'photo_storage', label: 'Fotospeicher' },
+  { wert: 'flugmappe', label: 'Flugmappe' },
   { wert: 'general', label: 'Allgemein' },
 ] as const;
 type Section = (typeof SECTIONS)[number]['wert'];
@@ -29,6 +38,7 @@ const META: Record<Section, string> = {
   broker: 'MQTT im VPN',
   media: 'MediaMTX',
   photo_storage: 'Garage für die Fotos aus Pilot 2',
+  flugmappe: 'Einsätze aus der Flugmappe',
   general: 'Verhalten im Einsatz',
 };
 
@@ -51,6 +61,7 @@ function SettingsSection({ section, title }: { section: Section; title: string }
       {data && section === 'broker' && <BrokerForm view={data.broker} />}
       {data && section === 'media' && <MediaForm view={data.media} />}
       {data && section === 'photo_storage' && <PhotoStorageForm view={data.photo_storage} />}
+      {data && section === 'flugmappe' && <FlugmappeForm view={data.flugmappe} />}
       {data && section === 'general' && <GeneralForm view={data.general} />}
     </PaneelZustand>
   );

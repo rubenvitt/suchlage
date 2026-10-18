@@ -186,6 +186,7 @@ export const handlersFor = (me: Me) => {
     ...missionHandlers(),
     http.get('/api/settings', () => HttpResponse.json(fx.settingsView)),
     http.put('/api/settings/:section', () => HttpResponse.json(fx.settingsView)),
+    http.delete('/api/settings/flugmappe', () => HttpResponse.json({ ...fx.settingsView, flugmappe: null })),
     http.get('/api/remote-controllers', () => HttpResponse.json(fx.remoteControllers)),
     http.post('/api/remote-controllers', async ({ request }) => {
       const { label } = (await request.json()) as RemoteControllerCreate;
