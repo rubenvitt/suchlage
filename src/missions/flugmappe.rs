@@ -797,7 +797,7 @@ mod tests {
             "Browser und Pilots sehen es"
         );
         let elements = f.hub.map.list_in(Some(m.id)).await.unwrap();
-        let summary: Vec<_> = elements
+        let mut summary: Vec<_> = elements
             .iter()
             .map(|e| {
                 (
@@ -808,6 +808,8 @@ mod tests {
                 )
             })
             .collect();
+        // Gleiche Anlegezeit: Die Reihenfolge der Liste hängt an der zufälligen ID.
+        summary.sort_by(|a, b| b.0.cmp(a.0));
         assert_eq!(
             summary,
             vec![
