@@ -72,3 +72,16 @@ test('unter 768 px die mobile Ansicht mit unterer Leiste', async () => {
     vi.unstubAllGlobals();
   }
 });
+
+test('Großbild ohne laufenden Einsatz: keine leere Einsatzzelle im Kopf', async () => {
+  server.use(
+    http.get('/api/me', () => HttpResponse.json(meKiosk)),
+    http.get('/api/missions', () => HttpResponse.json([])),
+  );
+  const head = show('/');
+  expect(await screen.findByText('Kein Einsatz läuft')).toBeInTheDocument();
+  const banner = screen.getByRole('banner');
+  const empty = [...banner.children].filter((c) => !c.classList.contains('sl-mark') && !c.textContent);
+  expect(empty).toEqual([]);
+  expect(head.getByText('SYNC')).toBeInTheDocument();
+});

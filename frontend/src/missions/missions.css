@@ -101,15 +101,9 @@
 }
 
 /* Einsatz in der Kopfleiste (Skizzen „Lage laufend“ und „ohne Einsatz“): eigene Zelle vor dem Status. */
-/* Die Zelle füllt der Einsatz selbst, damit „ohne Einsatz“ sie ganz tönen kann. */
-.sl-head .sl-mission-cell {
-  padding: 0;
-  align-items: stretch;
+/* Im Kopf ist der Einsatz selbst eine Zelle; „ohne Einsatz“ tönt sie ganz. */
+.sl-head > .sl-mission-status {
   background: var(--lfh-rahmen-aktiv);
-  min-width: 0;
-}
-.sl-head .sl-mission-status {
-  padding: 0 16px;
 }
 .sl-mission-status {
   display: flex;

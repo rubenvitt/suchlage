@@ -1,8 +1,9 @@
 import { Alert, Button, Dropdown, Form, Input, Modal, message, type MenuProps } from 'antd';
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError } from '../api/client';
 import {
+  deletedHere,
   useAddSection,
   useCloseMission,
   useMe,
@@ -36,7 +37,22 @@ export function MissionHeader() {
   const { data: me } = useMe();
   const missions = useMissions();
   const { scope, ready } = useMissionScope();
-  if (!me) return null;
+  const param = useSearchParams()[0].get('einsatz');
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  // Gelöscht oder unbekannt (Spec §4 „Offene Ansichten“): zurück zum Einstieg dieser Seite statt
+  // stillschweigend den laufenden Einsatz zu zeigen. Das Großbild kennt keine Adresse.
+  const gone =
+    ready &&
+    me?.role !== 'kiosk' &&
+    param !== null &&
+    param !== 'ohne' &&
+    !deletedHere.has(Number(param)) &&
+    !missions.data?.some((m) => String(m.id) === param);
+  useEffect(() => {
+    if (gone) void navigate(pathname, { replace: true });
+  }, [gone, navigate, pathname]);
+  if (!me || gone) return null;
   if (me.role === 'kiosk')
     return scope.kind === 'mission' ? (
       <div className="sl-mission-status">
@@ -49,15 +65,18 @@ export function MissionHeader() {
         <span>{missions.isError ? 'Einsätze nicht geladen' : 'Einsätze werden geladen …'}</span>
       </div>
     );
-  if (scope.kind === 'none') return <Without />;
+  const admin = me.role === 'admin';
+  if (scope.kind === 'none')
+    return <Without running={missions.data?.some((m) => m.state === 'running') ?? false} />;
   const { mission } = scope;
   if (mission.state === 'running') return <Running mission={mission} />;
-  if (mission.state === 'prepared') return <Prepared mission={mission} />;
-  return <Archived mission={mission} admin={me.role === 'admin'} />;
+  if (mission.state === 'prepared') return <Prepared mission={mission} admin={admin} />;
+  return <Archived mission={mission} admin={admin} />;
 }
 
 /** Deutlich (Spec §2, Skizze 3): Niemand soll ohne Einsatz fliegen, ohne es zu merken. */
-function Without() {
+/** `running`: Es läuft einer (Adresse `?einsatz=ohne`), dann führt der Knopf dorthin. */
+function Without({ running }: { running: boolean }) {
   const { reset } = useSkip();
   const navigate = useNavigate();
   // Die Statusfläche trägt ihren Text in beiden Darstellungen, auch auf dem immer dunklen Kopf.
@@ -74,13 +93,26 @@ function Without() {
           navigate('/');
         }}
       >
-        Einsatz starten
+        {running ? 'Zum laufenden Einsatz' : 'Einsatz starten'}
       </Button>
     </div>
   );
 }
 
-function Prepared({ mission }: { mission: Mission }) {
+/** „Löschen …“ mit Rückfrage, nur für die Verwaltung (vorbereitete und abgeschlossene Einsätze). */
+function DeleteAction({ mission }: { mission: Mission }) {
+  const [deleting, setDeleting] = useState(false);
+  return (
+    <>
+      <Button size="small" danger onClick={() => setDeleting(true)}>
+        Löschen …
+      </Button>
+      {deleting && <DeleteMissionDialog mission={mission} onClose={() => setDeleting(false)} />}
+    </>
+  );
+}
+
+function Prepared({ mission, admin }: { mission: Mission; admin: boolean }) {
   const start = useStartMission();
   const navigate = useNavigate();
   const [notice, holder] = message.useMessage();
@@ -100,24 +132,19 @@ function Prepared({ mission }: { mission: Mission }) {
       <Button type="primary" size="small" loading={start.isPending} onClick={() => void run()}>
         Einsatz starten
       </Button>
+      {admin && <DeleteAction mission={mission} />}
       <Link to="/">Zurück</Link>
     </div>
   );
 }
 
 function Archived({ mission, admin }: { mission: Mission; admin: boolean }) {
-  const [deleting, setDeleting] = useState(false);
   return (
     <div className="sl-mission-status" data-state="archiv">
       <span>Archiv:</span> <strong>{mission.name}</strong> <span>· abgeschlossen</span>
       <Link to={`/flights?einsatz=${mission.id}`}>Flüge</Link>
-      {admin && (
-        <Button size="small" danger onClick={() => setDeleting(true)}>
-          Löschen …
-        </Button>
-      )}
+      {admin && <DeleteAction mission={mission} />}
       <Link to="/einsaetze">Zurück</Link>
-      {deleting && <DeleteMissionDialog mission={mission} onClose={() => setDeleting(false)} />}
     </div>
   );
 }
@@ -128,6 +155,7 @@ function Running({ mission }: { mission: Mission }) {
   const now = useServerNow(15_000);
   const navigate = useNavigate();
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [open, setOpen] = useState(false);
   const section = mission.sections.at(-1);
   const items: MenuProps['items'] = [
     {
@@ -142,13 +170,16 @@ function Running({ mission }: { mission: Mission }) {
       ],
     },
   ];
-  const onClick: MenuProps['onClick'] = ({ key }) =>
-    key === 'flights' ? void navigate(`/flights?einsatz=${mission.id}`) : setDialog(key as Dialog);
+  const onClick: MenuProps['onClick'] = ({ key }) => {
+    setOpen(false);
+    if (key === 'flights') void navigate(`/flights?einsatz=${mission.id}`);
+    else setDialog(key as Dialog);
+  };
   const close = () => setDialog(null);
   return (
     <div className="sl-mission-status" data-state="laufend">
-      <Dropdown menu={{ items, onClick }} trigger={['click']}>
-        <button type="button" className="sl-mission-trigger">
+      <Dropdown menu={{ items, onClick }} trigger={['click']} open={open} onOpenChange={setOpen}>
+        <button type="button" className="sl-mission-trigger" aria-haspopup="menu" aria-expanded={open}>
           <strong>{mission.name}</strong>
           <StatusChip ton="normal" wort={`Laufend · ${since(mission.started_at_ms, now)}`} />
           {section && <span className="sl-mission-note">· Abschnitt {section.label}</span>}

@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { useLocation } from 'react-router';
+import { deletedHere, queryKeys } from '../api/queries';
 import { meAdmin, meKiosk } from '../contract/fixtures.generated';
 import type { Mission } from '../contract/generated/Mission';
 import { LiveProvider } from '../live/LiveProvider';
@@ -15,7 +16,10 @@ import { MissionHeader } from './MissionHeader';
 const [running, prepared] = missionFixtures() as [Mission, Mission];
 const closed: Mission = { ...running, id: 5, name: 'Brand Celle', state: 'closed', closed_at_ms: 1792160000000 };
 
-afterEach(() => sessionStorage.clear());
+afterEach(() => {
+  sessionStorage.clear();
+  deletedHere.clear();
+});
 
 function Address() {
   const { pathname, search } = useLocation();
@@ -42,7 +46,11 @@ test('laufend: Name, „Laufend“ mit Dauer, aktiver Abschnitt und das Menü', 
   expect(await screen.findByText('Übung Wietze', { selector: 'strong' })).toBeInTheDocument();
   expect(screen.getByText(/^Laufend · \d+:\d\d h$/)).toBeInTheDocument();
   expect(screen.getByText('· Abschnitt Nord')).toBeInTheDocument();
+  const trigger = screen.getByRole('button', { name: /Übung Wietze/ });
+  expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await openMenu();
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
   const menu = within(await screen.findByRole('menu'));
   for (const item of ['Neuer Abschnitt …', 'Einsatz bearbeiten', 'Flüge dieses Einsatzes', 'Einsatz abschließen …'])
     expect(menu.getByText(item)).toBeInTheDocument();
@@ -112,10 +120,10 @@ test('Abschließen während eines Flugs zeigt den Text des Servers', async () =>
 
 test('ohne Einsatz: deutlich, mit Löschhinweis; „Einsatz starten“ führt auf die Startseite', async () => {
   sessionStorage.setItem(SKIP_KEY, '1');
-  show('/?einsatz=ohne');
+  show('/?einsatz=ohne', [prepared]);
   expect(await screen.findByText('Ohne Einsatz')).toBeInTheDocument();
   expect(screen.getByText('Zeichnungen werden nach 24 h gelöscht')).toBeInTheDocument();
-  expect(screen.queryByText('Übung Wietze')).not.toBeInTheDocument();
+  expect(screen.queryByText('Hochwasser Aller')).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Einsatz starten' }));
   expect(address()).toHaveTextContent(/^\/$/);
   expect(sessionStorage.getItem(SKIP_KEY)).toBeNull();
@@ -136,6 +144,23 @@ test('Vorbereitung: läuft schon einer, sagt die Kopfleiste das', async () => {
   await userEvent.click(await screen.findByRole('button', { name: 'Einsatz starten' }));
   expect(await screen.findByText('Es läuft schon ein Einsatz')).toBeInTheDocument();
   expect(address()).toHaveTextContent('/?einsatz=2');
+});
+
+test('Vorbereitung: Löschen nur für die Verwaltung, danach die Einsatzseite', async () => {
+  show('/?einsatz=2');
+  await screen.findByText(/^Vorbereitung:/);
+  expect(screen.queryByRole('button', { name: 'Löschen …' })).not.toBeInTheDocument();
+});
+
+test('Vorbereitung: die Verwaltung löscht einen vorbereiteten Einsatz', async () => {
+  asAdmin();
+  show('/?einsatz=2');
+  await userEvent.click(await screen.findByRole('button', { name: 'Löschen …' }));
+  const dialog = within(await screen.findByRole('dialog'));
+  await dialog.findByText(/3 Flüge/);
+  await userEvent.type(dialog.getByLabelText(/Einsatzname/), 'Hochwasser Aller');
+  await userEvent.click(dialog.getByRole('button', { name: 'Endgültig löschen' }));
+  await vi.waitFor(() => expect(address()).toHaveTextContent('/einsaetze'));
 });
 
 test('Archiv: nur lesen, „Flüge“ und „Zurück“, kein Löschen für die Bedienung', async () => {
@@ -217,4 +242,27 @@ test('Großbild: nur der Name des laufenden Einsatzes, ohne Bedienung', async ()
   expect(screen.queryByText('Hochwasser Aller')).not.toBeInTheDocument();
   expect(screen.queryAllByRole('button')).toHaveLength(0);
   expect(screen.queryAllByRole('link')).toHaveLength(0);
+});
+
+test('ohne Einsatz, während einer läuft: der Knopf führt zum laufenden', async () => {
+  show('/?einsatz=ohne');
+  await screen.findByText('Ohne Einsatz');
+  expect(screen.queryByRole('button', { name: 'Einsatz starten' })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Zum laufenden Einsatz' }));
+  expect(address()).toHaveTextContent(/^\/$/);
+});
+
+test('verschwindet der angezeigte Einsatz, geht es zurück zum Einstieg', async () => {
+  const { client } = show('/?einsatz=5', [running, closed]);
+  await screen.findByText(/^Archiv:/);
+  await fetch('/api/missions/5', { method: 'DELETE' });
+  // So reagiert der Live-Strom auf `missions_changed`.
+  await client.invalidateQueries({ queryKey: queryKeys.missions });
+  await vi.waitFor(() => expect(address()).toHaveTextContent(/^\/$/));
+  expect(await screen.findByText('Übung Wietze', { selector: 'strong' })).toBeInTheDocument();
+});
+
+test('eine unbekannte Einsatznummer in der Flugliste führt zur Flugliste', async () => {
+  show('/flights?einsatz=99');
+  await vi.waitFor(() => expect(address()).toHaveTextContent(/^\/flights$/));
 });

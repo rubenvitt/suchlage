@@ -9,7 +9,8 @@ export function Header({ mission, status, me }: { mission?: ReactNode; status?: 
     <header className="sl-head">
       <div className="sl-mark" aria-hidden />
       <div className="sl-word">Suchlage</div>
-      {mission && <div className="sl-mission-cell">{mission}</div>}
+      {/* Ohne Inhalt keine leere Zelle: `MissionHeader` ist selbst die Zelle (`.sl-mission-status`). */}
+      {mission}
       <div className="sl-status">{status}</div>
       <div>
         <Clock />
