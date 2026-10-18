@@ -25,7 +25,7 @@ pub struct MissionHub {
 }
 
 impl MissionHub {
-    /// Übernimmt den laufenden Einsatz als Sichtbereich der Pilots (wirksam ab Task 4).
+    /// Übernimmt den laufenden Einsatz als Sichtbereich der Pilots.
     pub async fn start_up(pool: SqlitePool, map: MapHub) -> Result<Self, AppError> {
         map.set_pilot_scope(store::running_id(&pool).await?);
         let (changes, _) = broadcast::channel(CHANGES_BUFFERED);

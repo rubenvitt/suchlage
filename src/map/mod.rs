@@ -20,7 +20,11 @@ const CHANGES_BUFFERED: usize = 256;
 pub enum MapChange {
     Created(MapElement),
     Updated(MapElement),
-    Deleted { id: String },
+    Deleted {
+        id: String,
+    },
+    /// Pilot 2 lädt die Gruppe neu (Sichtbereich gewechselt). Für den Browser bedeutungslos.
+    Refresh,
 }
 
 /// Neues Element. Die ID kommt aus Pilot 2; ohne ID vergibt der Server eine.
@@ -56,6 +60,8 @@ pub struct MapHub {
     /// zweite dazwischen. Sonst überschriebe eine Umbenennung im Browser eine gleichzeitige
     /// Verschiebung aus Pilot 2, und Pilots und Browser sähen Änderungen in anderer Reihenfolge.
     writes: Arc<Mutex<()>>,
+    /// Einsatz, dessen Elemente Pilot 2 sieht; `None` heißt „ohne Einsatz“.
+    pilot_scope: Arc<watch::Sender<Option<i64>>>,
 }
 
 impl MapHub {
@@ -67,6 +73,7 @@ impl MapHub {
             changes,
             stop,
             writes: Arc::new(Mutex::new(())),
+            pilot_scope: Arc::new(watch::channel(None).0),
         }
     }
 
@@ -75,8 +82,16 @@ impl MapHub {
     }
 
     /// Welche Elemente Pilot 2 sieht: die des laufenden Einsatzes, sonst die „ohne Einsatz“.
-    /// Wirksam ab Task 4.
-    pub fn set_pilot_scope(&self, _mission: Option<i64>) {}
+    /// Pilot 2 lädt danach die Gruppe neu.
+    pub fn set_pilot_scope(&self, mission: Option<i64>) {
+        // `send_replace` speichert auch ohne Empfänger; `send` täte das nicht.
+        self.pilot_scope.send_replace(mission);
+        self.publish(MapChange::Refresh);
+    }
+
+    pub fn pilot_scope(&self) -> Option<i64> {
+        *self.pilot_scope.borrow()
+    }
 
     pub fn stop_signal(&self) -> watch::Receiver<bool> {
         self.stop.clone()
@@ -208,6 +223,8 @@ impl MapHub {
         }
         element.mission_id = Some(mission_id);
         self.publish(MapChange::Updated(element.clone()));
+        // Das Element verlässt „ohne Einsatz“ und damit womöglich die Sicht von Pilot 2.
+        self.publish(MapChange::Refresh);
         Ok(element)
     }
 

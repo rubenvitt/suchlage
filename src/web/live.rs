@@ -86,21 +86,25 @@ async fn next_event((mut rx, handle): Feed) -> Option<(Result<Event, Infallible>
 type MapFeed = (broadcast::Receiver<MapChange>, MapHub);
 
 async fn next_map_event((mut rx, hub): MapFeed) -> Option<(Result<Event, Infallible>, MapFeed)> {
-    let event = match rx.recv().await {
-        Ok(MapChange::Created(element) | MapChange::Updated(element)) => {
-            LiveEvent::MapElement { element }
+    let event = loop {
+        match rx.recv().await {
+            Ok(MapChange::Created(element) | MapChange::Updated(element)) => {
+                break LiveEvent::MapElement { element };
+            }
+            Ok(MapChange::Deleted { id }) => break LiveEvent::MapElementDeleted { id },
+            // Nur für Pilot 2; der Browser sieht alle Elemente.
+            Ok(MapChange::Refresh) => {}
+            Err(RecvError::Lagged(missed)) => {
+                tracing::debug!(missed, "Kartenstrom überholt – neue Liste");
+                let elements = hub
+                    .list()
+                    .await
+                    .inspect_err(|e| tracing::warn!(error = ?e, "Kartenelemente nicht lesbar"))
+                    .ok()?;
+                break LiveEvent::MapElements { elements };
+            }
+            Err(RecvError::Closed) => return None,
         }
-        Ok(MapChange::Deleted { id }) => LiveEvent::MapElementDeleted { id },
-        Err(RecvError::Lagged(missed)) => {
-            tracing::debug!(missed, "Kartenstrom überholt – neue Liste");
-            let elements = hub
-                .list()
-                .await
-                .inspect_err(|e| tracing::warn!(error = ?e, "Kartenelemente nicht lesbar"))
-                .ok()?;
-            LiveEvent::MapElements { elements }
-        }
-        Err(RecvError::Closed) => return None,
     };
     Some((sse(&event), (rx, hub)))
 }
