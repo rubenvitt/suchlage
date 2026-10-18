@@ -51,7 +51,9 @@ test('Großbild: über Zugangslink, ohne Bedienelemente', async ({ page, browser
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const kiosk = await context.newPage();
   const errors = pageErrors(kiosk);
-  await kiosk.goto(url.replace('http://127.0.0.1:8080', ''));
+  // Nur Pfad und Fragment: Der Link nennt SUCHLAGE_PUBLIC_URL, geladen wird über die baseURL.
+  const { pathname, search, hash } = new URL(url);
+  await kiosk.goto(pathname + search + hash);
   await expect(kiosk.getByRole('region', { name: 'Telemetrie' })).toHaveAttribute('data-size', 'large', {
     timeout: 15_000,
   });

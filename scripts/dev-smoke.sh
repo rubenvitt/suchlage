@@ -4,12 +4,12 @@ set -u
 cd "$(dirname "$0")/.."
 FAIL=0
 check() { if [ "$1" = 0 ]; then echo "ok   $2"; else echo "FAIL $2"; FAIL=1; fi; }
-# Eigenes Compose-Projekt: `down -v` darf nie den laufenden Dev-Stack (suchlage-dev) samt Broker-Volume treffen.
-if curl -s -o /dev/null http://127.0.0.1:8080/api/health || nc -z 127.0.0.1 1883 2>/dev/null || nc -z 127.0.0.1 3900 2>/dev/null; then
-  echo "Port 8080, 1883 oder 3900 ist belegt – läuft noch \`mise run dev\`? Erst beenden."; exit 1
-fi
+. scripts/lib/ports.sh
+pick_ports
+URL=http://127.0.0.1:$SL_SERVER_PORT
 TMP=$(mktemp -d)
-export SUCHLAGE_DATA_DIR="$TMP/data" SUCHLAGE_BIND=127.0.0.1:8080 SUCHLAGE_PUBLIC_URL=http://127.0.0.1:8080
+export SUCHLAGE_DATA_DIR="$TMP/data" SUCHLAGE_BIND=127.0.0.1:$SL_SERVER_PORT SUCHLAGE_PUBLIC_URL=$URL
+# Eigenes Compose-Projekt: `down -v` darf nie den laufenden Dev-Stack (suchlage-dev) samt Broker-Volume treffen.
 DC="docker compose -p suchlage-smoke -f deploy/compose.dev.yaml"
 pids=""
 cleanup() { for p in $pids; do kill "$p" 2>/dev/null || true; done; $DC down -v >/dev/null 2>&1; rm -rf "$TMP"; }
@@ -22,44 +22,45 @@ cargo build -q --features dev --bin suchlage --bin suchlage-sim || exit 1
 # Das Zielverzeichnis kann per Cargo-Konfiguration außerhalb des Repos liegen.
 BIN="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/debug"
 "$BIN/suchlage" >"$TMP/server.log" 2>&1 & pids="$pids $!"
-i=0; until curl -sf http://127.0.0.1:8080/api/health >/dev/null; do i=$((i+1)); [ $i -lt 60 ] || break; sleep 1; done
-curl -sf http://127.0.0.1:8080/api/health >/dev/null; check $? "Server läuft"
+i=0; until curl -sf $URL/api/health >/dev/null; do i=$((i+1)); [ $i -lt 60 ] || break; sleep 1; done
+curl -sf $URL/api/health >/dev/null; check $? "Server läuft"
 
 JAR="$TMP/jar"
-curl -sf -c "$JAR" -X POST http://127.0.0.1:8080/api/auth/dev-login >/dev/null
+curl -sf -c "$JAR" -X POST "$URL/api/auth/dev-login" >/dev/null
+use_ports "$JAR" "$URL" || exit 1
 api() { curl -sf -b "$JAR" -H 'content-type: application/json' "$@"; }
-code_for() { api -X POST -d "{\"label\":\"$1\"}" http://127.0.0.1:8080/api/remote-controllers | jq -r '.pairing_url | split("#")[1]'; }
-connect() { curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$1\",\"rc_sn\":\"$2\"}" http://127.0.0.1:8080/pilot/api/connect; }
+code_for() { api -X POST -d "{\"label\":\"$1\"}" $URL/api/remote-controllers | jq -r '.pairing_url | split("#")[1]'; }
+connect() { curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$1\",\"rc_sn\":\"$2\"}" $URL/pilot/api/connect; }
 CODE_A=$(code_for "RC A"); CODE_B=$(code_for "RC B")
 # Die Broker-Sitzung braucht nach dem Start einen Moment; bis dahin antwortet connect mit 503.
 i=0; until A=$(connect "$CODE_A" RCA); do i=$((i+1)); [ $i -lt 30 ] || break; sleep 1; done
 B=$(connect "$CODE_B" RCB)
 PASS_A=$(printf '%s' "$A" | jq -r .mqttPass); PASS_B=$(printf '%s' "$B" | jq -r .mqttPass)
 [ -n "$PASS_A" ] && [ "$PASS_A" != null ] && [ -n "$PASS_B" ] && [ "$PASS_B" != null ]; check $? "Kopplung liefert Zugangsdaten"
-curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$CODE_A\"}" http://127.0.0.1:8080/pilot/api/license | jq -e '.appKey != null and .mqttPass == null' >/dev/null
+curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$CODE_A\"}" $URL/pilot/api/license | jq -e '.appKey != null and .mqttPass == null' >/dev/null
 check $? "Lizenzschritt liefert Lizenz, aber keinen Broker-Zugang"
 for ep in license connect; do
-  curl -s -X POST -H 'content-type: application/json' -d '{"code":"falsch","rc_sn":"RCA"}' "http://127.0.0.1:8080/pilot/api/$ep" | grep -qE 'mqttPass|appKey'
+  curl -s -X POST -H 'content-type: application/json' -d '{"code":"falsch","rc_sn":"RCA"}' "$URL/pilot/api/$ep" | grep -qE 'mqttPass|appKey'
   [ $? -ne 0 ]; check $? "ohne gültigen Code nichts Geheimes ($ep)"
 done
 
 # M2: Kartenelemente über die Pilot-Schnittstelle, mit dem Token aus dem Koppeln.
-WS=$(curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$CODE_A\"}" http://127.0.0.1:8080/pilot/api/license | jq -r .workspaceId)
+WS=$(curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$CODE_A\"}" $URL/pilot/api/license | jq -r .workspaceId)
 TOKEN_A=$(printf '%s' "$A" | jq -r .apiToken)
-MAP="http://127.0.0.1:8080/map/api/v1/workspaces/$WS"
+MAP="$URL/map/api/v1/workspaces/$WS"
 GROUP=$(curl -sf -H "x-auth-token: $TOKEN_A" "$MAP/element-groups" | jq -r '.data[] | select(.type == 2) | .id')
 [ -n "$GROUP" ]; check $? "Pilot findet die App-Shared-Gruppe"
 PIN='{"id":"smoke-pin","name":"Smoke","resource":{"type":0,"user_name":"","content":{"type":"Feature","properties":{"color":"#E23C39","clampToGround":true},"geometry":{"type":"Point","coordinates":[10.01,52.43]}}}}'
 curl -sf -H "x-auth-token: $TOKEN_A" -H 'content-type: application/json' -d "$PIN" "$MAP/element-groups/$GROUP/elements" | jq -e '.code == 0' >/dev/null
 check $? "Pilot legt einen Punkt an"
-api http://127.0.0.1:8080/api/map/elements | jq -e 'map(select(.id == "smoke-pin" and .origin == "pilot" and .author == "RC A")) | length == 1' >/dev/null
+api $URL/api/map/elements | jq -e 'map(select(.id == "smoke-pin" and .origin == "pilot" and .author == "RC A")) | length == 1' >/dev/null
 check $? "Punkt aus Pilot 2 erscheint im Browser"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-auth-token: falsch' "$MAP/element-groups")" = 401 ]
 check $? "Kartenelemente ohne gültigen Token: 401"
 # M3: Upload-Zugang nur mit Token, Ablageort je Fernsteuerung.
-[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'x-auth-token: falsch' "http://127.0.0.1:8080/storage/api/v1/workspaces/$WS/sts")" = 401 ]
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'x-auth-token: falsch' "$URL/storage/api/v1/workspaces/$WS/sts")" = 401 ]
 check $? "Foto-Upload ohne gültigen Token: 401"
-STS=$(curl -sf -X POST -H "x-auth-token: $TOKEN_A" "http://127.0.0.1:8080/storage/api/v1/workspaces/$WS/sts")
+STS=$(curl -sf -X POST -H "x-auth-token: $TOKEN_A" "$URL/storage/api/v1/workspaces/$WS/sts")
 printf '%s' "$STS" | jq -e '.data.object_key_prefix == "fotos/RCA" and .data.credentials.access_key_id != null' >/dev/null
 check $? "sts liefert einen Upload-Schlüssel für fotos/RCA"
 
@@ -97,39 +98,39 @@ grep -q '^thing/product/ACX/osd' "$TMP/acl34"; check $? "RC A darf Fluggeräte-T
 ! grep -q '^thing/product/RCB/state' "$TMP/acl34"; check $? "RC A kann nicht als RC B telemetrieren"
 
 # RTMP mit falschem Schlüssel wird abgewiesen
-ffmpeg -loglevel error -re -f lavfi -i testsrc=size=320x180:rate=10 -t 2 -c:v libx264 -preset ultrafast -f flv "rtmp://127.0.0.1:1935/live/RCA?user=rc-RCA&pass=falsch" 2>/dev/null
+ffmpeg -loglevel error -re -f lavfi -i testsrc=size=320x180:rate=10 -t 2 -c:v libx264 -preset ultrafast -f flv "rtmp://127.0.0.1:$SL_RTMP_PORT/live/RCA?user=rc-RCA&pass=falsch" 2>/dev/null
 [ $? -ne 0 ]; check $? "RTMP mit falschem Schlüssel abgelehnt"
 
 # Einsätze: Der Flug gehört zu dem Einsatz, der beim Start läuft.
-MISSION=$(api -X POST -d '{"name":"Smoke-Einsatz","location":null}' http://127.0.0.1:8080/api/missions | jq -r .id)
-api -X POST "http://127.0.0.1:8080/api/missions/$MISSION/start" | jq -e '.state == "running"' >/dev/null
+MISSION=$(api -X POST -d '{"name":"Smoke-Einsatz","location":null}' $URL/api/missions | jq -r .id)
+api -X POST "$URL/api/missions/$MISSION/start" | jq -e '.state == "running"' >/dev/null
 check $? "Einsatz angelegt und gestartet"
 
 # Ganzer Flug im Zeitraffer, mit Livebild (Auto-Start beim Abheben)
-"$BIN/suchlage-sim" --server http://127.0.0.1:8080 --code "$CODE_A" --rc-sn RCA --speed 10 >"$TMP/sim.log" 2>&1
+"$BIN/suchlage-sim" --server $URL --code "$CODE_A" --rc-sn RCA --speed 10 >"$TMP/sim.log" 2>&1
 check $? "Simulator spielt den Flug ab"
 sleep 3
-FLIGHT=$(api http://127.0.0.1:8080/api/flights | jq '.[0]')
+FLIGHT=$(api $URL/api/flights | jq '.[0]')
 [ "$(printf '%s' "$FLIGHT" | jq -r .end_reason)" = landed ]; check $? "Flug erkannt und gelandet"
 ID=$(printf '%s' "$FLIGHT" | jq -r .id)
-api "http://127.0.0.1:8080/api/flights?mission=$MISSION" | jq -e --argjson id "$ID" 'map(select(.id == $id)) | length == 1' >/dev/null
+api "$URL/api/flights?mission=$MISSION" | jq -e --argjson id "$ID" 'map(select(.id == $id)) | length == 1' >/dev/null
 check $? "Flug steht in der Flugliste des Einsatzes"
-api "http://127.0.0.1:8080/api/flights?mission=none" | jq -e --argjson id "$ID" 'map(select(.id == $id)) | length == 0' >/dev/null
+api "$URL/api/flights?mission=none" | jq -e --argjson id "$ID" 'map(select(.id == $id)) | length == 0' >/dev/null
 check $? "Flug fehlt unter „ohne Einsatz“"
-api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.segments | length >= 1' >/dev/null; check $? "Spur gespeichert"
-api "http://127.0.0.1:8080/api/flights/$ID" | jq -e '.video != null' >/dev/null; check $? "Flugvideo aufgezeichnet"
-SIZE=$(curl -sf -b "$JAR" "http://127.0.0.1:8080/api/flights/$ID/video?download=1" | wc -c)
+api "$URL/api/flights/$ID" | jq -e '.segments | length >= 1' >/dev/null; check $? "Spur gespeichert"
+api "$URL/api/flights/$ID" | jq -e '.video != null' >/dev/null; check $? "Flugvideo aufgezeichnet"
+SIZE=$(curl -sf -b "$JAR" "$URL/api/flights/$ID/video?download=1" | wc -c)
 [ "$SIZE" -gt 1000 ]; check $? "Flugvideo herunterladbar ($SIZE Bytes)"
 
 # M3: Der Simulator lädt nach der Landung eine Auslösung (Wärme und Weit) über Garage hoch.
-SHOT=$(api http://127.0.0.1:8080/api/photos | jq '.[-1]')
+SHOT=$(api $URL/api/photos | jq '.[-1]')
 [ "$(printf '%s' "$SHOT" | jq -r .flight_id)" = "$ID" ]; check $? "Foto dem Flug zugeordnet"
 printf '%s' "$SHOT" | jq -e '.position != null and ([.photos[].lens] == ["thermal", "wide"])' >/dev/null
 check $? "Foto mit Aufnahmeort, Wärmebild zuerst"
 PHOTO=$(printf '%s' "$SHOT" | jq -r '.photos[0].id')
-i=0; until curl -sf -b "$JAR" -o /dev/null "http://127.0.0.1:8080/api/photos/$PHOTO/thumb"; do i=$((i+1)); [ $i -lt 20 ] || break; sleep 1; done
-curl -sf -b "$JAR" -o /dev/null "http://127.0.0.1:8080/api/photos/$PHOTO/thumb"; check $? "Vorschaubild erzeugt"
-SIZE=$(curl -sf -b "$JAR" "http://127.0.0.1:8080/api/photos/$PHOTO/original?download=1" | wc -c)
+i=0; until curl -sf -b "$JAR" -o /dev/null "$URL/api/photos/$PHOTO/thumb"; do i=$((i+1)); [ $i -lt 20 ] || break; sleep 1; done
+curl -sf -b "$JAR" -o /dev/null "$URL/api/photos/$PHOTO/thumb"; check $? "Vorschaubild erzeugt"
+SIZE=$(curl -sf -b "$JAR" "$URL/api/photos/$PHOTO/original?download=1" | wc -c)
 [ "$SIZE" -gt 1000 ]; check $? "Original herunterladbar ($SIZE Bytes)"
 
 [ $FAIL = 0 ] && echo ok || { echo "--- Server-Log (Ende)"; tail -40 "$TMP/server.log"; echo "--- Simulator-Log"; tail -20 "$TMP/sim.log"; }

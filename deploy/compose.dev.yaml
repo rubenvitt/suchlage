@@ -1,4 +1,5 @@
 # Lokale Entwicklung. Eigener Projektname: kollidiert weder mit dem M0-Spike (smoke.sh) noch mit dem Betrieb.
+# Die Ports sind die festen Dev-Ports; dev-smoke und e2e setzen SL_*_PORT auf freie (scripts/lib/ports.sh).
 name: suchlage-dev
 
 services:
@@ -6,7 +7,7 @@ services:
     image: eclipse-mosquitto:2.0.22
     entrypoint: ["/entrypoint.sh"]
     environment: { DYNSEC_INIT_USER: suchlage-admin, DYNSEC_INIT_PASSWORD: dev-admin }
-    ports: ["127.0.0.1:1883:1883"]
+    ports: ["127.0.0.1:${SL_MQTT_PORT:-1883}:1883"]
     volumes:
       - ./mosquitto/mosquitto.m1.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mosquitto/entrypoint.sh:/entrypoint.sh:ro
@@ -20,14 +21,20 @@ services:
     image: bluenviron/mediamtx:1.21.2
     environment:
       MTX_WEBRTCADDITIONALHOSTS: 127.0.0.1
-      MTX_AUTHHTTPADDRESS: http://host.docker.internal:8080/internal/media/auth
+      MTX_AUTHHTTPADDRESS: http://host.docker.internal:${SL_SERVER_PORT:-8080}/internal/media/auth
+      # Innen dieselbe Portnummer wie außen: WebRTC nennt dem Browser den UDP-Port, den MediaMTX selbst hört.
+      MTX_RTMPADDRESS: ":${SL_RTMP_PORT:-1935}"
+      MTX_HLSADDRESS: ":${SL_HLS_PORT:-8888}"
+      MTX_WEBRTCADDRESS: ":${SL_WEBRTC_PORT:-8889}"
+      MTX_WEBRTCLOCALUDPADDRESS: ":${SL_WEBRTC_UDP_PORT:-8189}"
+      MTX_PLAYBACKADDRESS: ":${SL_PLAYBACK_PORT:-9996}"
     extra_hosts: ["host.docker.internal:host-gateway"]
     ports:
-      - "127.0.0.1:1935:1935"
-      - "127.0.0.1:8888:8888"
-      - "127.0.0.1:8889:8889"
-      - "127.0.0.1:8189:8189/udp"
-      - "127.0.0.1:9996:9996"
+      - "127.0.0.1:${SL_RTMP_PORT:-1935}:${SL_RTMP_PORT:-1935}"
+      - "127.0.0.1:${SL_HLS_PORT:-8888}:${SL_HLS_PORT:-8888}"
+      - "127.0.0.1:${SL_WEBRTC_PORT:-8889}:${SL_WEBRTC_PORT:-8889}"
+      - "127.0.0.1:${SL_WEBRTC_UDP_PORT:-8189}:${SL_WEBRTC_UDP_PORT:-8189}/udp"
+      - "127.0.0.1:${SL_PLAYBACK_PORT:-9996}:${SL_PLAYBACK_PORT:-9996}"
     volumes:
       - ./mediamtx.m1.yml:/mediamtx.yml:ro
       - ../data/dev/video:/recordings
@@ -44,8 +51,8 @@ services:
       GARAGE_DEFAULT_ACCESS_KEY: GK0123456789abcdef01234567
       GARAGE_DEFAULT_SECRET_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     ports:
-      - "127.0.0.1:3900:3900"
-      - "127.0.0.1:3903:3903"
+      - "127.0.0.1:${SL_S3_PORT:-3900}:3900"
+      - "127.0.0.1:${SL_S3_ADMIN_PORT:-3903}:3903"
     volumes:
       - ./garage/garage.dev.toml:/etc/garage.toml:ro
       - fotos-data:/var/lib/garage
