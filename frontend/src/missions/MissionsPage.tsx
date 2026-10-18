@@ -17,7 +17,7 @@ const GROUPS: { state: MissionState; title: string }[] = [
   { state: 'closed', title: 'Abgeschlossen' },
 ];
 
-type Act = (method: 'POST', path: string, body?: unknown) => void;
+type Act = (method: 'POST', path: string, body?: unknown, onOk?: () => void) => void;
 
 function SectionForm({ mission, act }: { mission: Mission; act: Act }) {
   const [form] = Form.useForm<{ label: string }>();
@@ -26,11 +26,15 @@ function SectionForm({ mission, act }: { mission: Mission; act: Act }) {
       form={form}
       layout="inline"
       onFinish={(v) => {
-        act('POST', `/api/missions/${mission.id}/sections`, {
-          label: v.label,
-          location: null,
-        } satisfies SectionCreate);
-        form.resetFields();
+        act(
+          'POST',
+          `/api/missions/${mission.id}/sections`,
+          {
+            label: v.label,
+            location: null,
+          } satisfies SectionCreate,
+          () => () => form.resetFields(),
+        );
       }}
     >
       <Form.Item name="label" rules={[{ required: true, message: 'Name fehlt' }]}>
@@ -98,7 +102,7 @@ export function MissionsPage() {
     mutationFn: (a: { path: string; body?: unknown }) => apiSend<unknown>('POST', a.path, a.body),
     onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
   });
-  const act: Act = (_m, path, body) => run.mutate({ path, body });
+  const act: Act = (_m, path, body, onOk) => run.mutate({ path, body }, { onSuccess: onOk });
   const error = run.error;
   return (
     <Frame>
@@ -108,7 +112,7 @@ export function MissionsPage() {
             type="error"
             title={
               error instanceof ApiError
-                ? error.status === 409
+                ? error.status === 409 && run.variables?.path.endsWith('/start')
                   ? 'Es läuft schon ein Einsatz'
                   : error.message
                 : 'Server nicht erreichbar.'
@@ -123,11 +127,15 @@ export function MissionsPage() {
             colon={false}
             requiredMark={false}
             onFinish={(v) => {
-              act('POST', '/api/missions', {
-                name: v.name,
-                location: v.location || null,
-              } satisfies MissionCreate);
-              form.resetFields();
+              act(
+                'POST',
+                '/api/missions',
+                {
+                  name: v.name,
+                  location: v.location || null,
+                } satisfies MissionCreate,
+                () => form.resetFields(),
+              );
             }}
           >
             <Form.Item label="Name" name="name" rules={[{ required: true, message: 'Name fehlt' }]}>

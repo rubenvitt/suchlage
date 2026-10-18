@@ -56,3 +56,16 @@ test('Abschnitt anlegen und anderer Fehler zeigt die Serverantwort', async () =>
     '/?einsatz=1',
   );
 });
+
+test('409 bei einer anderen Aktion als Starten zeigt die Serverantwort', async () => {
+  await setup();
+  server.use(
+    http.post('/api/missions/:id/close', () =>
+      HttpResponse.json({ error: 'Einsatz ist nicht mehr offen' }, { status: 409 }),
+    ),
+  );
+  await userEvent.click(group('Laufend').getByRole('button', { name: /Abschließen/ }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Abschließen' }));
+  expect(await screen.findByText('Einsatz ist nicht mehr offen')).toBeInTheDocument();
+  expect(screen.queryByText('Es läuft schon ein Einsatz')).not.toBeInTheDocument();
+});
