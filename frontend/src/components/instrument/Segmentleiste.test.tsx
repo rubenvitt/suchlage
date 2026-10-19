@@ -39,6 +39,14 @@ describe('Segmentleiste', () => {
     expect(screen.getAllByRole('radio', { checked: true })).toHaveLength(1);
   });
 
+  it('ohne Wahl ist kein Segment gewählt, das erste liegt im Tab-Weg', () => {
+    renderMitProviders(
+      <Segmentleiste optionen={OPTIONEN} wert={null} onWechsel={() => {}} beschriftung="Einträge nach Typ" />,
+    );
+    expect(screen.queryAllByRole('radio', { checked: true })).toHaveLength(0);
+    expect(screen.getAllByRole('radio').map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+  });
+
   it('wählt per Klick', async () => {
     const onWechsel = vi.fn();
     renderMitProviders(
