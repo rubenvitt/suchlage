@@ -35,10 +35,6 @@ import '../../theme/sprache.css';
  * Hover und Fokus liegen auf dem Segment, nicht auf der Zelle: sie zeigen, wo ein Tippen wirkt,
  * der Rand bleibt still (wie die Kennzahl, LFH-630 D4).
  *
- * OHNE WAHL (`wert: null` oder ein Wert, den keine Option trägt): kein Segment ist gewählt, das
- * erste freie liegt im Tab-Weg (APG: Radiogruppe ohne gewähltes Element). Für Zustände, die das
- * Gerät nicht meldet, statt fälschlich das erste Segment als aktiv zu zeigen.
- *
  * GESPERRT: ein Segment mit `gesperrt` bleibt SICHTBAR und nennt seinen Grund — als Tooltip und
  * als Beschreibung (`aria-describedby`). Es ist `aria-disabled`, nicht `disabled`: ein natives
  * `disabled` nähme es aus Fokus und Hilfstechnik, der Grund wäre unerreichbar. Klick und Pfeile
@@ -129,7 +125,7 @@ export function naechsterIndex(
 
 interface SegmentleisteProps<W extends string | number> {
   optionen: readonly SegmentOption<W>[];
-  wert: W | null;
+  wert: W;
   onWechsel: (wert: W) => void;
   /** Zugänglicher Name der Gruppe — Pflicht („Einträge nach Typ filtern"). */
   beschriftung: string;
@@ -148,8 +144,10 @@ export default function Segmentleiste<W extends string | number>({
   const { token } = useRollen();
   const grundId = useId();
   const knoepfe = useRef<(HTMLButtonElement | null)[]>([]);
-  const aktivIndex = optionen.findIndex((o) => o.wert === wert);
-  const tabIndexZiel = aktivIndex >= 0 ? aktivIndex : Math.max(0, optionen.findIndex((o) => !o.gesperrt));
+  const aktivIndex = Math.max(
+    0,
+    optionen.findIndex((o) => o.wert === wert),
+  );
   const alsTab = rolle === 'tablist';
 
   const taste = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -185,7 +183,7 @@ export default function Segmentleiste<W extends string | number>({
             aria-disabled={gesperrt || undefined}
             aria-describedby={beschreibungId}
             data-gesperrt={gesperrt || undefined}
-            tabIndex={i === tabIndexZiel ? 0 : -1}
+            tabIndex={aktiv ? 0 : -1}
             className={aktiv ? 'lfh-segment lfh-segment--aktiv' : 'lfh-segment'}
             onClick={() => {
               if (!gesperrt) onWechsel(o.wert);

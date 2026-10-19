@@ -9,8 +9,8 @@ import type { StreamStartRequest } from '../contract/generated/StreamStartReques
 import type { StreamState } from '../contract/generated/StreamState';
 import type { StreamStopRequest } from '../contract/generated/StreamStopRequest';
 import type { VideoSource } from '../contract/generated/VideoSource';
-import { playerMessage, streamMessage, TRANSPORT_LABEL } from './copy';
-import { LensPicker } from './LensPicker';
+import { LENS_IN_PILOT, playerMessage, streamMessage, TRANSPORT_LABEL } from './copy';
+import { canSwitchLens, LensPicker } from './LensPicker';
 import { usePlayer } from './usePlayer';
 import './video.css';
 
@@ -45,6 +45,8 @@ export function VideoPanel({ gatewaySn, stream, sources, canControl }: Props) {
     command.mutate({ path: '/api/streams/lens', body: { gateway_sn: gatewaySn, lens: l } });
 
   const source = sources.find((s) => s.video_id === stream?.video_id);
+  const lenses = source?.switchable_lenses ?? [];
+  const currentLens = stream?.lens ?? source?.lens ?? null;
   const meta = [source?.camera_label, player.kind === 'playing' ? TRANSPORT_LABEL[player.transport] : null]
     .filter(Boolean)
     .join(' · ');
@@ -58,12 +60,16 @@ export function VideoPanel({ gatewaySn, stream, sources, canControl }: Props) {
     <div className="sl-video-actions">
       {isLive ? (
         <>
-          <LensPicker
-            lenses={source?.switchable_lenses ?? []}
-            value={stream?.lens ?? source?.lens ?? null}
-            onChange={lens}
-            disabled={command.isPending ? PENDING : undefined}
-          />
+          {canSwitchLens(lenses, currentLens) ? (
+            <LensPicker
+              lenses={lenses}
+              value={currentLens}
+              onChange={lens}
+              disabled={command.isPending ? PENDING : undefined}
+            />
+          ) : (
+            <p className="sl-video-hint">{LENS_IN_PILOT}</p>
+          )}
           <Button onClick={stop} disabled={command.isPending}>
             Livebild beenden
           </Button>
