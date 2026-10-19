@@ -39,6 +39,10 @@
   margin: 0;
   color: var(--lfh-alarm-text);
 }
+.sl-video-hint {
+  margin: 0;
+  color: var(--lfh-gedaempft);
+}
 .sl-video-note[role='status'] {
   color: var(--lfh-gedaempft);
 }

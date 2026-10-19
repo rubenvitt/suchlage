@@ -122,21 +122,16 @@ test('verbundene Sitzung bleibt offen, wenn der Player auf „spielt“ wechselt
   expect(close).not.toHaveBeenCalled();
 });
 
-test('Linsenwahl bleibt sichtbar, wenn die gemeldete Linse nicht umschaltbar ist', () => {
-  renderWithApp(
+test('ohne umschaltbare Linse verweist das Paneel auf Pilot 2 statt auf eine Linsenwahl', () => {
+  const { rerender } = renderWithApp(
     <VideoPanel gatewaySn="RCSIM0001" stream={{ ...live, lens: 'normal' }} sources={sources} canControl />,
   );
-  expect(screen.getByRole('radiogroup', { name: 'Linse wählen' })).toBeInTheDocument();
-  expect(screen.queryAllByRole('radio', { checked: true })).toHaveLength(0);
-});
-
-test('ohne gemeldete Linsen bietet die Linsenwahl Weit, Zoom und Wärme an', async () => {
-  const sent = captureCommand('/api/streams/lens');
+  expect(screen.queryByRole('radiogroup', { name: 'Linse wählen' })).not.toBeInTheDocument();
+  expect(screen.getByText('Linse in Pilot 2 wechseln.')).toBeInTheDocument();
   const bare = sources.map((s) => ({ ...s, switchable_lenses: [] }));
-  renderWithApp(<VideoPanel gatewaySn="RCSIM0001" stream={live} sources={bare} canControl />);
-  expect(screen.getAllByRole('radio').map((r) => r.textContent)).toEqual(['Weit', 'Zoom', 'Wärme']);
-  await userEvent.click(screen.getByRole('radio', { name: 'Wärme' }));
-  await vi.waitFor(() => expect(sent).toEqual([{ gateway_sn: 'RCSIM0001', lens: 'thermal' }]));
+  rerender(<VideoPanel gatewaySn="RCSIM0001" stream={live} sources={bare} canControl />);
+  expect(screen.queryByRole('radiogroup', { name: 'Linse wählen' })).not.toBeInTheDocument();
+  expect(screen.getByText('Linse in Pilot 2 wechseln.')).toBeInTheDocument();
 });
 
 test('Linsenwahl schickt die Linse an die Fernsteuerung', async () => {

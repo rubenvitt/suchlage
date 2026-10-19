@@ -2,9 +2,6 @@ import { Segmentleiste } from '../components/instrument';
 import type { Lens } from '../contract/generated/Lens';
 import { LENS_LABEL } from './copy';
 
-/** Linsen der H20N, falls das Fluggerät keine umschaltbaren Linsen meldet. */
-const FALLBACK_LENSES: Lens[] = ['wide', 'zoom', 'thermal'];
-
 interface Props {
   lenses: Lens[];
   value: Lens | null;
@@ -13,23 +10,22 @@ interface Props {
   disabled?: string;
 }
 
-/**
- * Immer sichtbar, solange ein Livebild läuft: Meldet das Gerät keine umschaltbaren Linsen, stehen
- * die der H20N zur Wahl. Steht die gemeldete Linse nicht in der Liste (etwa „normal“), ist keine
- * als aktiv markiert, statt fälschlich die erste.
- */
+/** Nur mit umschaltbaren Linsen, unter denen die gemeldete steht; sonst schweigt Pilot 2 auf den Wechsel. */
+export function canSwitchLens(lenses: Lens[], value: Lens | null): value is Lens {
+  return value != null && lenses.includes(value);
+}
+
 export function LensPicker({ lenses, value, onChange, disabled }: Props) {
-  const options = lenses.length > 0 ? lenses : FALLBACK_LENSES;
-  const current = value && options.includes(value) ? value : null;
+  if (!canSwitchLens(lenses, value)) return null;
   return (
     <Segmentleiste
       beschriftung="Linse wählen"
-      optionen={options.map((l) => ({
+      optionen={lenses.map((l) => ({
         wert: l,
         label: LENS_LABEL[l],
-        gesperrt: l === current ? undefined : disabled,
+        gesperrt: l === value ? undefined : disabled,
       }))}
-      wert={current}
+      wert={value}
       onWechsel={onChange}
     />
   );

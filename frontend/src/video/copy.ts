@@ -9,6 +9,9 @@ export const LENS_LABEL: Record<Lens, string> = {
   thermal: 'Wärme',
 };
 
+/** Statt der Linsenwahl, wenn das Gerät keinen Wechsel vom Server anbietet (etwa manuell gestartet). */
+export const LENS_IN_PILOT = 'Linse in Pilot 2 wechseln.';
+
 export const TRANSPORT_LABEL: Record<Transport, string> = { webrtc: 'WebRTC', hls: 'verzögert (HLS)' };
 
 /** Was mit dem Livebild der Fernsteuerung los ist, solange es nicht läuft. */
