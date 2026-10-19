@@ -451,7 +451,12 @@ fn stream_status(entries: &[LiveStatusEntry]) -> (Option<LiveStreamInfo>, Option
         .find(|e| e.status == Some(1))
         .map(|e| LiveStreamInfo {
             video_id: e.video_id.clone(),
-            lens: e.video_type.as_deref().map(parse_lens),
+            // „normal“ nennt keine Linse; es darf eine bestätigte Linse nicht überschreiben.
+            lens: e
+                .video_type
+                .as_deref()
+                .map(parse_lens)
+                .filter(|l| *l != Lens::Normal),
         });
     let error = if live.is_some() {
         None
@@ -658,6 +663,28 @@ mod tests {
                 live: Some(LiveStreamInfo {
                     video_id: "AC1/61-0-0/normal-0".into(),
                     lens: Some(Lens::Thermal)
+                }),
+                error: None,
+            }));
+    }
+
+    #[test]
+    fn normal_stream_type_names_no_lens() {
+        let mut t = Translator::new();
+        let tr = run(
+            &mut t,
+            0,
+            "thing/product/RC1/state",
+            json!({"gateway": "RC1", "data": {
+                "live_status": [{"video_id": "AC1/61-0-0/normal-0", "video_type": "normal", "status": 1}]
+            }}),
+        );
+        assert!(tr.observations.iter().any(|o| o.observation
+            == Observation::StreamStatus {
+                gateway_sn: "RC1".into(),
+                live: Some(LiveStreamInfo {
+                    video_id: "AC1/61-0-0/normal-0".into(),
+                    lens: None
                 }),
                 error: None,
             }));
