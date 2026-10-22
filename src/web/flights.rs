@@ -111,11 +111,14 @@ pub async fn detail(state: &AppState, id: i64) -> Result<FlightDetail, AppError>
     if flight.ended_at_ms.is_none() {
         with_track_so_far(&mut flight, &segments);
     }
-    let has_video = flight.ended_at_ms.is_some()
-        && crate::media::proxy::flight_video_available(state, &flight).await;
-    let video = has_video.then(|| FlightVideo {
+    let video_start = match flight.ended_at_ms {
+        Some(_) => crate::media::proxy::flight_video_start(state, &flight).await,
+        None => None,
+    };
+    let video = video_start.map(|started_at_ms| FlightVideo {
         play_url: format!("/api/flights/{id}/video"),
         download_url: format!("/api/flights/{id}/video?download=1"),
+        started_at_ms,
     });
     Ok(FlightDetail {
         flight,

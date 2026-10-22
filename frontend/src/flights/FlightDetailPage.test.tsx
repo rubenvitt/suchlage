@@ -12,14 +12,27 @@ import { renderWithApp } from '../test/render';
 import { FlightDetailPage } from './FlightDetailPage';
 
 vi.mock('../map/SituationMap', () => ({
-  SituationMap: (p: { tracks: unknown[][]; staticFit?: boolean; photos?: unknown[]; selectedPhotoId?: string | null }) => (
+  SituationMap: (p: {
+    tracks: unknown[][];
+    staticFit?: boolean;
+    photos?: unknown[];
+    selectedPhotoId?: string | null;
+    onTrackClick?: (point: { lat: number; lon: number }) => void;
+  }) => (
     <div
       data-testid="karte"
       data-segments={p.tracks[0]?.length}
       data-static={String(p.staticFit)}
       data-photos={p.photos?.length}
       data-selected={p.selectedPhotoId ?? ''}
-    />
+    >
+      {/* Steht für einen Klick neben den zweiten Spurpunkt. */}
+      {p.onTrackClick && (
+        <button type="button" onClick={() => p.onTrackClick!({ lat: 52.4302, lon: 10.0103 })}>
+          Spur anklicken
+        </button>
+      )}
+    </div>
   ),
 }));
 vi.mock('../shell/Frame', () => ({ Frame: (p: { children: ReactNode }) => <>{p.children}</> }));
@@ -59,11 +72,25 @@ test('Detail zeigt Spur, Kennzahlen und Video mit Download', async () => {
   expect(screen.getByRole('link', { name: 'Alle Flüge' })).toHaveAttribute('href', '/flights');
 });
 
+test('ein Klick auf die Spur springt im Video an diese Stelle', async () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: 'Spur anklicken' }));
+  const video = screen.getByLabelText<HTMLVideoElement>('Flugvideo');
+  // Zweiter Spurpunkt 2 s nach dem ersten, das Video beginnt 1 s nach dem ersten.
+  expect(video.currentTime).toBe(1);
+  expect(play).toHaveBeenCalled();
+  expect(video.scrollIntoView).toHaveBeenCalled();
+  play.mockRestore();
+});
+
 test('ohne Aufnahme sagt das Detail, warum', async () => {
   server.use(http.get('/api/flights/:id', () => HttpResponse.json({ ...flightDetail, video: null })));
   page();
   expect(await screen.findByText(/Kein Video aufgezeichnet/)).toBeInTheDocument();
   expect(screen.queryByLabelText('Flugvideo')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Spur anklicken' })).not.toBeInTheDocument();
 });
 
 test('bei laufendem Flug kommt das Video nach der Landung', async () => {

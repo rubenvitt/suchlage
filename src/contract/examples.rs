@@ -375,6 +375,8 @@ pub fn flight_detail() -> FlightDetail {
         video: Some(FlightVideo {
             play_url: "/api/flights/6/video".into(),
             download_url: "/api/flights/6/video?download=1".into(),
+            // Eine Sekunde nach dem ersten Spurpunkt: Das Livebild startet erst nach dem Abheben.
+            started_at_ms: T0 - 600_000 + 1_000,
         }),
     }
 }

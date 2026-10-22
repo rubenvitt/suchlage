@@ -787,7 +787,8 @@ export const flightDetail: FlightDetail = {
   ],
   "video": {
     "download_url": "/api/flights/6/video?download=1",
-    "play_url": "/api/flights/6/video"
+    "play_url": "/api/flights/6/video",
+    "started_at_ms": 1792149401000
   }
 };
 

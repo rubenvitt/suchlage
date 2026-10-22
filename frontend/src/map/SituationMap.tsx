@@ -53,6 +53,8 @@ interface Props {
   selectedPhotoId?: string | null;
   /** Klick auf ein Foto; ohne sind Fotos nur zu sehen (Großbild). */
   onPhotoClick?: (shotId: string) => void;
+  /** Klick auf die Spur: die Koordinate. Ohne ist die Spur nicht anklickbar. */
+  onTrackClick?: (point: GeoPoint) => void;
 }
 
 type Source = 'track' | 'aircraft' | 'gateways' | 'home' | 'elements' | 'element-labels' | 'draft' | 'photos';
@@ -81,6 +83,11 @@ const LOCALE = {
   'AttributionControl.ToggleAttribution': 'Quellenangabe ein- oder ausblenden',
   'AttributionControl.MapFeedback': 'Rückmeldung zur Karte',
 };
+
+const hitBox = ({ x, y }: maplibregl.Point): [maplibregl.PointLike, maplibregl.PointLike] => [
+  [x - HIT_PX, y - HIT_PX],
+  [x + HIT_PX, y + HIT_PX],
+];
 
 function setData<G, P>(map: maplibregl.Map, source: Source, data: Collection<G, P>) {
   map.getSource<maplibregl.GeoJSONSource>(source)?.setData(data);
@@ -118,6 +125,7 @@ function MapCanvas({
   photos = NO_PHOTOS,
   selectedPhotoId = null,
   onPhotoClick,
+  onTrackClick,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -127,19 +135,19 @@ function MapCanvas({
   const framed = useRef(false);
   const [loaded, setLoaded] = useState(false);
   const [showPhotos, setShowPhotos] = useState(true);
+  const [overTrack, setOverTrack] = useState(false);
   const { rollen, dunkel } = useRollen();
   const stopFollowing = useEffectEvent(() => onFollowChange?.(false));
   // Beim Zeichnen zählt jeder Klick als Eckpunkt, auch auf einem vorhandenen Element.
   const clicked = useEffectEvent((e: maplibregl.MapMouseEvent) => {
-    const { x, y } = e.point;
-    const box: [maplibregl.PointLike, maplibregl.PointLike] = [
-      [x - HIT_PX, y - HIT_PX],
-      [x + HIT_PX, y + HIT_PX],
-    ];
+    const box = hitBox(e.point);
     // Ein Foto geht vor: Es liegt über den Elementen. Beim Zeichnen zählt der Klick als Eckpunkt.
     if (!draft && onPhotoClick && showPhotos) {
       const photo = e.target.queryRenderedFeatures(box, { layers: ['photos'] })[0]?.properties?.id;
       if (typeof photo === 'string') return onPhotoClick(photo);
+    }
+    if (!draft && onTrackClick && e.target.queryRenderedFeatures(box, { layers: ['track'] }).length > 0) {
+      return onTrackClick({ lat: e.lngLat.lat, lon: e.lngLat.lng });
     }
     if (!onMapClick) return;
     const hits = draft
@@ -147,6 +155,12 @@ function MapCanvas({
       : e.target.queryRenderedFeatures(box, { layers: ELEMENT_LAYERS });
     const id = hits[0]?.properties?.id;
     onMapClick({ lat: e.lngLat.lat, lon: e.lngLat.lng }, typeof id === 'string' ? id : null);
+  });
+
+  // Über einer anklickbaren Spur zeigt der Zeiger die Hand.
+  const hovered = useEffectEvent((e: maplibregl.MapMouseEvent) => {
+    const over = onTrackClick != null && e.target.queryRenderedFeatures(hitBox(e.point), { layers: ['track'] }).length > 0;
+    setOverTrack(over);
   });
 
   useEffect(() => {
@@ -170,6 +184,7 @@ function MapCanvas({
       if (e.originalEvent) stopFollowing();
     });
     map.on('click', (e) => clicked(e));
+    map.on('mousemove', (e) => hovered(e));
     map.on('load', () => {
       const image = (id: string, data: ImageData) => map.addImage(id, data, { pixelRatio });
       image('aircraft-fresh', aircraftGlyph(rollen.bedien, false, 40 * pixelRatio));
@@ -475,7 +490,7 @@ function MapCanvas({
   const map = () => mapRef.current;
 
   return (
-    <div className="sl-map" role="region" aria-label={label} data-drawing={drafting}>
+    <div className="sl-map" role="region" aria-label={label} data-drawing={drafting} data-over-track={overTrack}>
       <div ref={container} className="sl-map-canvas" />
       {!staticFit && showTools && (
         <div className="sl-map-tools">

@@ -46,6 +46,10 @@
 .sl-map[data-drawing='true'] .maplibregl-canvas {
   cursor: crosshair;
 }
+/* Eine anklickbare Spur (Flugdetail mit Video) zeigt die Hand. */
+.sl-map[data-over-track='true'] .maplibregl-canvas {
+  cursor: pointer;
+}
 /* Zeichnen und Kartenelemente: unten links über der Karte, die Quellenangabe bleibt rechts frei. */
 .sl-map-editor {
   position: absolute;

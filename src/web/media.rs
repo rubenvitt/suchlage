@@ -361,6 +361,8 @@ mod tests {
             detail["video"]["download_url"],
             "/api/flights/4/video?download=1"
         );
+        // Wie der Abschnitt in `/get`: erste Aufnahme, auf die volle Sekunde aufgerundet.
+        assert_eq!(detail["video"]["started_at_ms"], 1_792_150_030_000_i64);
         let res = app
             .router
             .clone()
