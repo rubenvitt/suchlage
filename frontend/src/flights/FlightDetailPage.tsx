@@ -1,6 +1,6 @@
 import { Space } from 'antd';
 import type { ReactNode } from 'react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import {
   Datenfeld,
@@ -15,6 +15,7 @@ import { ApiError } from '../api/client';
 import { useDeleteFlight, useDeleteFlightVideo, useFlight, useFlightPhotos, useMe } from '../api/queries';
 import { DeleteButton } from '../components/DeleteButton';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
+import type { GeoPoint } from '../contract/generated/GeoPoint';
 import { useLive, useServerNow } from '../live/LiveProvider';
 import { SituationMap } from '../map/SituationMap';
 import { LENS_LABEL, mergeShots, shotTitle } from '../photos/photos';
@@ -22,6 +23,7 @@ import { usePhotoSelection } from '../photos/usePhotoSelection';
 import { Frame } from '../shell/Frame';
 import { DASH, fmt } from '../telemetry/format';
 import { flightRow } from './flightRow';
+import { nearestTrackTime, videoSecond } from './trackVideo';
 import './flights.css';
 
 const NO_DEVICES: never[] = [];
@@ -94,6 +96,17 @@ function Detail({ data }: { data: FlightDetail }) {
   const navigate = useNavigate();
   const removeFlight = useDeleteFlight(() => navigate('/flights'));
   const removeVideo = useDeleteFlightVideo();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const video = data.video;
+  // Klick auf die Spur: Das Video springt an die Stelle, an der das Fluggerät dort war.
+  const seekVideo = (p: GeoPoint) => {
+    const el = videoRef.current;
+    const t = nearestTrackTime(data.segments, p);
+    if (!el || !video || t == null) return;
+    el.currentTime = videoSecond(t, video.started_at_ms);
+    el.scrollIntoView({ block: 'nearest' });
+    void el.play().catch(() => {});
+  };
   const goes = new Intl.ListFormat('de').format([
     'Spur',
     ...(data.video ? ['Video'] : []),
@@ -117,6 +130,7 @@ function Detail({ data }: { data: FlightDetail }) {
             label={`Spur von Flug ${f.id}`}
             photos={photos}
             {...photo.mapProps}
+            onTrackClick={video ? seekVideo : undefined}
           />
           {photo.overlay}
         </div>
@@ -202,6 +216,7 @@ function Detail({ data }: { data: FlightDetail }) {
             {data.video ? (
               <div className="sl-detail-video-body">
                 <video
+                  ref={videoRef}
                   className="sl-detail-video"
                   controls
                   preload="metadata"
@@ -223,7 +238,10 @@ function Detail({ data }: { data: FlightDetail }) {
                     Gelöscht wird nur die Aufzeichnung; Spur und Fotos bleiben.
                   </DeleteButton>
                 )}
-                <p className="sl-muted">Das Video beginnt mit dem Livebild, meist kurz nach dem Abheben.</p>
+                <p className="sl-muted">
+                  Das Video beginnt mit dem Livebild, meist kurz nach dem Abheben. Ein Klick auf die Spur springt
+                  an diese Stelle im Video.
+                </p>
               </div>
             ) : (
               <p className="sl-muted">

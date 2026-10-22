@@ -186,10 +186,15 @@ async fn recording_window(
     Ok((end > start).then_some((start, ((end - start) / 1000).max(1))))
 }
 
-/// Für das Flugdetail: Ist MediaMTX nicht erreichbar, fehlt nur das Video, das Detail bleibt.
-pub async fn flight_video_available(state: &AppState, flight: &FlightSummary) -> bool {
-    let Ok(m) = media(state) else { return false };
-    matches!(recording_window(state, &m, flight).await, Ok(Some(_)))
+/// Für das Flugdetail: Beginn des Videos (ms), sofern es eins gibt. Ist MediaMTX nicht
+/// erreichbar, fehlt nur das Video, das Detail bleibt.
+pub async fn flight_video_start(state: &AppState, flight: &FlightSummary) -> Option<i64> {
+    let m = media(state).ok()?;
+    recording_window(state, &m, flight)
+        .await
+        .ok()
+        .flatten()
+        .map(|(start, _)| start)
 }
 
 pub async fn flight_video(

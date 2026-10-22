@@ -311,6 +311,29 @@ test('Fotos: nur Auslösungen mit Ort, ein Klick wählt, der Knopf blendet die E
   expect(onMapClick).toHaveBeenCalledTimes(1);
 });
 
+test('Spur: ein Klick meldet die Koordinate, der Zeiger zeigt darüber die Hand', () => {
+  const onTrackClick = vi.fn();
+  const onMapClick = vi.fn();
+  render(light(<SituationMap {...live} onTrackClick={onTrackClick} onMapClick={onMapClick} />));
+  const map = loaded();
+  map.queryRenderedFeatures.mockImplementation((_box, options) =>
+    (options as { layers: string[] }).layers.includes('track') ? [{ properties: { segment: 0 } }] : [],
+  );
+  const event = { point: { x: 10, y: 10 }, lngLat: { lat: 52.43, lng: 10.01 }, target: map };
+  act(() => map.handlers.get('mousemove')!(event));
+  expect(screen.getByRole('region', { name: 'Lagekarte' })).toHaveAttribute('data-over-track', 'true');
+  act(() => map.handlers.get('click')!(event));
+  expect(onTrackClick).toHaveBeenCalledWith({ lat: 52.43, lon: 10.01 });
+  expect(onMapClick).not.toHaveBeenCalled();
+
+  map.queryRenderedFeatures.mockReturnValue([]);
+  act(() => map.handlers.get('mousemove')!(event));
+  expect(screen.getByRole('region', { name: 'Lagekarte' })).toHaveAttribute('data-over-track', 'false');
+  act(() => map.handlers.get('click')!(event));
+  expect(onTrackClick).toHaveBeenCalledTimes(1);
+  expect(onMapClick).toHaveBeenCalledTimes(1);
+});
+
 test('ohne Fotos kein Knopf „Fotos“', () => {
   render(light(<SituationMap {...live} />));
   loaded();

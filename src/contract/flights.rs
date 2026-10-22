@@ -41,6 +41,9 @@ pub struct FlightSummary {
 pub struct FlightVideo {
     pub play_url: String,
     pub download_url: String,
+    /// Zeitpunkt der ersten Sekunde im Video; damit springt ein Klick auf die Spur an die passende Stelle.
+    #[ts(type = "number")]
+    pub started_at_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
