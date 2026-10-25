@@ -530,6 +530,7 @@ Beispiel `live_start_push` (RTMP):
 **WebSocket-Pushes** an Pilot, Hülle `{biz_code, version, timestamp, data}`:
 - `map_element_create`, `map_element_update`, `map_element_delete`,
 - `map_group_refresh` → Pilot lädt die Gruppen per GET neu.
+  *Feldbefund:* Das Neuladen ergänzt und ändert nur; was in der Antwort fehlt, behält Pilot 2. Wer Elemente aus der Sicht nimmt, schickt vorher `map_element_delete` je Element.
 
 **Situational Awareness** (optional, Modul `tsa`):
 - `GET /manage/api/v1/workspaces/{workspace_id}/devices/topologies`

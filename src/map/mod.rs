@@ -18,6 +18,9 @@ use crate::store::missions;
 pub const UNASSIGNED_TTL_MS: i64 = 24 * 3_600_000;
 const CLEANUP_EVERY: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
+/// So viele Elemente außerhalb der Sicht löscht ein Abgleich bei Pilot 2 höchstens.
+const STALE_FOR_PILOT: i64 = 500;
+
 /// Puffer je Empfänger. Wer mehr verpasst, bekommt die ganze Liste neu.
 const CHANGES_BUFFERED: usize = 256;
 
@@ -115,6 +118,13 @@ impl MapHub {
     /// Elemente eines Einsatzes, mit `None` die ohne Einsatz.
     pub async fn list_in(&self, mission: Option<i64>) -> Result<Vec<MapElement>, AppError> {
         Ok(store::list_in(&self.pool, mission).await?)
+    }
+
+    /// Was Pilot 2 aus früheren Sichtbereichen noch gespeichert haben kann: Neu laden ergänzt dort
+    /// nur und entfernt nichts. Die zuletzt geänderten genügen, älteres hat ein früherer Abgleich
+    /// schon gelöscht.
+    pub async fn ids_outside_pilot_scope(&self) -> Result<Vec<String>, AppError> {
+        Ok(store::ids_outside(&self.pool, self.pilot_scope(), STALE_FOR_PILOT).await?)
     }
 
     pub async fn get(&self, id: &str) -> Result<Option<MapElement>, AppError> {

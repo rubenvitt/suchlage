@@ -157,6 +157,22 @@ pub async fn unassigned_older_than(
         .await
 }
 
+/// IDs der Elemente außerhalb eines Einsatzes (mit `None`: außerhalb „ohne Einsatz“), zuletzt
+/// geänderte zuerst, höchstens `limit`.
+pub async fn ids_outside(
+    pool: &SqlitePool,
+    mission: Option<i64>,
+    limit: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM map_elements WHERE mission_id IS NOT ? ORDER BY updated_at_ms DESC, id LIMIT ?",
+    )
+    .bind(mission)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

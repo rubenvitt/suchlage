@@ -252,16 +252,34 @@ async fn still_valid(pool: &sqlx::SqlitePool, token: &str, rc_id: i64) -> bool {
     }
 }
 
-/// `None`: Das Element liegt außerhalb der Sicht von Pilot 2. Gelöscht wird immer – ein Löschen,
-/// das Pilot 2 nicht kennt, ist harmlos.
+/// `None`: Das Element liegt außerhalb der Sicht von Pilot 2, oder es ist ein Abgleich
+/// (`resync`). Gelöscht wird immer – ein Löschen, das Pilot 2 nicht kennt, ist harmlos.
 fn push_for(change: &MapChange, scope: Option<i64>, at_ms: i64) -> Option<String> {
     match change {
         MapChange::Created(e) | MapChange::Updated(e) if e.mission_id != scope => None,
         MapChange::Created(e) => Some(dji::push_created(e, at_ms)),
         MapChange::Updated(e) => Some(dji::push_updated(e, at_ms)),
         MapChange::Deleted { id } => Some(dji::push_deleted(id, at_ms)),
-        MapChange::Refresh => Some(dji::push_group_refresh(at_ms)),
+        MapChange::Refresh => None,
     }
+}
+
+/// Bringt Pilot 2 auf den Sichtbereich: Neu laden ergänzt und ändert nur, darum gehen vorher
+/// Löschungen für alles außerhalb, sonst sammeln sich die Zeichnungen früherer Einsätze.
+/// Ein Fehler der Datenbank lässt die Löschungen aus; neu geladen wird trotzdem.
+async fn resync(socket: &mut WebSocket, hub: &MapHub, rc_label: &str) -> Result<(), axum::Error> {
+    let stale = hub.ids_outside_pilot_scope().await.unwrap_or_else(|e| {
+        tracing::warn!(error = %e, rc = %rc_label, "Alte Kartenelemente für Pilot 2 nicht lesbar");
+        Vec::new()
+    });
+    for id in &stale {
+        socket
+            .send(Message::Text(dji::push_deleted(id, now_ms()).into()))
+            .await?;
+    }
+    socket
+        .send(Message::Text(dji::push_group_refresh(now_ms()).into()))
+        .await
 }
 
 /// Jede Änderung im Sichtbereich geht an jeden Pilot, auch an den, der sie gemacht hat (wie in der
@@ -281,29 +299,27 @@ async fn push_to_pilot(
     let mut recheck =
         tokio::time::interval_at(tokio::time::Instant::now() + TOKEN_RECHECK, TOKEN_RECHECK);
     tracing::info!(rc = %rc_label, "Pilot 2 am Kartenabgleich");
-    // Was zwischen dem Laden der Gruppen und diesem Abonnement geändert wurde, käme sonst nie an.
-    if socket
-        .send(Message::Text(dji::push_group_refresh(now_ms()).into()))
-        .await
-        .is_err()
-    {
+    // Was zwischen dem Laden der Gruppen und diesem Abonnement geändert wurde, käme sonst nie an;
+    // und Pilot 2 hat womöglich noch Elemente aus einem Einsatz, der inzwischen vorbei ist.
+    if resync(&mut socket, &hub, &rc_label).await.is_err() {
         return;
     }
     loop {
         tokio::select! {
             change = changes.recv() => {
-                let text = match change {
+                let sent = match change {
+                    Ok(MapChange::Refresh) => resync(&mut socket, &hub, &rc_label).await,
                     Ok(change) => match push_for(&change, hub.pilot_scope(), now_ms()) {
-                        Some(text) => text,
+                        Some(text) => socket.send(Message::Text(text.into())).await,
                         None => continue,
                     },
                     Err(RecvError::Lagged(missed)) => {
                         tracing::debug!(missed, rc = %rc_label, "Kartenabgleich überholt – Gruppe neu laden");
-                        dji::push_group_refresh(now_ms())
+                        resync(&mut socket, &hub, &rc_label).await
                     }
                     Err(RecvError::Closed) => break,
                 };
-                if socket.send(Message::Text(text.into())).await.is_err() {
+                if sent.is_err() {
                     break;
                 }
             }
@@ -783,6 +799,53 @@ mod tests {
         assert_eq!(
             next_text(&mut socket).await["biz_code"],
             "map_group_refresh"
+        );
+    }
+
+    /// Pilot 2 entfernt beim Neuladen nichts: Ohne die Löschungen sammelten sich auf der
+    /// Fernsteuerung die Zeichnungen aller Einsätze.
+    #[tokio::test]
+    async fn elements_outside_the_scope_are_deleted_on_the_pilot() {
+        let app = paired().await;
+        let (a, b) = (mission(&app, "A").await, mission(&app, "B").await);
+        let map = &app.state.map;
+        let in_a = map.create(pin_in(Some(a)), 1).await.unwrap();
+        let in_b = map.create(pin_in(Some(b)), 2).await.unwrap();
+        let unassigned = map.create(pin_in(None), 3).await.unwrap();
+        app.state.missions.start(a, 4).await.unwrap();
+
+        let deleted_until_refresh = async |socket: &mut PilotSocket| {
+            let mut ids = Vec::new();
+            loop {
+                let push = next_text(socket).await;
+                match push["biz_code"].as_str() {
+                    Some("map_element_delete") => {
+                        ids.push(push["data"]["id"].as_str().unwrap().to_string());
+                    }
+                    Some("map_group_refresh") => break ids,
+                    other => panic!("Löschen oder Neuladen erwartet, war {other:?}"),
+                }
+            }
+        };
+
+        // Beim Verbinden: alles außer A, das zuletzt geänderte zuerst.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(axum::serve(listener, app.router.clone()).into_future());
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/pilot/ws?x-auth-token={TOKEN}"))
+                .await
+                .unwrap();
+        assert_eq!(
+            deleted_until_refresh(&mut socket).await,
+            vec![unassigned.id.clone(), in_b.id.clone()]
+        );
+
+        // Nach dem Einsatz sieht Pilot 2 „ohne Einsatz“: A und B verschwinden.
+        app.state.missions.close(a, 5).await.unwrap();
+        assert_eq!(
+            deleted_until_refresh(&mut socket).await,
+            vec![in_b.id, in_a.id]
         );
     }
 

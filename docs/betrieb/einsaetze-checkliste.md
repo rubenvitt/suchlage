@@ -61,6 +61,8 @@ als Kommentar an die Aufgabe SUL-65, SUL-76 bzw. SUL-78 auf dem Board. Kann im s
 
 - [ ] Lädt Pilot 2 die Karte bei `map_group_refresh` von selbst neu? Falls nicht: Karte neu öffnen
       ist der Rückfall (Hinweis an den Piloten).
+- [ ] Nach Abschluss eines Einsatzes und Start des nächsten zeigt die Karte in Pilot 2 nur noch die
+      Zeichnungen des neuen Einsatzes; die alten sind ohne Zutun des Piloten verschwunden.
 - [ ] Ignoriert Pilot 2 `map_element_delete` und `map_element_update` für Elemente, die es nie
       geladen hat, ohne Fehlermeldung oder Absturz? Protokoll der Seite ansehen.
 - [ ] Landet ein Punkt, den Pilot 2 setzt, während **kein** Einsatz läuft, unter „ohne Einsatz“ und
