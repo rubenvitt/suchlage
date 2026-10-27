@@ -2,6 +2,14 @@
 
 export type OidcSettingsView = { issuer: string, client_id: string, has_client_secret: boolean, 
 /**
+ * Pocket-ID-Gruppe der Verwaltung (Rolle Admin).
+ */
+admin_group: string, 
+/**
+ * Pocket-ID-Gruppe der Nutzung (Rolle Operator).
+ */
+user_group: string, 
+/**
  * In Pocket ID als Callback-URL einzutragen.
  */
 redirect_url: string, };

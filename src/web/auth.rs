@@ -56,6 +56,8 @@ async fn setup(
         issuer: body.issuer,
         client_id: body.client_id,
         client_secret: Some(body.client_secret),
+        admin_group: body.admin_group,
+        user_group: body.user_group,
     };
     // Token vor jedem ausgehenden Abruf prüfen, aber erst nach erfolgreicher Discovery verbrauchen:
     // Ohne gültigen Link löst niemand Anfragen des Servers aus, und ein Tippfehler im Issuer
@@ -74,6 +76,8 @@ async fn setup(
 const STATE_COOKIE_PATH: &str = "/api/auth/oidc";
 /// Jeder Fehler der Anmeldung landet hier; die Details stehen nur im Log.
 const LOGIN_FAILED: &str = "/anmelden?fehler=oidc";
+/// Angemeldet, aber in keiner der beiden Pocket-ID-Gruppen.
+const LOGIN_NO_GROUP: &str = "/anmelden?fehler=gruppe";
 
 #[derive(serde::Deserialize)]
 struct StartQuery {
@@ -138,6 +142,7 @@ async fn oidc_callback(
             );
             (jar_out.add(session), Redirect::to(&next))
         }
+        Err(AppError::Forbidden) => (jar_out, Redirect::to(LOGIN_NO_GROUP)),
         Err(e) => {
             tracing::warn!(error = ?e, "OIDC-Anmeldung abgebrochen");
             (jar_out, Redirect::to(LOGIN_FAILED))
@@ -164,12 +169,21 @@ async fn complete_login(
         .ok_or(AppError::Unauthorized)?;
     let redirect = crate::settings::redirect_url(&state.boot);
     let (identity, next) = state.oidc.finish(&cfg, &redirect, &csrf, &code).await?;
+    let Some(role) = identity.role(&cfg) else {
+        tracing::warn!(
+            user = %identity.display_name,
+            groups = ?identity.groups,
+            "Anmeldung abgelehnt: in keiner Suchlage-Gruppe"
+        );
+        return Err(AppError::Forbidden);
+    };
     let now = now_ms();
     let user = store::users::upsert_oidc(
         &state.pool,
         &identity.issuer,
         &identity.subject,
         &identity.display_name,
+        role,
         now,
     )
     .await?;
@@ -365,7 +379,7 @@ mod tests {
         let request = |token: &str, issuer: &str| {
             post_json(
                 "/api/setup",
-                serde_json::json!({"token": token, "issuer": issuer, "client_id": "suchlage", "client_secret": "geheim"}),
+                serde_json::json!({"token": token, "issuer": issuer, "client_id": "suchlage", "client_secret": "geheim", "admin_group": "suchlage-admin", "user_group": "suchlage"}),
             )
         };
 
@@ -429,6 +443,8 @@ mod tests {
                 issuer: idp.issuer.clone(),
                 client_id: "suchlage".into(),
                 client_secret: Some("s".into()),
+                admin_group: "suchlage-admin".into(),
+                user_group: "suchlage".into(),
             })
             .await
             .unwrap();
@@ -448,8 +464,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn oidc_login_end_to_end_makes_first_user_admin() {
+    async fn oidc_login_end_to_end_takes_the_role_from_the_groups() {
         let (app, idp) = app_with_idp().await;
+        *idp.groups.lock().unwrap() = vec!["suchlage".into(), "suchlage-admin".into()];
 
         let res = tower::ServiceExt::oneshot(
             app.router.clone(),
@@ -504,6 +521,67 @@ mod tests {
         .await;
         assert_eq!(me["role"], "admin");
         assert_eq!(me["display_name"], crate::auth::oidc::test_idp::USERNAME);
+    }
+
+    /// Startet die Anmeldung und folgt dem Rücksprung; liefert die Antwort des Callbacks.
+    async fn login(
+        app: &crate::testing::TestApp,
+        idp: &crate::auth::oidc::test_idp::TestIdp,
+    ) -> axum::response::Response {
+        let res = tower::ServiceExt::oneshot(app.router.clone(), get("/api/auth/oidc/start"))
+            .await
+            .unwrap();
+        let authorize = url::Url::parse(location(&res)).unwrap();
+        let q: std::collections::HashMap<_, _> = authorize.query_pairs().into_owned().collect();
+        *idp.nonce.lock().unwrap() = q["nonce"].clone();
+        let cb = format!("/api/auth/oidc/callback?state={}&code=c", q["state"]);
+        let binding = format!("suchlage_oidc={}", q["state"]);
+        tower::ServiceExt::oneshot(app.router.clone(), with_cookie(get(&cb), &binding))
+            .await
+            .unwrap()
+    }
+
+    fn session(res: &axum::response::Response) -> Option<String> {
+        set_cookies(res)
+            .into_iter()
+            .find(|c| c.starts_with("suchlage_sid="))
+            .map(|c| c.split(';').next().unwrap().to_string())
+    }
+
+    #[tokio::test]
+    async fn login_without_a_suchlage_group_is_refused_and_the_role_follows_the_groups() {
+        let (app, idp) = app_with_idp().await;
+        *idp.groups.lock().unwrap() = vec!["andere".into()];
+        let res = login(&app, &idp).await;
+        assert_eq!(location(&res), "/anmelden?fehler=gruppe");
+        assert_eq!(session(&res), None, "keine Sitzung");
+        assert_eq!(
+            crate::store::users::count(&app.state.pool).await.unwrap(),
+            0
+        );
+
+        *idp.groups.lock().unwrap() = vec!["suchlage-admin".into()];
+        let admin = session(&login(&app, &idp).await).expect("Sitzung");
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &admin))
+                .await
+                .1["role"],
+            "admin"
+        );
+
+        *idp.groups.lock().unwrap() = vec!["suchlage".into()];
+        let op = session(&login(&app, &idp).await).expect("Sitzung");
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &op)).await.1["role"],
+            "operator"
+        );
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &admin))
+                .await
+                .1["role"],
+            "operator",
+            "die Rolle hängt am Konto, auch ältere Sitzungen sind herabgestuft"
+        );
     }
 
     #[tokio::test]

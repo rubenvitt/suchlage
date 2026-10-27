@@ -329,6 +329,8 @@ mod tests {
                 issuer: idp.issuer.clone(),
                 client_id: "suchlage".into(),
                 client_secret: Some("geheim".into()),
+                admin_group: "suchlage-admin".into(),
+                user_group: "suchlage".into(),
             })
             .await
             .unwrap();
@@ -344,6 +346,7 @@ mod tests {
             &idp.issuer,
             test_idp::SUBJECT,
             "Testpilot",
+            crate::contract::Role::Admin,
             0,
         )
         .await

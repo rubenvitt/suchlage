@@ -70,6 +70,32 @@ function Result({
 
 type OidcValues = WithSecrets<OidcSettingsInput, 'client_secret'>;
 
+/** Gruppen aus Pocket ID; auch in der Ersteinrichtung. Ohne eine der beiden kein Zugang. */
+export function OidcGroupFields() {
+  return (
+    <>
+      <p className="sl-form-hint">
+        Gruppennamen wie in Pocket ID (Feld „Name“, nicht der Anzeigename). Wer in keiner der beiden
+        Gruppen ist, kann sich nicht anmelden. Die Rolle gilt ab der nächsten Anmeldung.
+      </p>
+      <Form.Item
+        label="Gruppe Verwaltung (Admin)"
+        name="admin_group"
+        rules={[{ required: true, whitespace: true, message: 'Gruppe fehlt' }]}
+      >
+        <Input placeholder="suchlage-admin" />
+      </Form.Item>
+      <Form.Item
+        label="Gruppe Nutzung (Operator)"
+        name="user_group"
+        rules={[{ required: true, whitespace: true, message: 'Gruppe fehlt' }]}
+      >
+        <Input placeholder="suchlage" />
+      </Form.Item>
+    </>
+  );
+}
+
 /** `redirectUrl` kommt vom Server (`AuthOptions`), solange noch keine Anmeldung gespeichert ist. */
 export function OidcForm({ view, redirectUrl }: { view: OidcSettingsView | null; redirectUrl?: string }) {
   const [form] = Form.useForm<OidcValues>();
@@ -80,9 +106,20 @@ export function OidcForm({ view, redirectUrl }: { view: OidcSettingsView | null;
       form={form}
       layout="vertical"
       className="sl-form"
-      initialValues={{ issuer: view?.issuer, client_id: view?.client_id }}
+      initialValues={{
+        issuer: view?.issuer,
+        client_id: view?.client_id,
+        admin_group: view?.admin_group,
+        user_group: view?.user_group,
+      }}
       onFinish={(v) =>
-        s.save({ issuer: v.issuer, client_id: v.client_id, client_secret: secretOrNull(v.client_secret) })
+        s.save({
+          issuer: v.issuer,
+          client_id: v.client_id,
+          client_secret: secretOrNull(v.client_secret),
+          admin_group: v.admin_group,
+          user_group: v.user_group,
+        })
       }
     >
       {callback && (
@@ -102,6 +139,7 @@ export function OidcForm({ view, redirectUrl }: { view: OidcSettingsView | null;
           autoComplete="new-password"
         />
       </Form.Item>
+      <OidcGroupFields />
       <Result done={s.done} error={s.error} />
       <Button type="primary" htmlType="submit" loading={s.pending}>
         Anmeldung speichern

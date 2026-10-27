@@ -24,10 +24,12 @@ test('Einrichtung sendet Token und Pocket-ID-Daten und zeigt die Callback-Adress
   );
   renderWithApp(<SetupPage />, { route: '/einrichtung' });
   expect(await screen.findByText(authOptionsOidc.redirect_url)).toBeInTheDocument();
-  expect(screen.getByText('Client auf die I&K-Gruppe beschränken')).toBeInTheDocument();
+  expect(screen.getByText('Zwei Gruppen in Pocket ID anlegen')).toBeInTheDocument();
   await userEvent.type(screen.getByLabelText('Issuer'), 'https://id.example.org');
   await userEvent.type(screen.getByLabelText('Client-ID'), 'suchlage');
   await userEvent.type(screen.getByLabelText('Client-Secret'), 'geheim');
+  await userEvent.type(screen.getByLabelText('Gruppe Verwaltung (Admin)'), 'suchlage-admin');
+  await userEvent.type(screen.getByLabelText('Gruppe Nutzung (Operator)'), 'suchlage');
   await userEvent.click(screen.getByRole('button', { name: 'Einrichten und anmelden' }));
   expect(await screen.findByText('Anmeldedienst nicht erreichbar oder Issuer falsch')).toBeInTheDocument();
   expect(body).toEqual({
@@ -35,6 +37,8 @@ test('Einrichtung sendet Token und Pocket-ID-Daten und zeigt die Callback-Adress
     issuer: 'https://id.example.org',
     client_id: 'suchlage',
     client_secret: 'geheim',
+    admin_group: 'suchlage-admin',
+    user_group: 'suchlage',
   });
 });
 

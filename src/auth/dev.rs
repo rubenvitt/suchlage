@@ -1,4 +1,4 @@
-//! Nur mit Feature `dev`: Anmeldung ohne OIDC als „Entwicklung“ (Admin, weil erstes Konto), Seed
+//! Nur mit Feature `dev`: Anmeldung ohne OIDC als „Entwicklung“ (Admin), Seed
 //! der Einstellungen für den lokalen Stack aus `deploy/compose.dev.yaml` und die Fernsteuerung
 //! des Simulators.
 
@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 use crate::auth::session::{secure_cookies, session_cookie};
 use crate::config::BootConfig;
 use crate::contract::{
-    BrokerSettingsInput, DjiSettingsInput, MediaSettings, PhotoStorageSettingsInput,
+    BrokerSettingsInput, DjiSettingsInput, MediaSettings, PhotoStorageSettingsInput, Role,
 };
 use crate::error::AppError;
 use crate::settings::SettingsHandle;
@@ -25,7 +25,7 @@ pub async fn login(
     jar: CookieJar,
 ) -> Result<(CookieJar, StatusCode), AppError> {
     let now = now_ms();
-    let user = users::upsert_oidc(&pool, "dev", "dev", "Entwicklung", now).await?;
+    let user = users::upsert_oidc(&pool, "dev", "dev", "Entwicklung", Role::Admin, now).await?;
     let token = sessions::create_for_user(&pool, user.id, now).await?;
     let cookie = session_cookie(token, sessions::USER_TTL_MS, secure_cookies(&boot));
     Ok((jar.add(cookie), StatusCode::NO_CONTENT))

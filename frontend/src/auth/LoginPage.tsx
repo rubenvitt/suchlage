@@ -39,6 +39,13 @@ export default function LoginPage() {
         {params.get('fehler') === 'oidc' && (
           <Alert type="error" title="Anmeldung abgebrochen. Bitte erneut anmelden." />
         )}
+        {params.get('fehler') === 'gruppe' && (
+          <Alert
+            type="error"
+            title="Kein Zugang zu Suchlage."
+            description="Das Konto ist in Pocket ID in keiner Suchlage-Gruppe. Die Verwaltung muss es einer Gruppe zuordnen."
+          />
+        )}
         {isPending && <p aria-busy="true">Anmeldeverfahren werden abgerufen …</p>}
         {isError && (
           <>

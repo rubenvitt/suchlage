@@ -149,19 +149,10 @@ impl TestApp {
                 .unwrap();
             return format!("{}={token}", crate::auth::session::COOKIE);
         }
-        if role == Role::Admin && users::count(pool).await.unwrap() > 0 {
-            panic!("Admin zuerst anlegen: das erste Konto wird Admin");
-        }
-        if role == Role::Operator && users::count(pool).await.unwrap() == 0 {
-            users::upsert_oidc(pool, "test", "erster", "Admin", 0)
-                .await
-                .unwrap();
-        }
         let sub = format!("{role:?}-{}", crate::token::generate());
-        let user = users::upsert_oidc(pool, "test", &sub, &format!("{role:?}"), 0)
+        let user = users::upsert_oidc(pool, "test", &sub, &format!("{role:?}"), role, 0)
             .await
             .unwrap();
-        assert_eq!(user.role, role);
         let token = sessions::create_for_user(pool, user.id, crate::time::now_ms())
             .await
             .unwrap();

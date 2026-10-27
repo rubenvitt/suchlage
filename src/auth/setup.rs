@@ -150,6 +150,8 @@ mod tests {
                 issuer: "https://id.example.org".into(),
                 client_id: "suchlage".into(),
                 client_secret: Some("s".into()),
+                admin_group: "suchlage-admin".into(),
+                user_group: "suchlage".into(),
             })
             .await
             .unwrap();
@@ -160,9 +162,16 @@ mod tests {
 
         let pool = crate::db::test_pool().await;
         let settings = SettingsHandle::load(pool.clone()).await.unwrap();
-        store::users::upsert_oidc(&pool, "iss", "sub", "Admin", 0)
-            .await
-            .unwrap();
+        store::users::upsert_oidc(
+            &pool,
+            "iss",
+            "sub",
+            "Admin",
+            crate::contract::Role::Admin,
+            0,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             ensure_token(&pool, &settings, &boot, 0).await.unwrap(),
             None

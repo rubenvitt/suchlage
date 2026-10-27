@@ -603,6 +603,8 @@ pub fn settings_view() -> SettingsView {
             issuer: "https://id.example.org".into(),
             client_id: "suchlage".into(),
             has_client_secret: true,
+            admin_group: "suchlage-admin".into(),
+            user_group: "suchlage".into(),
             redirect_url: "https://suchlage.example.org/api/auth/oidc/callback".into(),
         }),
         dji: Some(DjiSettingsView {

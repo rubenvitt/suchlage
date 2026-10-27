@@ -17,56 +17,38 @@ fn role(s: &str) -> Role {
     }
 }
 
-/// Findet das Konto über (issuer, subject) oder legt es an. Das erste Konto überhaupt wird Admin (ADR 0002).
+/// Findet das Konto über (issuer, subject) oder legt es an. Die Rolle kommt bei jedem Login aus
+/// den Pocket-ID-Gruppen und überschreibt die gespeicherte.
 pub async fn upsert_oidc(
     pool: &SqlitePool,
     issuer: &str,
     subject: &str,
     display_name: &str,
+    role: Role,
     now_ms: i64,
 ) -> Result<User, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let existing =
-        sqlx::query("SELECT id, role FROM users WHERE oidc_issuer = ? AND oidc_subject = ?")
-            .bind(issuer)
-            .bind(subject)
-            .fetch_optional(&mut *tx)
-            .await?;
-    let user = if let Some(row) = existing {
-        let id: i64 = row.get("id");
-        sqlx::query("UPDATE users SET display_name = ? WHERE id = ?")
-            .bind(display_name)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        User {
-            id,
-            display_name: display_name.into(),
-            role: role(row.get("role")),
-        }
+    let r = if role == Role::Admin {
+        "admin"
     } else {
-        let first: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
-            .fetch_one(&mut *tx)
-            .await?;
-        let r = if first == 0 { "admin" } else { "operator" };
-        let id: i64 = sqlx::query_scalar(
-            "INSERT INTO users (oidc_issuer, oidc_subject, display_name, role, created_at_ms) VALUES (?, ?, ?, ?, ?) RETURNING id",
-        )
-        .bind(issuer)
-        .bind(subject)
-        .bind(display_name)
-        .bind(r)
-        .bind(now_ms)
-        .fetch_one(&mut *tx)
-        .await?;
-        User {
-            id,
-            display_name: display_name.into(),
-            role: role(r),
-        }
+        "operator"
     };
-    tx.commit().await?;
-    Ok(user)
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (oidc_issuer, oidc_subject, display_name, role, created_at_ms) VALUES (?, ?, ?, ?, ?) \
+         ON CONFLICT (oidc_issuer, oidc_subject) DO UPDATE SET display_name = excluded.display_name, role = excluded.role \
+         RETURNING id",
+    )
+    .bind(issuer)
+    .bind(subject)
+    .bind(display_name)
+    .bind(r)
+    .bind(now_ms)
+    .fetch_one(pool)
+    .await?;
+    Ok(User {
+        id,
+        display_name: display_name.into(),
+        role: self::role(r),
+    })
 }
 
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<User>, sqlx::Error> {
@@ -114,22 +96,31 @@ mod tests {
     use crate::db::test_pool;
 
     #[tokio::test]
-    async fn first_account_becomes_admin_later_ones_operator_and_login_is_stable() {
+    async fn login_keeps_the_account_and_takes_the_role_it_is_given() {
         let pool = test_pool().await;
-        let a = upsert_oidc(&pool, "https://id", "sub-a", "Erika Muster", 1)
+        let a = upsert_oidc(&pool, "https://id", "sub-a", "Erika Muster", Role::Admin, 1)
             .await
             .unwrap();
-        let b = upsert_oidc(&pool, "https://id", "sub-b", "Gast", 2)
+        let b = upsert_oidc(&pool, "https://id", "sub-b", "Gast", Role::Operator, 2)
             .await
             .unwrap();
-        let a2 = upsert_oidc(&pool, "https://id", "sub-a", "Erika Musterfrau", 3)
-            .await
-            .unwrap();
+        let a2 = upsert_oidc(
+            &pool,
+            "https://id",
+            "sub-a",
+            "Erika Musterfrau",
+            Role::Operator,
+            3,
+        )
+        .await
+        .unwrap();
         assert_eq!((a.role, b.role), (Role::Admin, Role::Operator));
         assert_eq!(
             (a2.id, a2.role, a2.display_name.as_str()),
-            (a.id, Role::Admin, "Erika Musterfrau")
+            (a.id, Role::Operator, "Erika Musterfrau"),
+            "aus der Admin-Gruppe entfernt"
         );
+        assert_eq!(get(&pool, a.id).await.unwrap(), Some(a2.clone()));
         assert_eq!(get(&pool, b.id).await.unwrap(), Some(b.clone()));
         assert_eq!(count(&pool).await.unwrap(), 2);
         assert_eq!(
