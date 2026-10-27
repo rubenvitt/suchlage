@@ -2,6 +2,7 @@
 //! Die Flugmappe schreibt über denselben Ort (`flugmappe`).
 
 pub mod flugmappe;
+pub mod lagemonitor;
 pub mod rules;
 
 use std::path::PathBuf;

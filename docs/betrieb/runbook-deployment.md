@@ -301,6 +301,16 @@ Link mit `?code=<code>` statt `#<code>` eintragen. Siehe Realflug-Checkliste.
 Tailnet zeigt das Großbild das Livebild über HLS. Für WebRTC muss der Rechner im Tailnet sein und
 unter `group:iuk` oder einer eigenen Regel auf UDP 8189 zugreifen dürfen.
 
+Derselbe Zugang verbindet auch den **Lagemonitor** im FüKw: einen eigenen Zugang „Lagemonitor
+FüKw“ anlegen und die Adresse (mit dem Teil hinter `#`) in der IUK-Suite unter *Lagemonitor →
+Suchlage* einfügen. Der Server des Lagemonitors liest damit `/api/lagemonitor/v1/lage` und spielt das
+Livebild über `/api/lagemonitor/v1/video/…` ab; der Kiosk-Browser sieht Suchlage nie. Widerrufen
+wirkt beim nächsten Abruf (alle 5 s).
+
+```sh
+curl -s -H "Authorization: Bearer <Teil hinter #>" https://suchlage.iuk-ue.de/api/lagemonitor/v1/lage | jq .mission
+```
+
 ## 11. Flugmappe verknüpfen (optional)
 
 Die Flugmappe (`uav.iuk-ue.de`) legt über `/api/flugmappe/v1/…` Einsätze in Suchlage an, verknüpft
