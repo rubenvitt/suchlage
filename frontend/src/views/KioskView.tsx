@@ -6,6 +6,7 @@ import { TelemetryStrip } from '../telemetry/TelemetryStrip';
 import { useDichte } from '../theme/ThemeModeProvider';
 import { useFocus } from './useFocus';
 import { useLiveMapData } from './useLiveMapData';
+import { useSonnenTheme } from './useSonnenTheme';
 import { useWakeLock } from './useWakeLock';
 import { VideoSlot } from './VideoSlot';
 import { viewerNoticeOf } from './viewerNotice';
@@ -27,13 +28,16 @@ export function KioskView() {
   // Ohne laufenden Einsatz zeigt das Großbild keine Zeichnungen und Fotos „ohne Einsatz“.
   const idle = ready && scope.kind === 'none';
   const notice = viewerNoticeOf(state, focus);
+  const elements = idle ? [] : map.elements;
+  // Im FüKw hell bei Tag, dunkel bei Nacht, ohne dass jemand umschaltet.
+  useSonnenTheme({ elements, gateways: map.gateways, aircraft: map.aircraft }, serverNow);
 
   return (
     <div className="sl-kiosk">
       <div className="sl-kiosk-map">
         <SituationMap
           {...map}
-          elements={idle ? [] : map.elements}
+          elements={elements}
           photos={idle ? [] : map.photos}
           serverNow={serverNow}
           thresholds={state.thresholds}

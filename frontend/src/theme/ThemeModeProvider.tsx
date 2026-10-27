@@ -29,7 +29,7 @@ import {
 /** Vom Nutzer wählbarer Modus. `system` folgt der OS-Einstellung. */
 export type ThemeModus = 'system' | 'light' | 'dark';
 /** Tatsächlich angewandtes Theme nach Auflösung von `system`. */
-type EffektivesTheme = 'light' | 'dark';
+export type EffektivesTheme = 'light' | 'dark';
 
 const SPEICHER_SCHLUESSEL = 'suchlage.theme';
 const DICHTE_SCHLUESSEL = 'suchlage.dichte';
@@ -40,6 +40,9 @@ interface ThemeModeWert {
   modus: ThemeModus;
   effektiv: EffektivesTheme;
   setModus: (m: ThemeModus) => void;
+  /** Meldet ein Theme an, das die Wahl überstimmt, oder hebt es mit `null` auf (nur über
+   *  `useThemeVorgabe`). Nicht gespeichert: die Wahl des Geräts bleibt stehen. */
+  setVorgabe: (t: EffektivesTheme | null) => void;
   /** Gewählte Bediendichte. Kein zweiter Typ wie bei `ThemeModus`/`EffektivesTheme`: die Wahl
    *  IST die effektive Stufe. Die Zeigerart entscheidet nur, womit eine Sitzung ohne
    *  gespeicherte Wahl beginnt (`gespeicherteDichte`); ein `automatisch` könnte die Wahl
@@ -98,6 +101,8 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
   const [systemDunkel, setSystemDunkel] = useState<boolean>(systemBevorzugtDunkel);
   const [dichte, setDichteState] = useState<Dichte>(gespeicherteDichte);
   const [helligkeit, setHelligkeitState] = useState<Helligkeit>(gespeicherteHelligkeit);
+  // Theme einer Ansicht, das die Wahl überstimmt (Großbild nach Sonnenstand); `null`: die Wahl gilt.
+  const [vorgabe, setVorgabe] = useState<EffektivesTheme | null>(null);
   // Die angemeldeten Warnquellen (LFH-397). Eine MENGE statt eines Schalters: endet die
   // Warnung der einen Quelle, darf das die Sperre einer zweiten nicht mit aufheben.
   const [warnQuellen, setWarnQuellen] = useState<ReadonlySet<string>>(() => new Set());
@@ -140,7 +145,8 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
   const warnungAktiv = warnQuellen.size > 0;
   const helligkeitWirksam = wirksameHelligkeit(helligkeit, warnungAktiv);
 
-  const effektiv: EffektivesTheme = modus === 'system' ? (systemDunkel ? 'dark' : 'light') : modus;
+  const gewaehlt: EffektivesTheme = modus === 'system' ? (systemDunkel ? 'dark' : 'light') : modus;
+  const effektiv: EffektivesTheme = vorgabe ?? gewaehlt;
 
   // `data-theme` + `color-scheme` am <html> setzen, damit reines CSS
   // (z. B. LoginPage, ETB-Berichtigungszeilen) auf den Modus reagieren kann.
@@ -177,6 +183,7 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
       modus,
       effektiv,
       setModus,
+      setVorgabe,
       dichte,
       setDichte,
       helligkeit,
@@ -189,6 +196,7 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
       modus,
       effektiv,
       setModus,
+      setVorgabe,
       dichte,
       setDichte,
       helligkeit,
@@ -242,6 +250,7 @@ export function useThemeMode(): ThemeModeWert {
     modus: MODUS_DEFAULT,
     effektiv: 'dark',
     setModus: () => {},
+    setVorgabe: () => {},
     dichte: DICHTE_DEFAULT,
     setDichte: () => {},
     helligkeit: HELLIGKEIT_DEFAULT,
@@ -297,4 +306,17 @@ export function useWarnsperre(aktiv: boolean): void {
     meldeWarnung(quelle, aktiv);
     return () => meldeWarnung(quelle, false);
   }, [quelle, aktiv, meldeWarnung]);
+}
+
+/**
+ * Überstimmt die gewählte Darstellung, solange die Ansicht steht (Großbild nach Sonnenstand).
+ * `null` lässt die Wahl gelten. Beim Abbau hebt der Hook die Vorgabe selbst auf, damit eine
+ * andere Ansicht auf demselben Gerät wieder der Wahl folgt.
+ */
+export function useThemeVorgabe(theme: EffektivesTheme | null): void {
+  const { setVorgabe } = useThemeMode();
+  useEffect(() => {
+    setVorgabe(theme);
+    return () => setVorgabe(null);
+  }, [theme, setVorgabe]);
 }
