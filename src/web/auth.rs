@@ -175,6 +175,12 @@ async fn complete_login(
             groups = ?identity.groups,
             "Anmeldung abgelehnt: in keiner Suchlage-Gruppe"
         );
+        // Ältere Sitzungen trügen sonst die alte Rolle weiter.
+        if let Some(u) =
+            store::users::find_by_oidc(&state.pool, &identity.issuer, &identity.subject).await?
+        {
+            store::sessions::delete_for_user(&state.pool, u.id).await?;
+        }
         return Err(AppError::Forbidden);
     };
     let now = now_ms();
@@ -581,6 +587,17 @@ mod tests {
                 .1["role"],
             "operator",
             "die Rolle hängt am Konto, auch ältere Sitzungen sind herabgestuft"
+        );
+
+        *idp.groups.lock().unwrap() = vec![];
+        assert_eq!(
+            location(&login(&app, &idp).await),
+            "/anmelden?fehler=gruppe"
+        );
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &op)).await.0,
+            StatusCode::UNAUTHORIZED,
+            "aus allen Gruppen entfernt: alte Sitzungen enden mit der abgelehnten Anmeldung"
         );
     }
 

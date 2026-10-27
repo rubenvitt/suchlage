@@ -81,6 +81,15 @@ pub async fn delete(pool: &SqlitePool, secret: &str) -> Result<(), sqlx::Error> 
     Ok(())
 }
 
+/// Beendet alle Sitzungen eines Kontos (z. B. aus allen Suchlage-Gruppen entfernt).
+pub async fn delete_for_user(pool: &SqlitePool, user_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
