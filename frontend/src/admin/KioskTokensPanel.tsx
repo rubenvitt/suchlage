@@ -107,7 +107,7 @@ export function KioskTokensPanel() {
       {created && (
         <OnceVisibleLink
           url={created.url}
-          hint="Auf dem Großbild-Rechner im Browser öffnen; er bleibt angemeldet, bis der Zugang widerrufen wird."
+          hint="Auf dem Großbild-Rechner im Browser öffnen; er bleibt angemeldet, bis der Zugang widerrufen wird. Für den Lagemonitor die Adresse in der IUK-Suite unter Lagemonitor → Suchlage einfügen."
         />
       )}
     </div>

@@ -91,6 +91,8 @@ pub fn router(state: AppState) -> Router {
             "/flugmappe/v1",
             crate::web::flugmappe::routes(state.settings.clone()),
         )
+        // Schnittstelle für den Lagemonitor: Großbild-Token als Bearer, nur lesen.
+        .nest("/lagemonitor/v1", crate::web::lagemonitor::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()
