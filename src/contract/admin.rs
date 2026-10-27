@@ -48,6 +48,8 @@ pub struct SetupRequest {
     pub issuer: String,
     pub client_id: String,
     pub client_secret: String,
+    pub admin_group: String,
+    pub user_group: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -62,6 +64,10 @@ pub struct OidcSettingsView {
     pub issuer: String,
     pub client_id: String,
     pub has_client_secret: bool,
+    /// Pocket-ID-Gruppe der Verwaltung (Rolle Admin).
+    pub admin_group: String,
+    /// Pocket-ID-Gruppe der Nutzung (Rolle Operator).
+    pub user_group: String,
     /// In Pocket ID als Callback-URL einzutragen.
     pub redirect_url: String,
 }
@@ -73,6 +79,8 @@ pub struct OidcSettingsInput {
     pub client_id: String,
     /// `null` behält das gespeicherte Geheimnis.
     pub client_secret: Option<String>,
+    pub admin_group: String,
+    pub user_group: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

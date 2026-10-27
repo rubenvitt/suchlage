@@ -821,10 +821,12 @@ export const settingsView: SettingsView = {
     "webrtc_url": "http://media:8889"
   },
   "oidc": {
+    "admin_group": "suchlage-admin",
     "client_id": "suchlage",
     "has_client_secret": true,
     "issuer": "https://id.example.org",
-    "redirect_url": "https://suchlage.example.org/api/auth/oidc/callback"
+    "redirect_url": "https://suchlage.example.org/api/auth/oidc/callback",
+    "user_group": "suchlage"
   },
   "photo_storage": {
     "access_key_id": "GK31c2f218a2e44f485b94239e",

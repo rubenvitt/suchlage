@@ -20,6 +20,11 @@ pub struct OidcSettings {
     pub issuer: String,
     pub client_id: String,
     pub client_secret: String,
+    /// Leer bei Einstellungen von vor den Gruppen: Dann lehnt der Login jedes Konto ab.
+    #[serde(default)]
+    pub admin_group: String,
+    #[serde(default)]
+    pub user_group: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -212,6 +217,8 @@ fn oidc_value(
             stored.map(|c| &c.client_secret),
             "Client-Secret",
         )?,
+        admin_group: non_empty(&input.admin_group, "Admin-Gruppe")?,
+        user_group: non_empty(&input.user_group, "Nutzungs-Gruppe")?,
     })
 }
 
@@ -399,6 +406,8 @@ impl SettingsHandle {
                 issuer: o.issuer,
                 client_id: o.client_id,
                 has_client_secret: !o.client_secret.is_empty(),
+                admin_group: o.admin_group,
+                user_group: o.user_group,
                 redirect_url: redirect_url(boot),
             }),
             dji: s.dji.map(|d| DjiSettingsView {
@@ -452,6 +461,8 @@ mod tests {
             issuer: "https://id.example.org".into(),
             client_id: "suchlage".into(),
             client_secret: secret.map(Into::into),
+            admin_group: "suchlage-admin".into(),
+            user_group: "suchlage".into(),
         };
         assert!(
             matches!(
@@ -469,6 +480,7 @@ mod tests {
         let json = serde_json::to_string(&h.view(&boot)).unwrap();
         assert!(!json.contains("geheim"));
         assert!(json.contains("\"has_client_secret\":true"));
+        assert!(json.contains("\"admin_group\":\"suchlage-admin\""));
         assert!(json.contains("http://127.0.0.1:8080/api/auth/oidc/callback"));
     }
 
@@ -506,6 +518,8 @@ mod tests {
                 issuer: "http://id.example.org".into(),
                 client_id: "x".into(),
                 client_secret: Some("s".into()),
+                admin_group: "a".into(),
+                user_group: "u".into(),
             })
             .await
             .unwrap_err();
@@ -628,11 +642,23 @@ mod tests {
             issuer: issuer.into(),
             client_id: "suchlage".into(),
             client_secret: secret.map(Into::into),
+            admin_group: "suchlage-admin".into(),
+            user_group: "suchlage".into(),
         };
         assert!(validate_oidc(&input("https://id.example.org", Some("s"))).is_ok());
         assert!(validate_oidc(&input("https://id.example.org", None)).is_err());
         assert!(validate_oidc(&input("https://id.example.org", Some(" "))).is_err());
         assert!(validate_oidc(&input("id.example.org", Some("s"))).is_err());
+        let mut no_group = input("https://id.example.org", Some("s"));
+        no_group.user_group = " ".into();
+        assert!(validate_oidc(&no_group).is_err());
+        // Gespeichert vor den Gruppen: lädt weiter, mit leeren Gruppen.
+        let old: OidcSettings =
+            serde_json::from_str(r#"{"issuer":"i","client_id":"c","client_secret":"s"}"#).unwrap();
+        assert_eq!(
+            (old.admin_group.as_str(), old.user_group.as_str()),
+            ("", "")
+        );
     }
 
     fn flugmappe(client_id: &str, allowed_origin: &str) -> FlugmappeSettings {

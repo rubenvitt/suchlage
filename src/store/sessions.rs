@@ -84,13 +84,14 @@ pub async fn delete(pool: &SqlitePool, secret: &str) -> Result<(), sqlx::Error> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contract::Role;
     use crate::db::test_pool;
     use crate::store::{kiosk, users};
 
     #[tokio::test]
     async fn sessions_expire_and_die_with_their_kiosk_token() {
         let pool = test_pool().await;
-        let u = users::upsert_oidc(&pool, "i", "s", "Erika Muster", 0)
+        let u = users::upsert_oidc(&pool, "i", "s", "Erika Muster", Role::Operator, 0)
             .await
             .unwrap();
         let s = create_for_user(&pool, u.id, 0).await.unwrap();
@@ -126,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn logout_deletes_only_its_own_session() {
         let pool = test_pool().await;
-        let u = users::upsert_oidc(&pool, "i", "s", "Erika Muster", 0)
+        let u = users::upsert_oidc(&pool, "i", "s", "Erika Muster", Role::Operator, 0)
             .await
             .unwrap();
         let (a, b) = (

@@ -90,6 +90,12 @@ test('abgebrochene Anmeldung wird erklärt', async () => {
   expect(await screen.findByText('Anmeldung abgebrochen. Bitte erneut anmelden.')).toBeInTheDocument();
 });
 
+test('Konto ohne Suchlage-Gruppe erfährt warum', async () => {
+  renderWithApp(<LoginPage />, { route: '/anmelden?fehler=gruppe' });
+  expect(await screen.findByText('Kein Zugang zu Suchlage.')).toBeInTheDocument();
+  expect(screen.getByText(/in keiner Suchlage-Gruppe/)).toBeInTheDocument();
+});
+
 test('während des Ladens und bei Serverfehler steht eine Aussage da, kein leeres Feld', async () => {
   server.use(http.get('/api/auth/options', () => HttpResponse.json({ error: 'x' }, { status: 500 })));
   renderWithApp(<LoginPage />, { route: '/anmelden' });

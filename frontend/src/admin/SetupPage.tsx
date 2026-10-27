@@ -4,6 +4,7 @@ import { ApiError, apiSend } from '../api/client';
 import { useAuthOptions } from '../api/queries';
 import type { SetupRequest } from '../contract/generated/SetupRequest';
 import type { SetupResult } from '../contract/generated/SetupResult';
+import { OidcGroupFields } from './SettingsForms';
 import './admin.css';
 
 type SetupValues = Omit<SetupRequest, 'token'>;
@@ -50,12 +51,11 @@ export function SetupPage() {
               : 'Callback-URL wird abgerufen …'}
           </p>
         )}
-        {/* Suchlage kennt keine Freigabe: Wer sich über Pocket ID anmelden darf, wird Operator. */}
         <Alert
-          type="warning"
+          type="info"
           showIcon
-          title="Client auf die I&K-Gruppe beschränken"
-          description="In Pocket ID beim Client unter „Allowed User Groups“ nur die Gruppe der I&K eintragen. Sonst wird jedes Konto in Pocket ID beim ersten Anmelden Operator und sieht Lage und Livebild."
+          title="Zwei Gruppen in Pocket ID anlegen"
+          description="Eine für die Verwaltung (Admin), eine für die Nutzung (Operator). Unter „Allowed User Groups“ am Client beide eintragen oder das Feld leer lassen."
         />
         <Form<SetupValues> layout="vertical" onFinish={submit} requiredMark={false}>
           <Form.Item label="Issuer" name="issuer" rules={[{ required: true, message: 'Issuer fehlt' }]}>
@@ -75,12 +75,13 @@ export function SetupPage() {
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
+          <OidcGroupFields />
           {error && <Alert type="error" title={error} className="sl-form-result" />}
           <Button type="primary" htmlType="submit" loading={pending} disabled={!token} block>
             Einrichten und anmelden
           </Button>
         </Form>
-        <p className="sl-muted">Wer sich als Erstes anmeldet, verwaltet Suchlage.</p>
+        <p className="sl-muted">Danach mit einem Konto aus der Admin-Gruppe anmelden.</p>
       </section>
     </div>
   );

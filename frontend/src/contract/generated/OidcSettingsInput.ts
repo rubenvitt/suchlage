@@ -4,4 +4,4 @@ export type OidcSettingsInput = { issuer: string, client_id: string,
 /**
  * `null` behält das gespeicherte Geheimnis.
  */
-client_secret: string | null, };
+client_secret: string | null, admin_group: string, user_group: string, };

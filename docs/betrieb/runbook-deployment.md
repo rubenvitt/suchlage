@@ -242,10 +242,11 @@ Und aus dem Tailnet: `nc -vz <TS-IP> 1883 && nc -vz <TS-IP> 1935`.
 
 1. **Pocket ID. Dieser Schritt ist Pflicht.** Einen OIDC-Client „Suchlage“ anlegen.
    - Callback-URL: `https://suchlage.iuk-ue.de/api/auth/oidc/callback`
-   - **Allowed User Groups:** nur die I&K-Gruppe. Die Oberfläche ist öffentlich, deshalb ist diese
-     Gruppe die einzige Schranke. Suchlage kennt keine eigene Freigabe. Jedes Konto, das sich über
-     den Client anmelden darf, wird Operator. Wer aus der Gruppe fliegt, behält eine bestehende
-     Sitzung bis zu 7 Tage.
+   - **Gruppen:** zwei Gruppen anlegen, `suchlage-admin` (Verwaltung) und `suchlage` (Nutzung).
+     Die Oberfläche ist öffentlich, deshalb sind diese Gruppen die einzige Schranke. Wer in keiner
+     der beiden ist, kommt nicht hinein. Die Rolle wird bei jeder Anmeldung aus den Gruppen gesetzt.
+     Wer aus einer Gruppe entfernt wird, behält eine bestehende Sitzung bis zu 7 Tage.
+   - **Allowed User Groups:** beide Gruppen oder leer.
 2. **Einrichtungslink** aus dem Log holen. Er ist 24 h gültig, ein Neustart des Servers erzeugt einen
    neuen. Wer den Link hat, richtet die Instanz ein. Ihn deshalb sofort benutzen:
 
@@ -253,10 +254,15 @@ Und aus dem Tailnet: `nc -vz <TS-IP> 1883 && nc -vz <TS-IP> 1935`.
    ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml logs server | grep Ersteinrichtung'
    ```
 
-3. Den Link **vollständig** öffnen, der Teil nach `#` gehört dazu. Issuer, Client-ID und
-   Client-Secret eintragen. Meldet die Seite „Anmeldedienst nicht erreichbar“, kommt der Server
-   nicht an Pocket ID heran. Dann DNS und ausgehende Verbindungen des Hosts prüfen.
-4. Anmelden. Das erste Konto wird Admin.
+3. Den Link **vollständig** öffnen, der Teil nach `#` gehört dazu. Issuer, Client-ID,
+   Client-Secret und die beiden Gruppennamen eintragen. Meldet die Seite „Anmeldedienst nicht
+   erreichbar“, kommt der Server nicht an Pocket ID heran. Dann DNS und ausgehende Verbindungen
+   des Hosts prüfen.
+4. Mit einem Konto aus der Admin-Gruppe anmelden.
+
+**Bestehende Instanz von vor den Gruppen:** Erst die beiden Gruppen in Pocket ID anlegen und
+befüllen. Danach, solange noch eine Admin-Sitzung läuft, unter Einstellungen → Anmeldung beide
+Gruppennamen eintragen. Bis dahin lehnt Suchlage jede neue Anmeldung ab.
 
 ## 8. Einstellungen in der App
 

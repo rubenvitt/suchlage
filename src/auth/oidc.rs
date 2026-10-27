@@ -7,14 +7,17 @@ use std::time::{Duration, Instant};
 
 use futures::future::BoxFuture;
 use openidconnect::core::{
-    CoreAuthenticationFlow, CoreClient, CoreJsonWebKeySet, CoreProviderMetadata,
+    CoreAuthenticationFlow, CoreClient, CoreGenderClaim, CoreJsonWebKeySet,
+    CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm, CoreProviderMetadata,
 };
 use openidconnect::{
-    AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, HttpRequest, HttpResponse, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
-    RedirectUrl, Scope, TokenResponse,
+    AdditionalClaims, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet,
+    EndpointNotSet, EndpointSet, HttpRequest, HttpResponse, IdToken, IssuerUrl, Nonce,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
 };
+use serde::{Deserialize, Serialize};
 
+use crate::contract::Role;
 use crate::error::AppError;
 use crate::settings::{OidcSettings, issuer_allowed};
 
@@ -42,7 +45,40 @@ pub struct Identity {
     pub issuer: String,
     pub subject: String,
     pub display_name: String,
+    /// Namen der Pocket-ID-Gruppen (Scope `groups`).
+    pub groups: Vec<String>,
 }
+
+impl Identity {
+    /// Verwaltung vor Nutzung; ohne eine der beiden Gruppen kein Zugang. Leere Gruppennamen
+    /// (Einstellungen von vor den Gruppen) passen nie.
+    pub fn role(&self, cfg: &OidcSettings) -> Option<Role> {
+        let member = |g: &str| !g.is_empty() && self.groups.iter().any(|x| x == g);
+        if member(&cfg.admin_group) {
+            Some(Role::Admin)
+        } else if member(&cfg.user_group) {
+            Some(Role::Operator)
+        } else {
+            None
+        }
+    }
+}
+
+/// Der Claim `groups` im ID-Token; fehlt er, ist das Konto in keiner Gruppe.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GroupClaims {
+    #[serde(default)]
+    pub groups: Vec<String>,
+}
+
+impl AdditionalClaims for GroupClaims {}
+
+pub type GroupIdToken = IdToken<
+    GroupClaims,
+    CoreGenderClaim,
+    CoreJweContentEncryptionAlgorithm,
+    CoreJwsSigningAlgorithm,
+>;
 
 struct Pending {
     nonce: String,
@@ -389,6 +425,7 @@ impl OidcState {
                 Nonce::new_random,
             )
             .add_scope(Scope::new("profile".into()))
+            .add_scope(Scope::new("groups".into()))
             .set_pkce_challenge(challenge)
             .url();
         let mut pending = self.pending.lock().unwrap();
@@ -436,7 +473,13 @@ impl OidcState {
                 tracing::warn!(error = %e, "OIDC-Token-Austausch fehlgeschlagen");
                 unavailable()
             })?;
-        let id_token = token.id_token().ok_or(AppError::Unauthorized)?;
+        // Der Core-Client kennt nur die Standard-Claims; für `groups` denselben Token neu lesen.
+        let id_token: GroupIdToken = token
+            .id_token()
+            .ok_or(AppError::Unauthorized)?
+            .to_string()
+            .parse()
+            .map_err(|_| AppError::Unauthorized)?;
         let claims = id_token
             .claims(&client.id_token_verifier(), &Nonce::new(pending.nonce))
             .map_err(|e| {
@@ -459,6 +502,7 @@ impl OidcState {
                 issuer: claims.issuer().to_string(),
                 subject: claims.subject().to_string(),
                 display_name,
+                groups: claims.additional_claims().groups.clone(),
             },
             pending.next,
         ))
@@ -482,13 +526,14 @@ pub mod test_idp {
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use openidconnect::core::{
-        CoreIdToken, CoreIdTokenClaims, CoreJsonWebKeySet, CoreJwsSigningAlgorithm,
-        CoreRsaPrivateSigningKey,
+        CoreGenderClaim, CoreJsonWebKeySet, CoreJwsSigningAlgorithm, CoreRsaPrivateSigningKey,
     };
     use openidconnect::{
-        Audience, EmptyAdditionalClaims, EndUserUsername, IssuerUrl, JsonWebKeyId, Nonce,
+        Audience, EndUserUsername, IdTokenClaims, IssuerUrl, JsonWebKeyId, Nonce,
         PrivateSigningKey, StandardClaims, SubjectIdentifier,
     };
+
+    use super::{GroupClaims, GroupIdToken};
 
     /// Erfundenes Konto des Test-IdP.
     pub const SUBJECT: &str = "sub-1";
@@ -555,6 +600,8 @@ pub mod test_idp {
         pub issuer: String,
         /// Nonce, die der nächste ID-Token trägt. Der Test übernimmt sie aus der Autorisierungs-URL.
         pub nonce: Arc<Mutex<String>>,
+        /// Gruppen im nächsten ID-Token (Vorgabe: die Nutzungs-Gruppe `suchlage`).
+        pub groups: Arc<Mutex<Vec<String>>>,
         discovery_requests: Arc<AtomicUsize>,
         jwks_requests: Arc<AtomicUsize>,
         token_requests: Arc<Mutex<Vec<HashMap<String, String>>>>,
@@ -638,6 +685,7 @@ pub mod test_idp {
         let idp = TestIdp {
             issuer,
             nonce: Arc::new(Mutex::new(String::new())),
+            groups: Arc::new(Mutex::new(vec!["suchlage".into()])),
             discovery_requests: Arc::new(AtomicUsize::new(0)),
             jwks_requests: Arc::new(AtomicUsize::new(0)),
             token_requests: Arc::new(Mutex::new(Vec::new())),
@@ -688,17 +736,19 @@ pub mod test_idp {
     ) -> Json<serde_json::Value> {
         idp.token_requests.lock().unwrap().push(form);
         let now = chrono::Utc::now();
-        let claims = CoreIdTokenClaims::new(
+        let claims = IdTokenClaims::<GroupClaims, CoreGenderClaim>::new(
             IssuerUrl::new(idp.issuer.clone()).unwrap(),
             vec![Audience::new(idp.client_id.into())],
             now + chrono::Duration::minutes(5),
             now,
             StandardClaims::new(SubjectIdentifier::new(SUBJECT.into()))
                 .set_preferred_username(Some(EndUserUsername::new(USERNAME.into()))),
-            EmptyAdditionalClaims {},
+            GroupClaims {
+                groups: idp.groups.lock().unwrap().clone(),
+            },
         )
         .set_nonce(Some(Nonce::new(idp.nonce.lock().unwrap().clone())));
-        let id_token = CoreIdToken::new(
+        let id_token = GroupIdToken::new(
             claims,
             idp.key.as_ref(),
             CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
@@ -723,6 +773,8 @@ mod tests {
             issuer: issuer.into(),
             client_id: "suchlage".into(),
             client_secret: "secret".into(),
+            admin_group: "suchlage-admin".into(),
+            user_group: "suchlage".into(),
         }
     }
 
@@ -739,6 +791,7 @@ mod tests {
         assert_eq!(q["code_challenge_method"], "S256");
         assert_eq!(q["redirect_uri"], REDIRECT);
         assert!(q["scope"].split(' ').any(|s| s == "openid"), "{q:?}");
+        assert!(q["scope"].split(' ').any(|s| s == "groups"), "{q:?}");
         *idp.nonce.lock().unwrap() = q["nonce"].clone();
 
         let (identity, next) = oidc
@@ -751,6 +804,7 @@ mod tests {
                 issuer: idp.issuer.clone(),
                 subject: test_idp::SUBJECT.into(),
                 display_name: test_idp::USERNAME.into(),
+                groups: vec!["suchlage".into()],
             }
         );
         assert_eq!(next, "/flights");
@@ -821,6 +875,31 @@ mod tests {
         oidc.check_discovery(&format!("{}/", idp.issuer))
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn role_comes_from_the_groups_admin_first() {
+        let who = |groups: &[&str]| Identity {
+            issuer: "i".into(),
+            subject: "s".into(),
+            display_name: "d".into(),
+            groups: groups.iter().map(|g| g.to_string()).collect(),
+        };
+        let c = cfg("https://id");
+        assert_eq!(who(&["suchlage-admin"]).role(&c), Some(Role::Admin));
+        assert_eq!(
+            who(&["suchlage", "suchlage-admin"]).role(&c),
+            Some(Role::Admin)
+        );
+        assert_eq!(who(&["suchlage"]).role(&c), Some(Role::Operator));
+        assert_eq!(who(&["andere"]).role(&c), None);
+        assert_eq!(who(&[]).role(&c), None);
+        let legacy = OidcSettings {
+            admin_group: String::new(),
+            user_group: String::new(),
+            ..c
+        };
+        assert_eq!(who(&[""]).role(&legacy), None, "leere Gruppe passt nie");
     }
 
     #[test]
