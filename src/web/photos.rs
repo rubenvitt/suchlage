@@ -65,6 +65,8 @@ async fn thumb(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
+    // Ein Vorschaubild-Job kann nach dem Löschen noch eine Datei schreiben; ohne Foto kein Bild.
+    state.photos.original_of(id).await?;
     let bytes = match tokio::fs::read(state.photos.thumb_path(id)).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
@@ -95,6 +97,16 @@ struct OriginalQuery {
     download: u8,
 }
 
+/// Nur passive Rasterformate zeigt der Browser direkt an, alles andere wird Download.
+fn inline_type(name: &str) -> Option<&'static str> {
+    let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        _ => None,
+    }
+}
+
 /// Dateiname für `Content-Disposition`: nur unverfängliche ASCII-Zeichen.
 fn safe_filename(name: &str) -> String {
     let cleaned: String = name
@@ -123,20 +135,24 @@ async fn original(
 ) -> Result<Response, AppError> {
     let (object_key, name) = state.photos.original_of(id).await?;
     let res = state.photos.original(&object_key).await?;
-    let content_type = res
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .filter(|v| v.starts_with("image/"))
-        .unwrap_or("image/jpeg")
-        .to_string();
+    // Typ und Inhalt bestimmt die Fernsteuerung; nosniff und sandbox halten ein untergeschobenes
+    // SVG oder HTML davon ab, im Ursprung der App zu laufen.
+    let inline = inline_type(&name);
     let mut out = Response::builder()
-        .header(header::CONTENT_TYPE, content_type)
+        .header(
+            header::CONTENT_TYPE,
+            inline.unwrap_or("application/octet-stream"),
+        )
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header(
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; sandbox",
+        )
         .header(header::CACHE_CONTROL, "private, max-age=3600");
     if let Some(len) = res.content_length() {
         out = out.header(header::CONTENT_LENGTH, len);
     }
-    if q.download == 1 {
+    if q.download == 1 || inline.is_none() {
         out = out.header(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{}\"", safe_filename(&name)),
@@ -413,6 +429,15 @@ mod tests {
                 "{uri}"
             );
         }
+    }
+
+    #[test]
+    fn only_raster_originals_show_inline() {
+        assert_eq!(inline_type("DJI_1_T.JPG"), Some("image/jpeg"));
+        assert_eq!(inline_type("a.png"), Some("image/png"));
+        assert_eq!(inline_type("DJI_1.svg"), None);
+        assert_eq!(inline_type("DJI_1.DNG"), None);
+        assert_eq!(inline_type("ohne_endung"), None);
     }
 
     #[test]

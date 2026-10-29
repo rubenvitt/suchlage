@@ -13,6 +13,9 @@ use crate::situation::observation::{LiveStreamInfo, ModeClass, Observation, Obse
 use super::topic::{self, DjiTopic};
 use super::wire::{self, Envelope, LiveCapacity, LiveStatusEntry, ServiceReply, UpdateTopo};
 
+/// Obergrenze des gemergten Stands je Gerät; ein echter DJI-Stand bleibt weit darunter.
+const MAX_MERGED_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Outgoing {
     pub topic: String,
@@ -222,6 +225,10 @@ impl Translator {
             .collect();
         let merged = self.merged.entry(sn.to_string()).or_default();
         deep_merge(merged, &incoming);
+        // Immer neue Felder ließen jede weitere Nachricht teurer werden; dann zählt nur die letzte.
+        if serde_json::to_vec(&*merged).map_or(0, |v| v.len()) > MAX_MERGED_BYTES {
+            *merged = incoming.clone();
+        }
         let merged = merged.clone();
         // Gültigkeit an der eingehenden Nachricht prüfen, damit ein falscher Wert genau einmal zählt;
         // die Werte selbst kommen aus dem gemergten Stand.
@@ -511,6 +518,23 @@ mod tests {
             Observation::AircraftTelemetry { telemetry, .. } => Some(telemetry),
             _ => None,
         })
+    }
+
+    #[test]
+    fn merged_state_stays_bounded() {
+        let mut t = Translator::new();
+        let chunk = "x".repeat(MAX_MERGED_BYTES / 3);
+        for i in 0..5 {
+            run(
+                &mut t,
+                i,
+                "thing/product/RC1/state",
+                json!({"tid": "t", "bid": "b", "timestamp": i, "gateway": "RC1",
+                       "data": {format!("f{i}"): chunk}}),
+            );
+        }
+        let size = serde_json::to_vec(&t.merged["RC1"]).unwrap().len();
+        assert!(size <= MAX_MERGED_BYTES, "{size}");
     }
 
     #[test]

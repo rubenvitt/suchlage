@@ -80,7 +80,8 @@ async fn by_code(state: &AppState, code: &str) -> Result<RemoteController, AppEr
         )
     };
     let code = code.trim();
-    if code.is_empty() {
+    // Eine Datenbank aus der Entwicklung kann den festen Simulator-Code noch enthalten.
+    if code.is_empty() || (!cfg!(feature = "dev") && code == "dev-simulator") {
         return Err(rejected());
     }
     rcs::find_by_code(&state.pool, code)
@@ -287,6 +288,16 @@ mod tests {
     async fn endpoints_without_valid_code_return_no_secrets() {
         let app = test_app().await;
         configured(&app).await;
+        if !cfg!(feature = "dev") {
+            crate::store::remote_controllers::create_with_code(
+                &app.state.pool,
+                "Alt",
+                "dev-simulator",
+                0,
+            )
+            .await
+            .unwrap();
+        }
         let bodies = [
             json!({"code": "falsch", "rc_sn": "RC1"}),
             json!({"code": "", "rc_sn": "RC1"}),

@@ -23,14 +23,22 @@ pub fn handle_service(payload: &[u8]) -> Option<(Vec<u8>, Action)> {
     let method = env["method"].as_str()?;
     let data = &env["data"];
     let (result, action) = match method {
-        // Wie Pilot 2: über MQTT nur RTMP (url_type 1), sonst „Protokoll nicht unterstützt“.
-        "live_start_push" if data["url_type"] == 1 => (
-            0,
-            Action::StartVideo {
-                url: data["url"].as_str()?.into(),
-                video_id: data["video_id"].as_str()?.into(),
-            },
-        ),
+        // Wie Pilot 2: über MQTT nur RTMP (url_type 1), sonst „Protokoll nicht unterstützt“. Die URL
+        // selbst prüfen: ffmpeg schriebe eine Dateiangabe sonst als FLV auf die Platte.
+        "live_start_push"
+            if data["url_type"] == 1
+                && data["url"]
+                    .as_str()
+                    .is_some_and(|u| u.starts_with("rtmp://")) =>
+        {
+            (
+                0,
+                Action::StartVideo {
+                    url: data["url"].as_str()?.into(),
+                    video_id: data["video_id"].as_str()?.into(),
+                },
+            )
+        }
         "live_start_push" => (513013, Action::None),
         "live_stop_push" => (0, Action::StopVideo),
         "live_lens_change" => (
@@ -379,14 +387,16 @@ mod tests {
 
     #[test]
     fn non_rtmp_start_is_refused_like_pilot_would() {
-        let (reply, action) = handle_service(&call(
-            "live_start_push",
+        for data in [
             json!({"url_type": 0, "url": "x", "video_id": "v"}),
-        ))
-        .unwrap();
-        let v: Value = serde_json::from_slice(&reply).unwrap();
-        assert_eq!(v["data"]["result"], 513013);
-        assert_eq!(action, Action::None);
+            json!({"url_type": 1, "url": "/tmp/x.flv", "video_id": "v"}),
+            json!({"url_type": 1, "url": "file:x.flv", "video_id": "v"}),
+        ] {
+            let (reply, action) = handle_service(&call("live_start_push", data)).unwrap();
+            let v: Value = serde_json::from_slice(&reply).unwrap();
+            assert_eq!(v["data"]["result"], 513013);
+            assert_eq!(action, Action::None);
+        }
     }
 
     #[test]
