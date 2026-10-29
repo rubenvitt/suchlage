@@ -21,6 +21,7 @@ use crate::auth::bearer::FlugmappeUser;
 use crate::contract::{
     FLUGMAPPE_API_VERSION, FLUGMAPPE_MISSION_HEADER, FmFeatureCollection, FmFlight, FmMapImport,
     FmMapImportResult, FmMe, FmMission, FmMissionCreate, FmMissionLink, FmSectionCreate,
+    FmSectionUpdate,
 };
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -44,6 +45,7 @@ pub fn routes(settings: SettingsHandle) -> Router<AppState> {
         .route("/missions/{id}", get(mission))
         .route("/missions/{id}/link", post(link))
         .route("/missions/{id}/sections", post(add_section))
+        .route("/missions/{id}/sections/{section_id}", put(update_section))
         .route("/missions/{id}/flights", get(flights))
         .route("/missions/{id}/map", get(map))
         .route(
@@ -217,6 +219,21 @@ async fn add_section(
         state
             .missions
             .add_flugmappe_section(id, &fm, input, now_ms())
+            .await?,
+    ))
+}
+
+async fn update_section(
+    _: FlugmappeUser,
+    Binding(fm): Binding,
+    State(state): State<AppState>,
+    Path((id, section)): Path<(i64, String)>,
+    JsonBody(input): JsonBody<FmSectionUpdate>,
+) -> Result<Json<FmMission>, AppError> {
+    Ok(Json(
+        state
+            .missions
+            .update_flugmappe_section(id, &fm, &section, input)
             .await?,
     ))
 }
@@ -596,6 +613,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_location_set_after_relocating_reaches_the_section() {
+        let s = setup().await;
+        let id = s.created(FM_A).await;
+        let section =
+            json!({"flugmappe_section_id": "s2", "label": "Standort 2", "location": null});
+        let (status, _) = s
+            .call(
+                "POST",
+                &format!("/missions/{id}/sections"),
+                Some(FM_A),
+                Some(section),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let uri = format!("/missions/{id}/sections/s2");
+        let put = |body: Value| s.call("PUT", &uri, Some(FM_A), Some(body));
+        let (status, m) = put(json!({"label": "Standort 2", "location": "Waldrand"})).await;
+        assert_eq!(status, StatusCode::OK, "{m}");
+        assert_eq!(m["sections"][1]["location"], "Waldrand");
+        let (_, one) = s
+            .call("GET", &format!("/missions/{id}"), Some(FM_A), None)
+            .await;
+        assert_eq!(one, m);
+        let (status, _) = put(json!({"label": "", "location": null})).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = s
+            .call(
+                "PUT",
+                &format!("/missions/{id}/sections/s9"),
+                Some(FM_A),
+                Some(json!({"label": "X", "location": null})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn a_second_running_mission_and_a_foreign_binding_are_409() {
         let s = setup().await;
         let id = s.created(FM_A).await;
@@ -614,6 +668,11 @@ mod tests {
         let import = json!({"features": [], "standort": null});
         for (method, uri, body) in [
             ("POST", format!("/missions/{id}/sections"), Some(section)),
+            (
+                "PUT",
+                format!("/missions/{id}/sections/s1"),
+                Some(json!({"label": "Abschnitt 1", "location": "Forst"})),
+            ),
             ("GET", format!("/missions/{id}"), None),
             ("GET", format!("/missions/{id}/map"), None),
             ("POST", format!("/missions/{id}/map/import"), Some(import)),

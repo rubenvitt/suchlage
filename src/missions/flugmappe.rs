@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use crate::contract::{
     FmFeatureCollection, FmFlight, FmLinkInfo, FmMapImport, FmMapImportResult, FmMission,
-    FmMissionCreate, FmMissionLink, FmSection, FmSectionCreate, MapElementOrigin, Mission,
-    MissionOrigin, MissionState, SectionCreate,
+    FmMissionCreate, FmMissionLink, FmSection, FmSectionCreate, FmSectionUpdate, MapElementOrigin,
+    Mission, MissionOrigin, MissionState, SectionCreate,
 };
 use crate::error::AppError;
 use crate::map::geojson::{self, Track};
@@ -212,6 +212,36 @@ impl MissionHub {
             return self.fm_view(mission).await;
         }
         store::add_section_from_flugmappe(&self.pool, id, &section, &input, now_ms).await?;
+        self.changed();
+        self.fm_view(self.get(id).await?).await
+    }
+
+    /// Bezeichnung und Ort eines Abschnitts der Flugmappe nachreichen (SUL-81). Ohne Änderung
+    /// bleibt alles still (die Ausgangsliste wiederholt nach einer verlorenen Antwort).
+    pub async fn update_flugmappe_section(
+        &self,
+        id: i64,
+        caller: &str,
+        flugmappe_section_id: &str,
+        input: FmSectionUpdate,
+    ) -> Result<FmMission, AppError> {
+        let input = SectionCreate {
+            label: rules::name(&input.label, "Bezeichnung").map_err(validation)?,
+            location: rules::location(input.location),
+        };
+        let _serial = self.writes.lock().await;
+        let (mission, ids) = self.bound_open(id, caller).await?;
+        let section = ids
+            .section(flugmappe_section_id)
+            .ok_or(AppError::NotFound)?;
+        let unchanged = mission
+            .sections
+            .iter()
+            .any(|s| s.id == section && s.label == input.label && s.location == input.location);
+        if unchanged {
+            return self.fm_view(mission).await;
+        }
+        store::update_section(&self.pool, section, &input).await?;
         self.changed();
         self.fm_view(self.get(id).await?).await
     }
@@ -768,6 +798,84 @@ mod tests {
                 },
                 16,
             )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Unprocessable(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn the_location_of_a_section_comes_later_from_the_flugmappe() {
+        let f = hub().await;
+        let m = f
+            .hub
+            .create_from_flugmappe(create_input(FM_A), "Testpilot", 10)
+            .await
+            .unwrap();
+        f.hub
+            .add_flugmappe_section(
+                m.id,
+                FM_A,
+                FmSectionCreate {
+                    flugmappe_section_id: "s2".into(),
+                    label: "Standort 2".into(),
+                    location: None,
+                },
+                11,
+            )
+            .await
+            .unwrap();
+        let update = |label: &str, location: Option<&str>| FmSectionUpdate {
+            label: label.into(),
+            location: location.map(Into::into),
+        };
+        let after = f
+            .hub
+            .update_flugmappe_section(m.id, FM_A, "s2", update(" Standort 2 ", Some(" Waldrand ")))
+            .await
+            .unwrap();
+        let s2 = &after.sections[1];
+        assert_eq!(
+            (s2.label.as_str(), s2.location.as_deref()),
+            ("Standort 2", Some("Waldrand"))
+        );
+        assert_eq!(after.sections[0].location, None, "der erste bleibt");
+        assert_eq!(
+            f.hub.get(m.id).await.unwrap().sections.last().unwrap().id,
+            s2.id,
+            "der aktive Abschnitt bleibt der aktive"
+        );
+        let again = f
+            .hub
+            .update_flugmappe_section(m.id, FM_A, "s2", update("Standort 2", Some("Waldrand")))
+            .await
+            .unwrap();
+        assert_eq!(again, after, "Wiederholung ändert nichts");
+        let cleared = f
+            .hub
+            .update_flugmappe_section(m.id, FM_A, "s1", update("Abschnitt 1", Some(" ")))
+            .await
+            .unwrap();
+        assert_eq!(
+            cleared.sections[0].location, None,
+            "leerer Ort heißt keiner"
+        );
+
+        for (fm, section, label, expected) in [
+            (FM_A, "s9", "X", "NotFound"),
+            (FM_B, "s2", "X", "Conflict"),
+            (FM_A, "s2", " ", "Validation"),
+        ] {
+            let err = f
+                .hub
+                .update_flugmappe_section(m.id, fm, section, update(label, None))
+                .await
+                .unwrap_err();
+            assert!(format!("{err:?}").starts_with(expected), "{err:?}");
+        }
+        f.hub.close(m.id, 15).await.unwrap();
+        let err = f
+            .hub
+            .update_flugmappe_section(m.id, FM_A, "s2", update("Standort 2", None))
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Unprocessable(_)), "{err:?}");

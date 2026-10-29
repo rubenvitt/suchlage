@@ -71,6 +71,7 @@ Schnittstelle (alle Felder `snake_case`, Zeiten ms seit Epoch):
 | `POST /missions` | `FmMissionCreate { name, location, section_label, section_location, flugmappe_mission_id, flugmappe_section_id }` | `FmMission` (laufend; Wiederholung: der schon angelegte) | 400, 409 (anderer läuft / UUID mit einem anderen Einsatz verknüpft), 422 (mit dieser UUID angelegter Einsatz ist abgeschlossen) |
 | `POST /missions/{id}/link` | `FmMissionLink { flugmappe_mission_id, flugmappe_section_id, section_label, section_location, take_over: bool }` | `FmMission` (laufend) | 409 (anderer läuft; mit anderer Flugmappe verknüpft und `take_over = false`), 422 (abgeschlossen) |
 | `POST /missions/{id}/sections` | `FmSectionCreate { flugmappe_section_id, label, location }` | `FmMission` | 409 (Bindung), 422 (abgeschlossen) |
+| `PUT /missions/{id}/sections/{fm_section_id}` (SUL-81) | `FmSectionUpdate { label, location }` | `FmMission` (ohne Änderung unverändert) | 400, 404, 409, 422 (abgeschlossen) |
 | `GET /missions/{id}/flights` | – | `Vec<FmFlight>` | 409 (Bindung) |
 | `GET /missions/{id}/map?section=` | – | GeoJSON (`serde_json::Value`, im Vertrag als `FmFeatureCollection` typisiert) | 409 |
 | `POST /missions/{id}/map/import` | `FmMapImport { features: Vec<FmImportFeature>, standort: Option<GeoPoint> }` | `FmMapImportResult { imported }` | 400, 409, 422 |

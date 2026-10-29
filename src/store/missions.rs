@@ -508,6 +508,21 @@ pub async fn add_section_from_flugmappe(
     .await
 }
 
+/// Bezeichnung und Ort eines Abschnitts aus der Flugmappe.
+pub async fn update_section(
+    pool: &SqlitePool,
+    section_id: i64,
+    input: &SectionCreate,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE mission_sections SET label = ?, location = ? WHERE id = ?")
+        .bind(&input.label)
+        .bind(&input.location)
+        .bind(section_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Setzt den Ort eines Abschnitts, falls er noch keinen hat.
 pub async fn set_section_location_if_empty<'e>(
     db: impl sqlx::SqliteExecutor<'e>,
