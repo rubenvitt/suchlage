@@ -158,9 +158,12 @@ ssh <host> /srv/suchlage/deploy/fotos-init.sh
 
 Das Skript legt das RPC-Geheimnis von Garage unter `/srv/suchlage/garage-secrets` an (neben
 `deploy/`, damit `rsync --delete` es nicht löscht), startet `fotos` und legt Bucket
-`suchlage-fotos`, den Server-Schlüssel und einen Admin-Token an, der nur Schlüssel verwalten darf.
+`suchlage-fotos`, den Eingangs-Bucket `suchlage-fotos-eingang` (ADR 0004), den Server-Schlüssel und
+einen Admin-Token an, der nur Schlüssel verwalten darf.
 Schlüssel-ID, geheimen Schlüssel und Admin-Token gibt es **genau einmal** aus. Notieren und in
-Schritt 8 eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts.
+Schritt 8 eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts. Fehlt auf einem
+älteren Server nur der Eingangs-Bucket, legt ein erneuter Aufruf genau diesen an. Die alten
+Upload-Schlüssel laufen nach höchstens einer Stunde ab.
 
 ```sh
 ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml up -d && docker compose -f compose.m1.yaml ps'
@@ -378,6 +381,11 @@ Ab 0.4.0 läuft die Migration 0004 (Einsätze) beim Start des Servers von selbst
 Flüge, Kartenelemente und Fotos erscheinen danach unter „ohne Einsatz“; die Migration selbst
 verliert nichts (zum Aufräumen ohne Einsatz siehe die Warnung unten). Vor dem Update trotzdem sichern (siehe „Rückweg“).
 
+Mit dem Eingang für Fotos (ADR 0004) **vor** dem Update `fotos-init.sh` erneut ausführen (Schritt 5).
+Es legt nur `suchlage-fotos-eingang` an. Ohne den Eingang antwortet `sts` mit 503, und Pilot 2 lädt
+keine Fotos hoch. Uploads mit alten Schlüsseln aus der Stunde davor landen noch direkt in
+`suchlage-fotos`; der Upload-Callback nimmt sie dort an.
+
 Ab 0.5.0 läuft die Migration 0005 (Flugmappe) ebenso von selbst. Vorhandene Einsätze gelten danach
 als in Suchlage angelegt und sind mit keiner Flugmappe verknüpft. Die Schnittstelle bleibt aus, bis
 sie unter *Einstellungen → Flugmappe* gesetzt ist (Schritt 11).
@@ -459,7 +467,8 @@ nächsten Koppeln wieder an.
 | Kartenelemente fehlen in Pilot 2, Protokoll der Pilot-Seite ohne „Kartenabgleich: verbunden“ | Cloud-Seite in Pilot 2 neu öffnen (lädt `api`, `ws`, `map`). Meldet Pilot 2 „Anmeldung abgelaufen“, wurde dieselbe Fernsteuerung woanders neu gekoppelt: jedes Koppeln erzeugt einen neuen Token |
 | Fotos kommen nicht an, Pilot-Seite zeigt bei „Fotos“ „Server ohne Fotospeicher“ | *Einstellungen → Fotospeicher* fehlt. Danach die Cloud-Seite in Pilot 2 neu öffnen (lädt `media`) |
 | Pilot 2 lädt Fotos nicht hoch, Funkprotokoll „Foto-Upload gescheitert“ | Die RC erreicht `<TS-IP>:3900` nicht: ACL (Schritt 1) und *S3-Adresse für die Fernsteuerung* prüfen. `docker compose … logs fotos` |
-| `sts` antwortet 503 „Fotospeicher lehnt ab“ | Admin-Token oder Admin-Adresse falsch, oder der Bucket heißt anders. `docker compose … logs server` nennt den HTTP-Status von Garage |
+| `sts` antwortet 503 „Fotospeicher lehnt ab“ | Admin-Token oder Admin-Adresse falsch, oder der Bucket heißt anders. HTTP 404: `suchlage-fotos-eingang` fehlt, `fotos-init.sh` erneut ausführen. `docker compose … logs server` nennt den HTTP-Status von Garage |
+| `upload-callback` antwortet 503, Foto bleibt im Eingang | Der Server-Schlüssel darf den Eingang nicht lesen oder löschen (`garage bucket info suchlage-fotos-eingang` zeigt `RW` für `suchlage-server`) |
 | Foto ohne Vorschaubild | Der Server-Schlüssel darf nicht lesen (`garage bucket info suchlage-fotos` zeigt `RW` für `suchlage-server`) oder das Foto ist kein JPEG |
 | `fotos` startet nicht | `/srv/suchlage/garage-secrets/rpc_secret` fehlt oder ist für andere lesbar: `fotos-init.sh` ausführen bzw. `chmod 600` |
 | Pilot 2 meldet „Ressource existiert nicht“ beim Zeichnen | Die Workspace-ID unter *Einstellungen → DJI* wurde geändert. Zurückändern oder in Pilot 2 neu koppeln |

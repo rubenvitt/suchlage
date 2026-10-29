@@ -6,10 +6,15 @@
 #
 # 1. RPC-Geheimnis in /srv/suchlage/garage-secrets (neben deploy/, damit rsync --delete es nicht löscht)
 # 2. Garage starten (`--single-node` legt das Layout selbst an)
-# 3. Bucket, Server-Schlüssel (Lesen und Schreiben) und ein Admin-Token, der nur Schlüssel verwalten darf
+# 3. Bucket, Eingangs-Bucket (ADR 0004), Server-Schlüssel (Lesen und Schreiben in beiden) und ein
+#    Admin-Token, der nur Schlüssel verwalten darf
+#
+# Auf einem schon eingerichteten Server legt ein zweiter Lauf nur den fehlenden Eingangs-Bucket an.
 set -eu
 cd "$(dirname "$0")"
 BUCKET=suchlage-fotos
+# Name fest aus dem Bucket abgeleitet, siehe src/storage/mod.rs (inbox_bucket).
+INBOX=$BUCKET-eingang
 SECRETS=../garage-secrets
 DC="docker compose -f compose.m1.yaml"
 
@@ -27,8 +32,19 @@ until g status >/dev/null 2>&1; do
   sleep 1
 done
 
+# Fernsteuerungen schreiben nur in den Eingang; der Server übernimmt die Fotos von dort.
+inbox() {
+  g bucket create "$INBOX" >/dev/null
+  g bucket allow --read --write "$INBOX" --key suchlage-server >/dev/null
+}
+
 # Erst prüfen, dann anlegen: Ein zweiter Lauf soll keinen zweiten Schlüssel erzeugen.
 if g bucket info "$BUCKET" >/dev/null 2>&1; then
+  if ! g bucket info "$INBOX" >/dev/null 2>&1; then
+    inbox
+    echo "Eingangs-Bucket $INBOX angelegt; sonst nichts geändert."
+    exit 0
+  fi
   echo "Fotospeicher ist bereits eingerichtet – nichts geändert." >&2
   exit 1
 fi
@@ -37,6 +53,7 @@ g bucket create "$BUCKET" >/dev/null
 echo "== Server-Schlüssel (Key ID und Secret key in Suchlage eintragen) =="
 g key create suchlage-server
 g bucket allow --read --write "$BUCKET" --key suchlage-server >/dev/null
+inbox
 echo
 echo "== Admin-Token (nur jetzt sichtbar, in Suchlage eintragen) =="
 g admin-token create \

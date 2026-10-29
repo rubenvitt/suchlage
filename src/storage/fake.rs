@@ -17,6 +17,7 @@ use crate::settings::PhotoStorageSettings;
 
 pub const TOKEN: &str = "admin-test";
 pub const BUCKET: &str = "suchlage-fotos";
+pub const INBOX: &str = "suchlage-fotos-eingang";
 
 #[derive(Default)]
 pub struct Seen {
@@ -47,6 +48,7 @@ async fn bucket_info(h: HeaderMap, Query(q): Params) -> Response {
     }
     match q.get("globalAlias").map(String::as_str) {
         Some(BUCKET) => Json(json!({"id": "b1"})).into_response(),
+        Some(INBOX) => Json(json!({"id": "b2"})).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -104,6 +106,11 @@ async fn s3(State(seen): State<Shared>, req: Request) -> Response {
         std::future::pending::<()>().await;
     }
     let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    let copy_source = req
+        .headers()
+        .get("x-amz-copy-source")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     let body: Bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
         .await
         .unwrap_or_default();
@@ -113,7 +120,14 @@ async fn s3(State(seen): State<Shared>, req: Request) -> Response {
     }
     match method {
         Method::PUT => {
-            s.objects.insert(path, body.to_vec());
+            let data = match copy_source {
+                Some(source) => match s.objects.get(&source) {
+                    Some(o) => o.clone(),
+                    None => return StatusCode::NOT_FOUND.into_response(),
+                },
+                None => body.to_vec(),
+            };
+            s.objects.insert(path, data);
             StatusCode::OK.into_response()
         }
         Method::HEAD => match s.objects.get(&path) {

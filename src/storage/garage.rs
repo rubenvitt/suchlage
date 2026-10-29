@@ -92,7 +92,7 @@ fn endpoint(cfg: &PhotoStorageSettings, path: &str, params: &[(&str, &str)]) -> 
     format!("{base}?{query}")
 }
 
-/// Legt einen Schlüssel an, der bis `expires_at_ms` nur in den Bucket schreiben darf.
+/// Legt einen Schlüssel an, der bis `expires_at_ms` nur in den Eingangs-Bucket schreiben darf.
 pub async fn create_upload_key(
     http: &reqwest::Client,
     cfg: &PhotoStorageSettings,
@@ -104,7 +104,7 @@ pub async fn create_upload_key(
         http.get(endpoint(
             cfg,
             "GetBucketInfo",
-            &[("globalAlias", cfg.bucket.as_str())],
+            &[("globalAlias", super::inbox_bucket(cfg).as_str())],
         )),
     )
     .await?;
@@ -268,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             s.grants[0],
-            json!({"bucketId": "b1", "accessKeyId": "GK1", "permissions": {"read": false, "write": true, "owner": false}})
+            json!({"bucketId": "b2", "accessKeyId": "GK1", "permissions": {"read": false, "write": true, "owner": false}})
         );
     }
 

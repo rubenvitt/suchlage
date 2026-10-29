@@ -9,6 +9,13 @@ pub(crate) mod fake;
 
 use crate::settings::PhotoStorageSettings;
 
+/// Eingangs-Bucket neben dem Fotospeicher (ADR 0004). Garage kennt nur Rechte je Bucket, und
+/// `write` umfasst dort auch Löschen und Überschreiben: Fernsteuerungen schreiben deshalb nur hierher,
+/// der Server übernimmt jedes Foto beim Upload-Callback in den eigentlichen Bucket.
+pub fn inbox_bucket(cfg: &PhotoStorageSettings) -> String {
+    format!("{}-eingang", cfg.bucket)
+}
+
 /// Bucket und Schlüssel des Servers aus den Einstellungen.
 pub fn server_access(cfg: &PhotoStorageSettings) -> (s3::Bucket, s3::Credentials) {
     (
@@ -22,4 +29,11 @@ pub fn server_access(cfg: &PhotoStorageSettings) -> (s3::Bucket, s3::Credentials
             secret_access_key: cfg.secret_access_key.clone(),
         },
     )
+}
+
+/// Eingangs-Bucket mit dem Schlüssel des Servers (lesen, schreiben, löschen).
+pub fn inbox_access(cfg: &PhotoStorageSettings) -> (s3::Bucket, s3::Credentials) {
+    let (mut bucket, creds) = server_access(cfg);
+    bucket.name = inbox_bucket(cfg);
+    (bucket, creds)
 }

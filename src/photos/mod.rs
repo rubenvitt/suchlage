@@ -14,7 +14,7 @@ use crate::contract::PhotoShot;
 use crate::error::AppError;
 use crate::settings::{PhotoStorageSettings, SettingsHandle};
 use crate::storage::garage::{UploadKey, UploadKeys};
-use crate::storage::{s3, server_access};
+use crate::storage::{inbox_access, s3, server_access};
 use crate::store::photos::{self as store, NewPhoto};
 
 /// Puffer je Empfänger. Wer mehr verpasst, sieht die Fotos beim nächsten Laden der Liste.
@@ -83,13 +83,25 @@ impl PhotoHub {
             .await
     }
 
-    /// Liegt das Objekt im Speicher?
-    pub async fn object_exists(
+    /// Übernimmt ein hochgeladenes Foto aus dem Eingang in den Fotospeicher (ADR 0004). `false`,
+    /// wenn es weder dort noch schon im Fotospeicher liegt; ein wiederholter Callback findet es dort.
+    pub async fn take_upload(
         &self,
         cfg: &PhotoStorageSettings,
         object_key: &str,
     ) -> Result<bool, AppError> {
+        // shortcut: Fotos ohne Callback bleiben im Eingang liegen; bei Bedarf Lifecycle-Regel setzen.
         let (bucket, creds) = server_access(cfg);
+        let (inbox, _) = inbox_access(cfg);
+        if s3::head(&self.http, &inbox, &creds, object_key)
+            .await?
+            .is_some()
+        {
+            s3::copy(&self.http, &bucket, &creds, &inbox.name, object_key).await?;
+            // Erst nach der Kopie: Scheitert das Löschen, holt der nächste Callback es nach.
+            s3::delete(&self.http, &inbox, &creds, object_key).await?;
+            return Ok(true);
+        }
         Ok(s3::head(&self.http, &bucket, &creds, object_key)
             .await?
             .is_some())

@@ -22,6 +22,8 @@ trap cleanup EXIT
 grep -q 'recordDeleteAfter: 0s' deploy/mediamtx.m1.yml; check $? "MediaMTX löscht Aufnahmen nicht"
 
 $DC up -d --wait || { echo "FAIL Container starten"; exit 1; }
+. scripts/lib/fotos.sh
+fotos_inbox || { echo "FAIL Eingangs-Bucket"; exit 1; }
 cargo build -q --features dev --bin suchlage --bin suchlage-sim || exit 1
 # Das Zielverzeichnis kann per Cargo-Konfiguration außerhalb des Repos liegen.
 BIN="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/debug"
@@ -67,6 +69,19 @@ check $? "Foto-Upload ohne gültigen Token: 401"
 STS=$(curl -sf -X POST -H "x-auth-token: $TOKEN_A" "$URL/storage/api/v1/workspaces/$WS/sts")
 printf '%s' "$STS" | jq -e '.data.object_key_prefix == "fotos/RCA" and .data.credentials.access_key_id != null' >/dev/null
 check $? "sts liefert einen Upload-Schlüssel für fotos/RCA"
+# ADR 0004: Der Upload-Schlüssel schreibt nur in den Eingang, im Fotospeicher darf er nichts.
+s3rc() {
+  curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 "aws:amz:garage:s3" \
+    --user "$(printf '%s' "$STS" | jq -r '.data.credentials.access_key_id + ":" + .data.credentials.access_key_secret')" \
+    "$@"
+}
+S3="http://127.0.0.1:$SL_S3_PORT"
+[ "$(s3rc -X PUT --data-binary x "$S3/suchlage-fotos-eingang/fotos/RCA/smoke.jpg")" = 200 ]
+check $? "Upload-Schlüssel schreibt in den Eingang"
+[ "$(s3rc -X PUT --data-binary x "$S3/suchlage-fotos/fotos/RCA/smoke.jpg")" = 403 ]
+check $? "Upload-Schlüssel schreibt nicht in den Fotospeicher: 403"
+[ "$(s3rc -X DELETE "$S3/suchlage-fotos/fotos/RCA/smoke.jpg")" = 403 ]
+check $? "Upload-Schlüssel löscht nicht im Fotospeicher: 403"
 
 mq() { $DC exec -T mqtt "$@"; }
 # update_topo wird beantwortet (Serverrolle darf senden, RC darf ihr status_reply abonnieren)
