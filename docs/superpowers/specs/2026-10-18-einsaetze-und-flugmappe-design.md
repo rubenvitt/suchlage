@@ -130,6 +130,7 @@ Die Flugmappe hat eine Karte: die Einsatzkarte je Abschnitt (`src/components/map
 | Einsatz anlegen | mit Name, Ort, erstem Abschnitt und den IDs der Flugmappe; wird sofort *laufend* |
 | Mit Einsatz verknüpfen | vorbereiteten Einsatz übernehmen, IDs der Flugmappe setzen, Einsatz wird *laufend*. Ein bereits laufender Einsatz ohne Flugmappe-Verknüpfung darf ebenfalls übernommen werden. |
 | Abschnitt anlegen | bei einer Verlegung in der Flugmappe; wird aktiver Abschnitt |
+| Abschnitt ändern | Bezeichnung und Ort nachreichen, meist den Ort, der erst nach der Verlegung feststeht (SUL-81) |
 | Flüge des Einsatzes | je Flug: ID, Abschnitt, Start, Ende, Endegrund, Fluggerät (Seriennummer), maximale Höhe, Strecke, Zahl der Fotos |
 | Karte des Einsatzes | GeoJSON: Kartenelemente und Flugspuren, optional je Abschnitt |
 | Kartenelemente übernehmen | einmalig beim Verknüpfen: Zeichnungen und Standort aus der Flugmappe in den aktiven Abschnitt |
