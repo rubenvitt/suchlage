@@ -207,4 +207,6 @@ fn field_flight_m350_yields_one_landed_flight() {
         .find(|g| g.sn == "RCSIM0002")
         .unwrap();
     assert_eq!(gateway.aircraft_sn.as_deref(), Some("ACSIM0001"));
+    // Die RC ohne Fluggerät meldet `4g_quality` 65535 (kein LTE-Dongle); das ist kein Fehler.
+    assert_eq!(snapshot.system.invalid_messages, 0);
 }

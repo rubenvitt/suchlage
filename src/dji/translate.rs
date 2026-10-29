@@ -354,14 +354,25 @@ fn gateway_values(
         .get("wireless_link")
         .and_then(Value::as_object)
         .map(|w| LinkQuality {
-            sdr_quality: ok(wire::int(w, "sdr_quality"), invalid),
-            lte_quality: ok(wire::int(w, "4g_quality"), invalid),
+            sdr_quality: link_quality(w, "sdr_quality", invalid),
+            lte_quality: link_quality(w, "4g_quality", invalid),
         });
     (
         position,
         ok(wire::int(m, "capacity_percent"), invalid),
         link.unwrap_or_default(),
     )
+}
+
+/// Eine RC Plus ohne LTE-Dongle meldet die Link-Güte als 65535 (u16-Max): kein Wert, nicht ungültig.
+fn link_quality(w: &Map<String, Value>, key: &str, invalid: &mut bool) -> Option<u8> {
+    match ok(wire::int::<u16>(w, key), invalid)? {
+        u16::MAX => None,
+        v => ok(
+            u8::try_from(v).map(Some).map_err(|_| wire::InvalidNumber),
+            invalid,
+        ),
+    }
 }
 
 fn diag(at_ms: i64, unknown_fields: Vec<String>, invalid_messages: u32) -> Observed {
@@ -872,6 +883,40 @@ mod tests {
                 .iter()
                 .any(|o| matches!(o.observation, Observation::Diagnostics { .. })),
             "der alte Fehler zählt nicht noch einmal"
+        );
+    }
+
+    #[test]
+    fn link_quality_without_lte_dongle_is_no_value() {
+        let link = |q: Value| {
+            let mut t = Translator::new();
+            let tr = run(
+                &mut t,
+                0,
+                "thing/product/RC1/osd",
+                json!({"gateway": "RC1", "data": {"wireless_link": {"sdr_quality": 0, "4g_quality": q}}}),
+            );
+            let invalid = tr.observations.iter().any(|o| {
+                matches!(
+                    o.observation,
+                    Observation::Diagnostics {
+                        invalid_messages: 1,
+                        ..
+                    }
+                )
+            });
+            let lte = tr.observations.iter().find_map(|o| match &o.observation {
+                Observation::GatewayTelemetry { link, .. } => Some(link.lte_quality),
+                _ => None,
+            });
+            (lte.flatten(), invalid)
+        };
+        assert_eq!(link(json!(65535)), (None, false));
+        assert_eq!(link(json!(3)), (Some(3), false));
+        assert_eq!(
+            link(json!(300)),
+            (None, true),
+            "jeder andere Überlauf bleibt ungültig"
         );
     }
 
