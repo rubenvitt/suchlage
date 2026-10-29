@@ -2,7 +2,7 @@
 
 - **Stand:** 18.10.2026, aus dem Brainstorming zu SUL-1
 - **Status:** Entwurf zur Durchsicht
-- **Nachtrag:** `2026-10-29-mehrere-flugmappen-design.md` (SUL-84) ersetzt „Übernehmen“ durch mehrere gleichzeitig verknüpfte Flugmappen und ergänzt das Flugbuch der Flugmappe in Suchlage.
+- **Nachtrag:** `2026-10-29-mehrere-flugmappen-design.md` (SUL-84) ersetzt „Übernehmen“ durch mehrere gleichzeitig verknüpfte Flugmappen und ergänzt das Flugbuch der Flugmappe in Suchlage. Die Angaben zu `/api/flugmappe/v1` in §6 und §10 sind damit durch `/api/flugmappe/v2` ersetzt.
 - **Repos:** `rubenvitt/suchlage` (dieses Dokument) und `rubenvitt/uav-checklists` (Flugmappe)
 
 ## 1. Zweck

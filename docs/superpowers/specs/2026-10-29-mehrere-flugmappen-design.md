@@ -44,14 +44,14 @@ Entscheidungen dieses Entwurfs (bei der Durchsicht zu bestätigen):
 ### Modell
 
 - **Verknüpfung** (neue Tabelle `mission_flugmappe_links`): Einsatz, Einsatz-ID der Flugmappe (UUID, systemweit eindeutig wie bisher), verknüpft von, verknüpft um, Fluggerät der Flugmappe (Bezeichnung, z. B. „Matrice 200“), fertig um (optional), gelöst um (optional). Die Migration übernimmt die bestehende Verknüpfung aus `missions.flugmappe_*` und entfernt die Spalten.
-- **Abschnitt:** neu „angelegt von Verknüpfung“ (optional; in Suchlage angelegte haben keine).
+- **Abschnitt:** neu „angelegt von Verknüpfung“ (optional; in Suchlage angelegte haben keine). Die Abschnitts-ID der Flugmappe ist nur innerhalb ihrer Verknüpfung eindeutig (`(Verknüpfung, Abschnitts-ID)` statt heute `(Einsatz, Abschnitts-ID)`), damit gleiche lokale IDs zweier Flugmappen nicht kollidieren.
 - **Flugbucheintrag der Flugmappe** (neue Tabelle): Verknüpfung, Eintrags-ID der Flugmappe (UUID), optional der Suchlage-Flug (bei bestätigten), Abschnitt, Start, Landung (optional, solange in der Luft), Fluggerät, Fernpilot, Landestatus. Ein Suchlage-Flug hat höchstens einen Eintrag (eindeutig).
 - Ein Handeintrag ist **kein** Flug im Sinne von `flights` (keine Spur, kein Video, keine Fotos). Er erscheint in der Flugliste und im Einsatz, nicht auf der Karte.
 
 ### Regeln
 
 - **Bindung:** Jede verknüpfte, nicht gelöste Flugmappe darf am Einsatz lesen und schreiben. Eine gelöste bekommt 409 („Verknüpfung in Suchlage gelöst“).
-- **Verknüpfen:** wie bisher (vorbereitet → laufend, kein anderer Einsatz läuft), aber ohne `take_over`. Ist die Flugmappe schon mit einem anderen Einsatz verknüpft, 409 wie bisher.
+- **Verknüpfen:** wie bisher (vorbereitet → laufend, kein anderer Einsatz läuft), aber ohne `take_over`. Ist die Flugmappe schon mit einem anderen Einsatz verknüpft und diese Verknüpfung nicht gelöst, 409 wie bisher. Eine gelöste Verknüpfung blockiert kein neues Verknüpfen.
 - **Abschnitt anlegen:** wird der aktive Abschnitt des Einsatzes und der Flugmappe. Die Flugmappe adressiert wie bisher über ihre eigene Abschnitts-ID; IDs anderer Flugmappen sieht sie nicht.
 - **Flugbuch melden:** Die Flugmappe schreibt jeden Eintrag mit seiner ID (`PUT`, wiederholbar) und löscht ihn mit `DELETE`, wenn er in der Flugmappe gelöscht wird. Ein Eintrag mit Suchlage-Flug, den schon eine andere Flugmappe gemeldet hat, ist ein Konflikt (409). Fehlt Netz, sammelt die Flugmappe die Meldungen und holt sie nach.
 - **Abschluss aus der Flugmappe:** setzt „fertig um“ an der Verknüpfung. Sind danach alle nicht gelösten Verknüpfungen fertig, schließt der Einsatz (Regeln wie bisher: kein laufender Flug, sonst merkt die Flugmappe es sich). Ein Eintrag nach „fertig“ wird noch angenommen, solange der Einsatz offen ist.
@@ -63,7 +63,7 @@ Entscheidungen dieses Entwurfs (bei der Durchsicht zu bestätigen):
 - **Flugliste des Einsatzes:** alle Flüge nach Startzeit. Je Zeile: Start, Landung, Dauer, Fluggerät, Abschnitt, Quelle („Telemetrie“, „Telemetrie, bestätigt in Flugmappe <Fluggerät>“ oder „Flugmappe“). Telemetrie-Flüge führen wie bisher zum Flugdetail mit Spur und Video, Handeinträge haben keine Detailseite.
 - Die Liste „ohne Einsatz“ und das Flugdetail bleiben, wie sie sind.
 
-### Schnittstelle (Änderungen an `/api/flugmappe/v1`)
+### Schnittstelle (`/api/flugmappe/v2`, Änderungen gegenüber v1)
 
 | Aufruf | Änderung |
 |---|---|
@@ -75,6 +75,8 @@ Entscheidungen dieses Entwurfs (bei der Durchsicht zu bestätigen):
 | Einsatz abschließen | meldet den Teil der Flugmappe als fertig; Antwort sagt, ob der Einsatz geschlossen ist |
 
 Die Felder ändern sich nicht abwärtskompatibel. Weil die Flugmappe die Typen als Kopie übernimmt und nur eine Flugmappe-Version im Feld ist, steigt die Version auf **v2** (`/api/flugmappe/v2`, `api_version: 2`). Suchlage bietet v1 nicht weiter an; die Flugmappe zeigt bei `api_version` 1 bzw. 404 auf v2 die Suchlage-Teile nicht (wie ohne Anmeldung). Reihenfolge beim Ausrollen: Suchlage und Flugmappe am selben Tag, Suchlage zuerst.
+
+CORS für den Flugmappe-Bereich erlaubt zusätzlich `DELETE` (für das Löschen von Flugbucheinträgen); der Preflight-Test prüft das mit.
 
 ## 5. Teil B: Flugmappe
 
