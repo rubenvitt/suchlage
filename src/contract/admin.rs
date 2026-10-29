@@ -239,6 +239,25 @@ pub struct KioskTokenView {
     pub created_at_ms: i64,
 }
 
+/// Ein Konto aus Pocket ID, wie es die Verwaltung sieht. Die Rolle kommt bei jeder Anmeldung aus
+/// den Gruppen; die Verwaltung ändert sie nicht, sie kann ein Konto nur sperren.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AccountView {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub display_name: String,
+    /// Rolle seit der letzten Anmeldung (`admin` oder `operator`).
+    pub role: Role,
+    #[ts(type = "number")]
+    pub created_at_ms: i64,
+    /// Gesetzt, solange das Konto gesperrt ist.
+    #[ts(type = "number | null")]
+    pub blocked_at_ms: Option<i64>,
+    /// Das eigene Konto; es lässt sich nicht sperren.
+    pub own: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct KioskTokenCreate {

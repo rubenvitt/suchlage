@@ -7,11 +7,12 @@ use axum::Router;
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::get;
+use axum_extra::extract::CookieJar;
 use futures::{Stream, StreamExt, stream};
 use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::app::AppState;
-use crate::auth::session::Admin;
+use crate::auth::session::{self, Admin};
 use crate::contract::{DeviceLogEntry, DeviceLogEvent};
 
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
@@ -25,12 +26,23 @@ pub fn routes() -> Router<AppState> {
 async fn device_log(
     _: Admin,
     State(state): State<AppState>,
+    jar: CookieJar,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let (entries, rx) = state.devlog.subscribe();
     let first = stream::once(async move { sse(&DeviceLogEvent::History { entries }) });
     let devlog = state.devlog.clone();
     let rest = stream::unfold(rx, next_event).take_until(async move { devlog.stopped().await });
-    Sse::new(first.chain(rest)).keep_alive(KeepAlive::new().interval(KEEP_ALIVE))
+    // Abmelden, Sperren oder Herabstufen beenden auch den offenen Strom. `Admin` hat das Cookie
+    // eben geprüft; fehlt es trotzdem, endet der Strom beim ersten Prüfen.
+    let token = session::token(&jar).unwrap_or_default();
+    let revoked = session::ended(
+        state.pool.clone(),
+        token,
+        session::STREAM_CHECK,
+        session::is_admin,
+    );
+    Sse::new(first.chain(rest).take_until(revoked))
+        .keep_alive(KeepAlive::new().interval(KEEP_ALIVE))
 }
 
 async fn next_event(

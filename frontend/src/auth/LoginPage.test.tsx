@@ -96,6 +96,12 @@ test('Konto ohne Suchlage-Gruppe erfährt warum', async () => {
   expect(screen.getByText(/in keiner Suchlage-Gruppe/)).toBeInTheDocument();
 });
 
+test('gesperrtes Konto erfährt warum', async () => {
+  renderWithApp(<LoginPage />, { route: '/anmelden?fehler=gesperrt' });
+  expect(await screen.findByText('Konto gesperrt.')).toBeInTheDocument();
+  expect(screen.getByText(/Nur sie kann die Sperre aufheben/)).toBeInTheDocument();
+});
+
 test('während des Ladens und bei Serverfehler steht eine Aussage da, kein leeres Feld', async () => {
   server.use(http.get('/api/auth/options', () => HttpResponse.json({ error: 'x' }, { status: 500 })));
   renderWithApp(<LoginPage />, { route: '/anmelden' });

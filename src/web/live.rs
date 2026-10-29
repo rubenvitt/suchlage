@@ -7,12 +7,13 @@ use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::get;
 use axum::{Json, Router};
+use axum_extra::extract::CookieJar;
 use futures::{Stream, StreamExt, stream};
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::sync::oneshot;
 
 use crate::app::AppState;
-use crate::auth::session::Viewer;
+use crate::auth::session::{self, Viewer};
 use crate::contract::{LiveEvent, PhotoShot, SituationSnapshot};
 use crate::error::AppError;
 use crate::map::{MapChange, MapHub};
@@ -39,6 +40,7 @@ async fn situation(
 async fn live(
     _: Viewer,
     State(state): State<AppState>,
+    jar: CookieJar,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AppError> {
     let (snapshot, rx) = state.situation.subscribe().await?;
     // Vor dem Lesen abonnieren: Keine Änderung fällt zwischen Liste und Strom heraus. Doppelt
@@ -51,8 +53,6 @@ async fn live(
         sse(&LiveEvent::Snapshot { snapshot }),
         sse(&LiveEvent::MapElements { elements }),
     ]);
-    // shortcut: Abmelden oder ein widerrufener Großbild-Token beenden laufende Ströme erst beim
-    // nächsten Neuverbinden; reicht für M1, sonst die Sitzung im Strom regelmäßig neu prüfen.
     // Der Lage-Strom endet mit dem Aktor beim Herunterfahren; der Kartenstrom endet mit ihm.
     let (ended, on_end) = oneshot::channel::<()>();
     let situation = stream::unfold((rx, state.situation.clone()), next_event).chain(
@@ -65,8 +65,15 @@ async fn live(
     let photos = stream::unfold(photo_rx, next_photo_event);
     let missions = stream::unfold(mission_rx, next_mission_event);
     let hubs = stream::select(stream::select(map, photos), missions).take_until(on_end);
-    Ok(Sse::new(first.chain(stream::select(situation, hubs)))
-        .keep_alive(KeepAlive::new().interval(KEEP_ALIVE)))
+    // Abmelden, Sperren oder ein widerrufener Großbild-Token beenden auch den offenen Strom.
+    let token = session::token(&jar).ok_or(AppError::Unauthorized)?;
+    let revoked = session::ended(state.pool.clone(), token, session::STREAM_CHECK, |_| true);
+    Ok(Sse::new(
+        first
+            .chain(stream::select(situation, hubs))
+            .take_until(revoked),
+    )
+    .keep_alive(KeepAlive::new().interval(KEEP_ALIVE)))
 }
 
 type Feed = (broadcast::Receiver<LiveEvent>, SituationHandle);

@@ -245,7 +245,8 @@ Und aus dem Tailnet: `nc -vz <TS-IP> 1883 && nc -vz <TS-IP> 1935`.
    - **Gruppen:** zwei Gruppen anlegen, `suchlage-admin` (Verwaltung) und `suchlage` (Nutzung).
      Die Oberfläche ist öffentlich, deshalb sind diese Gruppen die einzige Schranke. Wer in keiner
      der beiden ist, kommt nicht hinein. Die Rolle wird bei jeder Anmeldung aus den Gruppen gesetzt.
-     Wer aus einer Gruppe entfernt wird, behält eine bestehende Sitzung bis zu 7 Tage.
+     Wer aus einer Gruppe entfernt wird, behält eine bestehende Sitzung bis zu 7 Tage. Sofort
+     wirkt nur „Sperren“ unter Einstellungen → Konten.
    - **Allowed User Groups:** beide Gruppen oder leer.
 2. **Einrichtungslink** aus dem Log holen. Er ist 24 h gültig, ein Neustart des Servers erzeugt einen
    neuen. Wer den Link hat, richtet die Instanz ein. Ihn deshalb sofort benutzen:

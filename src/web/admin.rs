@@ -1,4 +1,4 @@
-//! Verwaltung für Admins: Einstellungen, Großbild-Tokens und Fernsteuerungen.
+//! Verwaltung für Admins: Einstellungen, Großbild-Tokens, Fernsteuerungen und Konten.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -8,9 +8,10 @@ use axum::{Json, Router};
 use crate::app::AppState;
 use crate::auth::session::Admin;
 use crate::contract::{
-    BrokerSettingsInput, DjiSettingsInput, FlugmappeSettings, GeneralSettings, KioskTokenCreate,
-    KioskTokenCreated, KioskTokenView, MediaSettings, OidcSettingsInput, PhotoStorageSettingsInput,
-    RemoteControllerCreate, RemoteControllerCreated, RemoteControllerView, SettingsView,
+    AccountView, BrokerSettingsInput, DjiSettingsInput, FlugmappeSettings, GeneralSettings,
+    KioskTokenCreate, KioskTokenCreated, KioskTokenView, MediaSettings, OidcSettingsInput,
+    PhotoStorageSettingsInput, RemoteControllerCreate, RemoteControllerCreated,
+    RemoteControllerView, SettingsView,
 };
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -29,6 +30,11 @@ pub fn routes() -> Router<AppState> {
         .route("/kiosk-tokens/{id}", delete(delete_kiosk))
         .route("/remote-controllers", get(list_rcs).post(create_rc))
         .route("/remote-controllers/{id}", delete(delete_rc))
+        .route("/accounts", get(list_accounts))
+        .route(
+            "/accounts/{id}/block",
+            put(block_account).delete(unblock_account),
+        )
 }
 
 async fn settings_view(_: Admin, State(state): State<AppState>) -> Json<SettingsView> {
@@ -172,6 +178,47 @@ async fn delete_rc(
         })
         .await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_accounts(
+    Admin(me): Admin,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AccountView>>, AppError> {
+    Ok(Json(store::users::list(&state.pool, me.id).await?))
+}
+
+/// Sperrt ein Konto: Seine Sitzungen enden sofort, offene Ströme spätestens nach
+/// `auth::session::STREAM_CHECK`, und weder Anmeldung noch Flugmappe lassen es wieder hinein.
+async fn block_account(
+    Admin(me): Admin,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    // Sonst sperrt sich der letzte Admin aus, und nur noch SQL hilft.
+    if id == me.id {
+        return Err(AppError::Unprocessable(
+            "Das eigene Konto lässt sich nicht sperren".into(),
+        ));
+    }
+    if store::users::block(&state.pool, id, now_ms()).await? {
+        tracing::info!(account = id, by = %me.display_name, "Konto gesperrt");
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound)
+    }
+}
+
+async fn unblock_account(
+    Admin(me): Admin,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    if store::users::unblock(&state.pool, id).await? {
+        tracing::info!(account = id, by = %me.display_name, "Sperre aufgehoben");
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound)
+    }
 }
 
 #[cfg(test)]
@@ -503,6 +550,97 @@ mod tests {
         assert_eq!(
             send(&app.router, with_cookie(req, &admin)).await.0,
             StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_blocks_an_account_and_its_session_ends_at_once() {
+        let app = test_app().await;
+        let admin = app.cookie(Role::Admin).await;
+        let op = app.cookie(Role::Operator).await;
+        let block = |id: i64| {
+            Request::put(format!("/api/accounts/{id}/block"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        let unblock = |id: i64| {
+            Request::delete(format!("/api/accounts/{id}/block"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/accounts"), &op))
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        let (status, list) = send(&app.router, with_cookie(get("/api/accounts"), &admin)).await;
+        assert_eq!(status, StatusCode::OK);
+        let id_of = |list: &serde_json::Value, own: bool| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["own"] == own)
+                .unwrap()["id"]
+                .as_i64()
+                .unwrap()
+        };
+        let (admin_id, op_id) = (id_of(&list, true), id_of(&list, false));
+        assert_eq!(
+            send(&app.router, with_cookie(block(admin_id), &op)).await.0,
+            StatusCode::FORBIDDEN,
+            "nur Admins sperren"
+        );
+
+        let (status, body) = send(&app.router, with_cookie(block(admin_id), &admin)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"], "Das eigene Konto lässt sich nicht sperren");
+        assert_eq!(
+            send(&app.router, with_cookie(block(9_999), &admin)).await.0,
+            StatusCode::NOT_FOUND
+        );
+
+        assert_eq!(
+            send(&app.router, with_cookie(block(op_id), &admin)).await.0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &op)).await.0,
+            StatusCode::UNAUTHORIZED,
+            "Sitzung sofort weg"
+        );
+        let (_, list) = send(&app.router, with_cookie(get("/api/accounts"), &admin)).await;
+        let blocked = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == op_id)
+            .unwrap();
+        assert!(blocked["blocked_at_ms"].is_i64(), "{blocked}");
+
+        assert_eq!(
+            send(&app.router, with_cookie(unblock(op_id), &admin))
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            send(&app.router, with_cookie(unblock(9_999), &admin))
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        let (_, list) = send(&app.router, with_cookie(get("/api/accounts"), &admin)).await;
+        assert!(
+            list.as_array()
+                .unwrap()
+                .iter()
+                .all(|a| a["blocked_at_ms"].is_null())
+        );
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &op)).await.0,
+            StatusCode::UNAUTHORIZED,
+            "Entsperren bringt keine alte Sitzung zurück"
         );
     }
 }

@@ -488,6 +488,25 @@ mod tests {
         );
     }
 
+    /// Bearer-Aufrufe haben keine Sitzung: Die Sperre wirkt beim nächsten Aufruf.
+    #[tokio::test]
+    async fn a_blocked_account_is_403_at_the_next_call() {
+        let s = setup().await;
+        assert_eq!(s.call("GET", "/me", None, None).await.0, StatusCode::OK);
+        let pool = &s.app.state.pool;
+        let user = crate::store::users::find_by_oidc(pool, &s.idp.issuer, test_idp::SUBJECT)
+            .await
+            .unwrap()
+            .unwrap();
+        crate::store::users::block(pool, user.id, 1).await.unwrap();
+        assert_eq!(
+            s.call("GET", "/me", None, None).await.0,
+            StatusCode::FORBIDDEN
+        );
+        crate::store::users::unblock(pool, user.id).await.unwrap();
+        assert_eq!(s.call("GET", "/me", None, None).await.0, StatusCode::OK);
+    }
+
     #[tokio::test]
     async fn switched_off_is_503_for_every_call() {
         let s = setup().await;
