@@ -65,8 +65,11 @@ async fn thumb(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
-    // Ein Vorschaubild-Job kann nach dem Löschen noch eine Datei schreiben; ohne Foto kein Bild.
-    state.photos.original_of(id).await?;
+    // Ein Job kann nach dem Löschen noch eine Datei schreiben, auch für eine neu vergebene ID; die
+    // gilt erst, wenn der Job dieser Zeile sie als fertig markiert hat.
+    if !state.photos.thumb_ready(id).await? {
+        return Err(AppError::NotFound);
+    }
     let bytes = match tokio::fs::read(state.photos.thumb_path(id)).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
@@ -429,6 +432,27 @@ mod tests {
                 "{uri}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_stale_thumbnail_file_is_not_served_before_its_row_is_ready() {
+        let (app, _) = with_storage().await;
+        // Wie nach einem späten Job für eine gelöschte, neu vergebene ID: Datei da, Zeile nicht fertig.
+        let id = crate::store::photos::upsert(&app.state.pool, &photo("DJI_9_T.JPG", None, 1))
+            .await
+            .unwrap();
+        let path = app.state.photos.thumb_path(id);
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&path, b"alt").await.unwrap();
+        let viewer = app.cookie(Role::Kiosk).await;
+        let (status, _) = send(
+            &app.router,
+            with_cookie(get(&format!("/api/photos/{id}/thumb")), &viewer),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[test]

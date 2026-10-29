@@ -225,9 +225,15 @@ impl Translator {
             .collect();
         let merged = self.merged.entry(sn.to_string()).or_default();
         deep_merge(merged, &incoming);
-        // Immer neue Felder ließen jede weitere Nachricht teurer werden; dann zählt nur die letzte.
-        if serde_json::to_vec(&*merged).map_or(0, |v| v.len()) > MAX_MERGED_BYTES {
-            *merged = incoming.clone();
+        // Immer neue Felder ließen jede weitere Nachricht teurer werden; dann zählt nur die letzte,
+        // und ist schon die allein zu groß, wird nichts behalten.
+        let size = |m: &Map<String, Value>| serde_json::to_vec(m).map_or(0, |v| v.len());
+        if size(merged) > MAX_MERGED_BYTES {
+            *merged = if size(&incoming) > MAX_MERGED_BYTES {
+                Map::new()
+            } else {
+                incoming.clone()
+            };
         }
         let merged = merged.clone();
         // Gültigkeit an der eingehenden Nachricht prüfen, damit ein falscher Wert genau einmal zählt;
@@ -535,6 +541,17 @@ mod tests {
         }
         let size = serde_json::to_vec(&t.merged["RC1"]).unwrap().len();
         assert!(size <= MAX_MERGED_BYTES, "{size}");
+        run(
+            &mut t,
+            9,
+            "thing/product/RC1/state",
+            json!({"tid": "t", "bid": "b", "timestamp": 9, "gateway": "RC1",
+                   "data": {"riesig": "x".repeat(MAX_MERGED_BYTES + 1)}}),
+        );
+        assert!(
+            t.merged["RC1"].is_empty(),
+            "eine übergroße Nachricht bleibt nicht"
+        );
     }
 
     #[test]

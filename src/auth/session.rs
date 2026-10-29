@@ -32,6 +32,8 @@ pub fn session_cookie(token: String, max_age_ms: i64, secure: bool) -> Cookie<'s
 
 /// Wie oft ein offener Strom (SSE) seine Sitzung neu prüft.
 pub const STREAM_CHECK: Duration = Duration::from_secs(5);
+/// So viele Prüfungen hintereinander dürfen scheitern, bevor der Strom endet.
+const MAX_FAILED_CHECKS: u32 = 3;
 
 /// Geheimnis der Sitzung aus dem Cookie, z. B. für `ended`.
 pub fn token(jar: &CookieJar) -> Option<String> {
@@ -40,7 +42,8 @@ pub fn token(jar: &CookieJar) -> Option<String> {
 
 /// Endet, sobald die Sitzung hinter `token` nicht mehr gilt oder `keep` sie nicht mehr zulässt:
 /// abgemeldet, abgelaufen, Konto gesperrt, Großbild-Token widerrufen, Admin herabgestuft. Damit
-/// enden auch offene Ströme, spätestens nach `every`. Ein Lesefehler der Datenbank beendet nichts.
+/// enden auch offene Ströme, spätestens nach `every`. Ein einzelner Lesefehler der Datenbank beendet
+/// nichts, `MAX_FAILED_CHECKS` hintereinander schon.
 pub async fn ended(
     pool: SqlitePool,
     token: String,
@@ -51,12 +54,21 @@ pub async fn ended(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Der erste Tick kommt sofort; gerade eben hat der Extractor die Sitzung geprüft.
     tick.tick().await;
+    let mut failed = 0;
     loop {
         tick.tick().await;
         match sessions::lookup(&pool, &token, now_ms()).await {
-            Ok(Some(p)) if keep(&p) => {}
+            Ok(Some(p)) if keep(&p) => failed = 0,
             Ok(_) => return,
-            Err(e) => tracing::warn!(error = ?e, "Sitzung des Stroms nicht prüfbar"),
+            // Eine kurze Störung der Datenbank beendet keinen Strom, eine anhaltende schon: Ungeprüft
+            // soll er nicht weitersenden. Der Browser verbindet danach neu.
+            Err(e) => {
+                tracing::warn!(error = ?e, "Sitzung des Stroms nicht prüfbar");
+                failed += 1;
+                if failed >= MAX_FAILED_CHECKS {
+                    return;
+                }
+            }
         }
     }
 }

@@ -205,7 +205,7 @@ impl Situation {
                     if let Some(count) = self.unknown.get_mut(&key) {
                         *count += 1;
                     } else if self.unknown.len() < MAX_UNKNOWN_FIELDS
-                        && key.len() <= MAX_UNKNOWN_FIELD_CHARS
+                        && key.chars().count() <= MAX_UNKNOWN_FIELD_CHARS
                     {
                         self.unknown.insert(key, 1);
                     }
@@ -779,6 +779,8 @@ mod tests {
             .map(|i| format!("aircraft.f{i}"))
             .collect();
         fields.push("x".repeat(MAX_UNKNOWN_FIELD_CHARS + 1));
+        // Gezählt werden Zeichen, nicht Bytes: Dieser Name passt, ersetzt aber keinen anderen.
+        fields.insert(0, "ä".repeat(MAX_UNKNOWN_FIELD_CHARS));
         s.apply(Observed {
             at_ms: 0,
             observation: Observation::Diagnostics {
@@ -787,6 +789,7 @@ mod tests {
             },
         });
         assert_eq!(s.unknown.len(), MAX_UNKNOWN_FIELDS);
+        assert!(s.unknown.contains_key(&"ä".repeat(MAX_UNKNOWN_FIELD_CHARS)));
     }
 
     #[test]

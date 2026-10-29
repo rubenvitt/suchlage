@@ -9,7 +9,8 @@
 # 3. Bucket, Eingangs-Bucket (ADR 0004), Server-Schlüssel (Lesen und Schreiben in beiden) und ein
 #    Admin-Token, der nur Schlüssel verwalten darf
 #
-# Auf einem schon eingerichteten Server legt ein zweiter Lauf nur den fehlenden Eingangs-Bucket an.
+# Auf einem schon eingerichteten Server legt ein weiterer Lauf nur den Eingangs-Bucket an, falls er
+# fehlt, und setzt das Recht des Servers darauf; sonst ändert er nichts.
 set -eu
 cd "$(dirname "$0")"
 BUCKET=suchlage-fotos
@@ -32,21 +33,18 @@ until g status >/dev/null 2>&1; do
   sleep 1
 done
 
-# Fernsteuerungen schreiben nur in den Eingang; der Server übernimmt die Fotos von dort.
+# Fernsteuerungen schreiben nur in den Eingang; der Server übernimmt die Fotos von dort. Das Recht
+# wird jedes Mal gesetzt (`bucket allow` ist wiederholbar), damit ein abgebrochener Lauf heilt.
 inbox() {
-  g bucket create "$INBOX" >/dev/null
+  g bucket info "$INBOX" >/dev/null 2>&1 || g bucket create "$INBOX" >/dev/null
   g bucket allow --read --write "$INBOX" --key suchlage-server >/dev/null
 }
 
 # Erst prüfen, dann anlegen: Ein zweiter Lauf soll keinen zweiten Schlüssel erzeugen.
 if g bucket info "$BUCKET" >/dev/null 2>&1; then
-  if ! g bucket info "$INBOX" >/dev/null 2>&1; then
-    inbox
-    echo "Eingangs-Bucket $INBOX angelegt; sonst nichts geändert."
-    exit 0
-  fi
-  echo "Fotospeicher ist bereits eingerichtet – nichts geändert." >&2
-  exit 1
+  inbox
+  echo "Fotospeicher war schon eingerichtet; Eingangs-Bucket $INBOX und Recht des Servers geprüft."
+  exit 0
 fi
 
 g bucket create "$BUCKET" >/dev/null

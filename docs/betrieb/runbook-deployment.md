@@ -161,8 +161,8 @@ Das Skript legt das RPC-Geheimnis von Garage unter `/srv/suchlage/garage-secrets
 `suchlage-fotos`, den Eingangs-Bucket `suchlage-fotos-eingang` (ADR 0004), den Server-Schlüssel und
 einen Admin-Token an, der nur Schlüssel verwalten darf.
 Schlüssel-ID, geheimen Schlüssel und Admin-Token gibt es **genau einmal** aus. Notieren und in
-Schritt 8 eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts. Fehlt auf einem
-älteren Server nur der Eingangs-Bucket, legt ein erneuter Aufruf genau diesen an. Die alten
+Schritt 8 eintragen, sonst nirgends speichern. Ein weiterer Aufruf legt nur den Eingangs-Bucket an,
+falls er fehlt, und setzt das Recht des Servers darauf; Schlüssel und Token bleiben. Die alten
 Upload-Schlüssel laufen nach höchstens einer Stunde ab.
 
 ```sh

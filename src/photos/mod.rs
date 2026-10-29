@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
-use tokio::sync::{Semaphore, broadcast};
+use tokio::sync::{Mutex, Semaphore, broadcast};
 
 use crate::contract::PhotoShot;
 use crate::error::AppError;
@@ -36,6 +36,8 @@ pub struct PhotoHub {
     thumbs_dir: PathBuf,
     /// Ein Vorschaubild nach dem anderen: Ein 20-MP-Foto belegt dekodiert rund 60 MB.
     thumb_jobs: Arc<Semaphore>,
+    /// Eine Übernahme aus dem Eingang nach der anderen, damit Prüfen und Kopieren nicht verzahnen.
+    transfers: Arc<Mutex<()>>,
 }
 
 impl PhotoHub {
@@ -54,6 +56,7 @@ impl PhotoHub {
             keys: UploadKeys::default(),
             thumbs_dir,
             thumb_jobs: Arc::new(Semaphore::new(1)),
+            transfers: Arc::default(),
         }
     }
 
@@ -93,6 +96,8 @@ impl PhotoHub {
         // shortcut: Fotos ohne Callback bleiben im Eingang liegen; bei Bedarf Lifecycle-Regel setzen.
         let (bucket, creds) = server_access(cfg);
         let (inbox, _) = inbox_access(cfg);
+        // Garage kopiert ohne Prüfung des Ziels; zwei gleichzeitige Callbacks dürfen nicht beide kopieren.
+        let _turn = self.transfers.lock().await;
         // Ein übernommenes Original bleibt unverändert: In den Eingang schreibt jede Fernsteuerung,
         // und DJI vergibt jeden Dateinamen nur einmal. Ein Duplikat im Eingang fällt weg.
         if s3::head(&self.http, &bucket, &creds, object_key)
@@ -208,8 +213,16 @@ impl PhotoHub {
         tokio::fs::rename(&partial, &path)
             .await
             .map_err(|e| AppError::Internal(format!("Vorschaubild nicht abgelegt: {e}")))?;
-        store::set_thumb_ready(&self.pool, id).await?;
+        store::set_thumb_ready(&self.pool, id, object_key).await?;
         Ok(())
+    }
+
+    /// Hat das Foto ein fertiges Vorschaubild? `NotFound` ohne Foto.
+    pub async fn thumb_ready(&self, id: i64) -> Result<bool, AppError> {
+        Ok(store::get(&self.pool, id)
+            .await?
+            .ok_or(AppError::NotFound)?
+            .thumb_ready)
     }
 
     /// Objektschlüssel und Name eines Fotos für den Download.
