@@ -1,6 +1,7 @@
 //! Simulator: verhält sich wie Pilot 2 auf einer gekoppelten Fernsteuerung. Holt den Zugang über
 //! `/pilot/api/connect`, setzt einen Kartenpunkt, spielt einen Flug ab, beantwortet
 //! Livebild-Befehle mit einem Testbild und lädt nach jedem Flug ein Foto hoch (M3).
+//! `suchlage-sim scrub <roh.jsonl> <fixture.jsonl>` bereinigt einen echten Mitschnitt (SUL-51).
 
 use std::process::{ExitCode, Stdio};
 use std::time::Duration;
@@ -15,6 +16,7 @@ use suchlage::sim::fake_pilot::{
     live_status, osd_position, parse_args, photo_name, pilot_pin, replay_script, retry_delays,
     upload_callback,
 };
+use suchlage::sim::scrub::scrub;
 use suchlage::sim::synth::{Scenario, generate};
 use tokio::process::{Child, Command};
 use tokio::time::Instant;
@@ -29,6 +31,9 @@ async fn main() -> ExitCode {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+    if std::env::args().nth(1).as_deref() == Some("scrub") {
+        return scrub_command(std::env::args().skip(2).collect());
+    }
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(e) => {
@@ -43,6 +48,53 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+const SCRUB_USAGE: &str = "Aufruf: suchlage-sim scrub <rohmitschnitt.jsonl> <fixture.jsonl>";
+
+/// Liest den Rohmitschnitt, schreibt die bereinigte Fassung und nennt am Terminal, was ersetzt wurde.
+fn scrub_command(paths: Vec<String>) -> ExitCode {
+    let [input, output] = paths.as_slice() else {
+        eprintln!("{SCRUB_USAGE}");
+        return ExitCode::FAILURE;
+    };
+    match scrub_file(input, output) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Bereinigung abgebrochen: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn scrub_file(input: &str, output: &str) -> Result<(), String> {
+    use std::io::Write;
+    let file = std::fs::File::open(input).map_err(|e| format!("{input}: {e}"))?;
+    let lines = read_lines(std::io::BufReader::new(file))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{input}: {e}"))?;
+    let scrubbed = scrub(lines).map_err(|e| e.to_string())?;
+    let mut out = std::io::BufWriter::new(
+        std::fs::File::create(output).map_err(|e| format!("{output}: {e}"))?,
+    );
+    for line in &scrubbed.lines {
+        let json = serde_json::to_string(line).map_err(|e| e.to_string())?;
+        writeln!(out, "{json}").map_err(|e| format!("{output}: {e}"))?;
+    }
+    out.flush().map_err(|e| format!("{output}: {e}"))?;
+    eprintln!(
+        "{} Zeilen geschrieben, {} verworfen (keine Gerätenachricht oder unlesbar).",
+        scrubbed.lines.len(),
+        scrubbed.dropped
+    );
+    eprintln!(
+        "Versatz: {:+.7}° Breite, {:+.7}° Länge.",
+        scrubbed.offset.lat, scrubbed.offset.lon
+    );
+    for (original, sim) in &scrubbed.serials {
+        eprintln!("  {original} → {sim}");
+    }
+    Ok(())
 }
 
 async fn run(args: Args) -> Result<(), String> {
