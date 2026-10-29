@@ -225,7 +225,7 @@ Topic: `thing/product/<AIRCRAFT_SN>/osd` für pushMode 0 bzw. `.../state` für p
 | 8 | ADS-B avoidance | ADS-B-Ausweichen | Luft |
 | 9 | Auto returning to home | automatische Rückkehr (RTH) | Luft |
 | 10 | Automatic landing | automatische Landung | Luft (Übergang) |
-| 11 | Forced landing | Zwangslandung | Luft (Übergang) |
+| 11 | Forced landing | Landung (**gemessen:** auch bei jeder manuellen Landung, M350 mit RC Plus, Feldtest 22.10.2026) | Luft (Übergang) |
 | 12 | Three-blade landing | „Three-blade landing“ | Luft (Übergang) |
 | 13 | Upgrading | Firmware-Update | Boden (vermutlich) |
 | 14 | Not connected | nicht verbunden | **unbekannt** |
