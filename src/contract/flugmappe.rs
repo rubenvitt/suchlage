@@ -109,6 +109,17 @@ pub struct FmSectionCreate {
     pub location: Option<String>,
 }
 
+/// `PUT /missions/{id}/sections/{fm_section_id}`: Bezeichnung und Ort eines Abschnitts, meist
+/// der Ort, den der Truppführer erst nach der Verlegung setzt (SUL-81). Ersetzt beides; der
+/// aktive Abschnitt bleibt, wer er ist.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FmSectionUpdate {
+    pub label: String,
+    /// `null` oder leer: kein Ort.
+    pub location: Option<String>,
+}
+
 /// Ein Flug aus der Telemetrie, als Vorschlag für das Flugbuch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
