@@ -119,7 +119,7 @@ fn serial_map(device: &[(RecordLine, Value)]) -> BTreeMap<String, String> {
     let mut aircraft: Vec<String> = Vec::new();
     let mut others: Vec<String> = Vec::new();
     let push = |list: &mut Vec<String>, sn: &str| {
-        if !list.iter().any(|s| s == sn) {
+        if looks_like_serial(sn) && !list.iter().any(|s| s == sn) {
             list.push(sn.to_string());
         }
     };
@@ -231,10 +231,22 @@ fn first_position(value: &Value) -> Option<GeoPoint> {
     }
 }
 
-/// Verschiebt Koordinaten und Epoch-Millisekunden. Eine 0 bleibt 0: „kein Fix“ soll es bleiben.
+/// Verschiebt Koordinaten und Epoch-Millisekunden. Nur das Paar 0/0 bleibt: „kein Fix“ soll es
+/// bleiben. Eine einzelne 0 (Äquator, Nullmeridian) ist eine echte Position und wandert mit.
 fn rewrite(value: &mut Value, offset: GeoPoint, shift_ms: i64) {
     match value {
         Value::Object(map) => {
+            let no_fix: Vec<String> = map
+                .iter()
+                .filter(|(k, v)| {
+                    (is_latitude(k) || is_longitude(k))
+                        && v.as_f64() == Some(0.0)
+                        && partner(k)
+                            .iter()
+                            .all(|p| map.get(p).is_none_or(|w| w.as_f64() == Some(0.0)))
+                })
+                .map(|(k, _)| k.clone())
+                .collect();
             for (key, v) in map.iter_mut() {
                 let delta = if is_latitude(key) {
                     Some(offset.lat)
@@ -244,8 +256,8 @@ fn rewrite(value: &mut Value, offset: GeoPoint, shift_ms: i64) {
                     None
                 };
                 match (delta, v.as_f64()) {
-                    (Some(d), Some(x)) if x != 0.0 => *v = round7(x + d).into(),
-                    (Some(_), Some(_)) => {}
+                    (Some(_), Some(_)) if no_fix.contains(key) => {}
+                    (Some(d), Some(x)) => *v = round7(x + d).into(),
                     _ => rewrite(v, offset, shift_ms),
                 }
             }
@@ -257,6 +269,19 @@ fn rewrite(value: &mut Value, offset: GeoPoint, shift_ms: i64) {
             }
         }
         _ => {}
+    }
+}
+
+/// Die andere Hälfte eines Koordinatenpaars: `home_latitude` ↔ `home_longitude`, `lat` ↔ `lon`/`lng`.
+fn partner(key: &str) -> Vec<String> {
+    if let Some(prefix) = key.strip_suffix("latitude") {
+        vec![format!("{prefix}longitude")]
+    } else if let Some(prefix) = key.strip_suffix("longitude") {
+        vec![format!("{prefix}latitude")]
+    } else if key == "lat" {
+        vec!["lon".into(), "lng".into()]
+    } else {
+        vec!["lat".into()]
     }
 }
 
@@ -306,7 +331,10 @@ mod tests {
                 "thing/product/1581F5BKD225D00A0B5A/state",
                 serde_json::json!({
                     "gateway": "5YSZK1C0023RT7",
-                    "data": { "home_latitude": 53.124_456_7, "home_longitude": 0.0 }
+                    "data": {
+                        "home_latitude": 53.124_456_7, "home_longitude": 9.876_543_2,
+                        "latitude": 0.0, "longitude": 0.0
+                    }
                 }),
             ),
         ]
@@ -340,10 +368,9 @@ mod tests {
         assert_eq!(osd["data"]["height"], 61.5, "Höhen bleiben");
         let state: Value = serde_json::from_str(&s.lines[2].payload).unwrap();
         assert_eq!(state["data"]["home_latitude"], round7(HOME.lat + 0.001));
-        assert_eq!(
-            state["data"]["home_longitude"], 0.0,
-            "kein Fix bleibt kein Fix"
-        );
+        assert_eq!(state["data"]["home_longitude"], HOME.lon);
+        assert_eq!(state["data"]["latitude"], 0.0, "kein Fix bleibt kein Fix");
+        assert_eq!(state["data"]["longitude"], 0.0, "kein Fix bleibt kein Fix");
     }
 
     #[test]
@@ -367,6 +394,19 @@ mod tests {
         let s = scrub(lines).unwrap();
         assert!(!s.serials.contains_key("1"));
         assert!(s.lines[3].payload.contains("\"zoom\":1"));
+    }
+
+    #[test]
+    fn a_single_zero_is_a_position_and_moves_with_its_pair() {
+        let mut lines = raw();
+        lines.push(line(
+            3_000,
+            "thing/product/1581F5BKD225D00A0B5A/osd",
+            serde_json::json!({ "data": { "latitude": 53.0, "longitude": 0.0 } }),
+        ));
+        let s = scrub(lines).unwrap();
+        let osd: Value = serde_json::from_str(&s.lines[3].payload).unwrap();
+        assert_eq!(osd["data"]["longitude"], round7(s.offset.lon));
     }
 
     #[test]
