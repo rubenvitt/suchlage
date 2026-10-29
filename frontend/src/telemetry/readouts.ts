@@ -23,7 +23,7 @@ const RTK: Record<RtkFix, [string, Tone]> = {
   failed: ['RTK gestört', 'alarm'],
 };
 
-/** Rückkehr zum Startpunkt, automatische Landung, Zwangslandung, Landung mit drei Rotoren. */
+/** Rückkehr zum Startpunkt, automatische Landung, Landung (11, auch manuell), Landung mit drei Rotoren. */
 const RETURN_OR_LANDING = [9, 10, 11, 12];
 
 function batteryTone(percent: number | null, returnHome: number | null): Tone {

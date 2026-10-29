@@ -65,7 +65,8 @@ pub fn mode_label(code: u8) -> &'static str {
         8 => "ADS-B-Ausweichen",
         9 => "Rückkehr zum Startpunkt",
         10 => "automatische Landung",
-        11 => "Zwangslandung",
+        // DJI nennt 11 „Forced landing“, sie kommt aber bei jeder manuellen Landung (Feldtest 22.10.2026).
+        11 => "Landung",
         12 => "Landung mit drei Rotoren",
         13 => "Firmware-Update",
         14 => "nicht verbunden",
@@ -524,6 +525,12 @@ mod tests {
             Observation::AircraftTelemetry { telemetry, .. } => Some(telemetry),
             _ => None,
         })
+    }
+
+    #[test]
+    fn manual_landing_is_not_called_forced() {
+        assert_eq!(mode_label(11), "Landung");
+        assert_eq!(mode_class(11), ModeClass::Air);
     }
 
     #[test]
