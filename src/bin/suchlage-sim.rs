@@ -70,6 +70,14 @@ fn scrub_command(paths: Vec<String>) -> ExitCode {
 fn scrub_file(input: &str, output: &str) -> Result<(), String> {
     use std::io::Write;
     let file = std::fs::File::open(input).map_err(|e| format!("{input}: {e}"))?;
+    // Dieselbe Datei als Ziel würde den Rohmitschnitt beim Anlegen leeren, bevor er gelesen ist.
+    let same = std::fs::canonicalize(input)
+        .ok()
+        .zip(std::fs::canonicalize(output).ok())
+        .is_some_and(|(i, o)| i == o);
+    if same {
+        return Err(format!("{output}: Ziel ist der Rohmitschnitt selbst"));
+    }
     let lines = read_lines(std::io::BufReader::new(file))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("{input}: {e}"))?;
