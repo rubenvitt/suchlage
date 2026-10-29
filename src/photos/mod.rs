@@ -93,18 +93,25 @@ impl PhotoHub {
         // shortcut: Fotos ohne Callback bleiben im Eingang liegen; bei Bedarf Lifecycle-Regel setzen.
         let (bucket, creds) = server_access(cfg);
         let (inbox, _) = inbox_access(cfg);
-        if s3::head(&self.http, &inbox, &creds, object_key)
+        // Ein übernommenes Original bleibt unverändert: In den Eingang schreibt jede Fernsteuerung,
+        // und DJI vergibt jeden Dateinamen nur einmal. Ein Duplikat im Eingang fällt weg.
+        if s3::head(&self.http, &bucket, &creds, object_key)
             .await?
             .is_some()
         {
-            s3::copy(&self.http, &bucket, &creds, &inbox.name, object_key).await?;
-            // Erst nach der Kopie: Scheitert das Löschen, holt der nächste Callback es nach.
             s3::delete(&self.http, &inbox, &creds, object_key).await?;
             return Ok(true);
         }
-        Ok(s3::head(&self.http, &bucket, &creds, object_key)
+        if s3::head(&self.http, &inbox, &creds, object_key)
             .await?
-            .is_some())
+            .is_none()
+        {
+            return Ok(false);
+        }
+        s3::copy(&self.http, &bucket, &creds, &inbox.name, object_key).await?;
+        // Erst nach der Kopie: Scheitert das Löschen, räumt der nächste Callback es weg.
+        s3::delete(&self.http, &inbox, &creds, object_key).await?;
+        Ok(true)
     }
 
     /// Löscht das Objekt; fehlt es schon, ist das auch erledigt.

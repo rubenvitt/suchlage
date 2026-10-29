@@ -384,14 +384,28 @@ mod tests {
                 "aus dem Eingang entfernt"
             );
         }
-        // Pilot 2 wiederholt einen Callback, wenn die Antwort verloren geht.
+        // Pilot 2 wiederholt einen Callback, wenn die Antwort verloren geht. Liegt inzwischen etwas
+        // anderes unter dem Namen im Eingang, bleibt das übernommene Original trotzdem.
         let name = "DJI_20261017143012_0001_T.JPG";
+        let inbox_path = format!("/{}/fotos/RC1/{name}", fake::INBOX);
+        seen.lock()
+            .unwrap()
+            .objects
+            .insert(inbox_path.clone(), b"anders".to_vec());
         let (status, body) = send(
             &app.router,
             post("upload-callback", callback(name, json!(52.9612))),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        {
+            let s = seen.lock().unwrap();
+            assert_eq!(
+                s.objects[&format!("/{}/fotos/RC1/{name}", fake::BUCKET)],
+                b"jpg"
+            );
+            assert!(!s.objects.contains_key(&inbox_path), "Duplikat entfernt");
+        }
         let first = shots.recv().await.unwrap();
         assert_eq!(first.photos.len(), 1);
         let shot = shots.recv().await.unwrap();
