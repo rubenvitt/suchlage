@@ -10,4 +10,4 @@
 - Vertrag ändern: Typ in `src/contract/` anpassen, `cargo test contract` erzeugt `frontend/src/contract/`, beides zusammen committen. Entfernte Typen: die erzeugte `.ts`-Datei von Hand löschen.
 - Keine Env-Konfiguration außer `SUCHLAGE_DATA_DIR`, `SUCHLAGE_BIND`, `SUCHLAGE_PUBLIC_URL`, `RUST_LOG`.
 - Dev-Login nur hinter dem Cargo-Feature `dev`.
-- Mitschnitte und `data/` nie committen; Fixtures nur synthetisch.
+- Mitschnitte und `data/` nie committen; Fixtures nur synthetisch oder mit `suchlage-sim scrub` bereinigt.
