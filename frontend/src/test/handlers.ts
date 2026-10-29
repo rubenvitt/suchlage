@@ -222,6 +222,9 @@ export const handlersFor = (me: Me, missions: Mission[] = missionFixtures()) => 
       return HttpResponse.json(created);
     }),
     http.delete('/api/kiosk-tokens/:id', noContent),
+    http.get('/api/accounts', () => HttpResponse.json(fx.accounts)),
+    http.put('/api/accounts/:id/block', noContent),
+    http.delete('/api/accounts/:id/block', noContent),
     http.post('/api/setup', () => HttpResponse.json({ login_url: '/anmelden' } satisfies SetupResult)),
     http.get('/api/map/elements', ({ request }) =>
       HttpResponse.json([...drawn.values()].filter((e) => matchesMission(request.url, e.mission_id))),

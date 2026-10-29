@@ -1,4 +1,5 @@
 // Erzeugt von `cargo test contract` (src/contract/fixtures.rs) – nicht von Hand ändern.
+import type { AccountView } from './generated/AccountView';
 import type { AuthOptions } from './generated/AuthOptions';
 import type { DeviceLogEvent } from './generated/DeviceLogEvent';
 import type { FlightDetail } from './generated/FlightDetail';
@@ -873,6 +874,33 @@ export const kioskTokens: KioskTokenView[] = [
     "created_at_ms": 1792146400000,
     "id": 1,
     "label": "FüKw Großbild"
+  }
+];
+
+export const accounts: AccountView[] = [
+  {
+    "blocked_at_ms": null,
+    "created_at_ms": 1791545200000,
+    "display_name": "Erika Mustermann",
+    "id": 1,
+    "own": true,
+    "role": "admin"
+  },
+  {
+    "blocked_at_ms": null,
+    "created_at_ms": 1792063600000,
+    "display_name": "Max Muster",
+    "id": 2,
+    "own": false,
+    "role": "operator"
+  },
+  {
+    "blocked_at_ms": 1792146400000,
+    "created_at_ms": 1791977200000,
+    "display_name": "Gesa Gast",
+    "id": 3,
+    "own": false,
+    "role": "operator"
   }
 ];
 

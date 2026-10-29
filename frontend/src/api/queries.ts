@@ -1,4 +1,5 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { AccountView } from '../contract/generated/AccountView';
 import type { AuthOptions } from '../contract/generated/AuthOptions';
 import type { FlightDetail } from '../contract/generated/FlightDetail';
 import type { FlightSummary } from '../contract/generated/FlightSummary';
@@ -24,6 +25,7 @@ export const queryKeys = {
   settings: ['settings'] as const,
   remoteControllers: ['remote-controllers'] as const,
   kioskTokens: ['kiosk-tokens'] as const,
+  accounts: ['accounts'] as const,
   health: ['health'] as const,
   missions: ['missions'] as const,
   /** Fotos der Lagekarte je Einsatz und je Flug; der Live-Strom ergänzt beide. */
@@ -84,6 +86,8 @@ export const useMissions = () =>
   useQuery({ queryKey: queryKeys.missions, queryFn: () => apiGet<Mission[]>('/api/missions') });
 export const useKioskTokens = () =>
   useQuery({ queryKey: queryKeys.kioskTokens, queryFn: () => apiGet<KioskTokenView[]>('/api/kiosk-tokens') });
+export const useAccounts = () =>
+  useQuery({ queryKey: queryKeys.accounts, queryFn: () => apiGet<AccountView[]>('/api/accounts') });
 /** Laufender Stand des Servers. Ohne `staleTime`: Nach einem Update zeigt die offene Seite beim nächsten Blick den neuen. */
 export const useHealth = () =>
   useQuery({ queryKey: queryKeys.health, queryFn: () => apiGet<Health>('/api/health') });

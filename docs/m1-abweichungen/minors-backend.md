@@ -90,4 +90,5 @@ vor: Bevor die Pocket-ID-Daten eingetragen werden, wird der Client auf eine I&K-
 („Allowed User Groups“). Dazu steht dort, dass eine bestehende Sitzung nach dem Entfernen aus der
 Gruppe bis zu 7 Tage weiter gilt. Den Hinweis auf der Einrichtungsseite im Frontend ergänzt der
 Frontend-Strang. Offen für später bleiben eine Prüfung des Gruppen-Claims in `oidc::finish` und
-ein Endpunkt zum Sperren von Konten.
+ein Endpunkt zum Sperren von Konten. **Erledigt:** Gruppen-Claim seit 27.10.2026 (Rolle aus den
+Gruppen), Sperren seit 29.10.2026 (SUL-52, `PUT /api/accounts/{id}/block`).

@@ -687,6 +687,35 @@ pub fn kiosk_tokens() -> Vec<KioskTokenView> {
     }]
 }
 
+pub fn accounts() -> Vec<AccountView> {
+    vec![
+        AccountView {
+            id: 1,
+            display_name: "Erika Mustermann".into(),
+            role: Role::Admin,
+            created_at_ms: T0 - 7 * 86_400_000,
+            blocked_at_ms: None,
+            own: true,
+        },
+        AccountView {
+            id: 2,
+            display_name: "Max Muster".into(),
+            role: Role::Operator,
+            created_at_ms: T0 - 86_400_000,
+            blocked_at_ms: None,
+            own: false,
+        },
+        AccountView {
+            id: 3,
+            display_name: "Gesa Gast".into(),
+            role: Role::Operator,
+            created_at_ms: T0 - 2 * 86_400_000,
+            blocked_at_ms: Some(T0 - 3_600_000),
+            own: false,
+        },
+    ]
+}
+
 pub fn auth_options(oidc: bool, dev_login: bool, setup_required: bool) -> AuthOptions {
     AuthOptions {
         oidc,
@@ -739,6 +768,7 @@ pub fn all() -> Vec<Fixture> {
             &remote_controllers(),
         ),
         fx("kioskTokens", "KioskTokenView[]", &kiosk_tokens()),
+        fx("accounts", "AccountView[]", &accounts()),
         fx("mapElements", "MapElement[]", &map_elements()),
         fx("photoShots", "PhotoShot[]", &photo_shots()),
         fx("missionList", "Mission[]", &missions()),

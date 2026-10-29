@@ -79,7 +79,9 @@ das Compose-Netz und reicht sie über seine Video-Proxies weiter.
    Anmeldung neu: Admin-Gruppe vor Nutzungs-Gruppe. Wer in keiner der beiden ist, kommt nicht
    hinein. Am Client unter „Allowed User Groups“ beide eintragen oder das Feld leer lassen. Wer aus
    einer Gruppe entfernt wird, kann sich nicht mehr neu anmelden. Eine bestehende Sitzung gilt
-   aber bis zu 7 Tage weiter.
+   aber bis zu 7 Tage weiter; soll sie sofort enden, das Konto unter Einstellungen → Konten
+   sperren. Die Sperre beendet alle Sitzungen und offenen Ströme und lehnt jede neue Anmeldung ab,
+   auch über die Flugmappe, bis sie dort aufgehoben wird.
 
    Danach: Der Server schreibt beim ersten Start einen Einmal-Link ins Log (24 h gültig). Link
    öffnen, die Pocket-ID-Daten und beide Gruppennamen eintragen. Dann mit einem Konto aus der

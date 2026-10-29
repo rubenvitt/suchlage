@@ -78,6 +78,8 @@ const STATE_COOKIE_PATH: &str = "/api/auth/oidc";
 const LOGIN_FAILED: &str = "/anmelden?fehler=oidc";
 /// Angemeldet, aber in keiner der beiden Pocket-ID-Gruppen.
 const LOGIN_NO_GROUP: &str = "/anmelden?fehler=gruppe";
+/// In einer Gruppe, aber in Suchlage gesperrt.
+const LOGIN_BLOCKED: &str = "/anmelden?fehler=gesperrt";
 
 #[derive(serde::Deserialize)]
 struct StartQuery {
@@ -142,11 +144,31 @@ async fn oidc_callback(
             );
             (jar_out.add(session), Redirect::to(&next))
         }
-        Err(AppError::Forbidden) => (jar_out, Redirect::to(LOGIN_NO_GROUP)),
-        Err(e) => {
+        Err(LoginError::NoGroup) => (jar_out, Redirect::to(LOGIN_NO_GROUP)),
+        Err(LoginError::Blocked) => (jar_out, Redirect::to(LOGIN_BLOCKED)),
+        Err(LoginError::Failed(e)) => {
             tracing::warn!(error = ?e, "OIDC-Anmeldung abgebrochen");
             (jar_out, Redirect::to(LOGIN_FAILED))
         }
+    }
+}
+
+/// Warum eine Anmeldung scheitert; jeder Fall hat seine eigene Meldung auf der Anmeldeseite.
+enum LoginError {
+    NoGroup,
+    Blocked,
+    Failed(AppError),
+}
+
+impl From<AppError> for LoginError {
+    fn from(e: AppError) -> Self {
+        LoginError::Failed(e)
+    }
+}
+
+impl From<sqlx::Error> for LoginError {
+    fn from(e: sqlx::Error) -> Self {
+        LoginError::Failed(e.into())
     }
 }
 
@@ -154,13 +176,13 @@ async fn complete_login(
     state: &AppState,
     jar: &CookieJar,
     q: CallbackQuery,
-) -> Result<(String, String), AppError> {
+) -> Result<(String, String), LoginError> {
     let (Some(csrf), Some(code)) = (q.state, q.code) else {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized.into());
     };
     // Bindet den Rücksprung an den Browser, der die Anmeldung begonnen hat (Login-CSRF).
     if jar.get(STATE_COOKIE).map(|c| c.value()) != Some(csrf.as_str()) {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized.into());
     }
     let cfg = state
         .settings
@@ -175,7 +197,7 @@ async fn complete_login(
             groups = ?identity.groups,
             "Anmeldung abgelehnt: in keiner Suchlage-Gruppe"
         );
-        return Err(AppError::Forbidden);
+        return Err(LoginError::NoGroup);
     };
     let now = now_ms();
     let user = store::users::upsert_oidc(
@@ -187,6 +209,10 @@ async fn complete_login(
         now,
     )
     .await?;
+    if store::users::is_blocked(&state.pool, user.id).await? {
+        tracing::warn!(user = %user.display_name, "Anmeldung abgelehnt: Konto gesperrt");
+        return Err(LoginError::Blocked);
+    }
     Ok((
         store::sessions::create_for_user(&state.pool, user.id, now).await?,
         next,
@@ -582,6 +608,37 @@ mod tests {
             "operator",
             "die Rolle hängt am Konto, auch ältere Sitzungen sind herabgestuft"
         );
+    }
+
+    #[tokio::test]
+    async fn blocked_account_gets_no_session_until_unblocked() {
+        let (app, idp) = app_with_idp().await;
+        *idp.groups.lock().unwrap() = vec!["suchlage".into()];
+        let old = session(&login(&app, &idp).await).expect("Sitzung");
+        let user = crate::store::users::find_by_oidc(
+            &app.state.pool,
+            &idp.issuer,
+            crate::auth::oidc::test_idp::SUBJECT,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        crate::store::users::block(&app.state.pool, user.id, 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            send(&app.router, with_cookie(get("/api/me"), &old)).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+
+        let res = login(&app, &idp).await;
+        assert_eq!(location(&res), "/anmelden?fehler=gesperrt");
+        assert_eq!(session(&res), None, "trotz Gruppe keine Sitzung");
+
+        crate::store::users::unblock(&app.state.pool, user.id)
+            .await
+            .unwrap();
+        assert!(session(&login(&app, &idp).await).is_some());
     }
 
     #[tokio::test]

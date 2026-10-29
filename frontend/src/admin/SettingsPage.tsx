@@ -3,6 +3,7 @@ import { Paneel, PaneelZustand, Segmentleiste } from '../components/instrument';
 import { useAuthOptions, useSettings } from '../api/queries';
 import { Frame } from '../shell/Frame';
 import './admin.css';
+import { AccountsPanel } from './AccountsPanel';
 import { KioskTokensPanel } from './KioskTokensPanel';
 import { RemoteControllersPanel } from './RemoteControllersPanel';
 import {
@@ -19,6 +20,7 @@ import { zustandOf } from './zustand';
 const SECTIONS = [
   { wert: 'rc', label: 'Fernsteuerungen' },
   { wert: 'kiosk', label: 'Großbild' },
+  { wert: 'accounts', label: 'Konten' },
   { wert: 'oidc', label: 'Anmeldung' },
   { wert: 'dji', label: 'DJI' },
   { wert: 'broker', label: 'Broker' },
@@ -33,6 +35,7 @@ type Section = (typeof SECTIONS)[number]['wert'];
 const META: Record<Section, string> = {
   rc: 'Kopplung mit Pilot 2',
   kiosk: 'Bildschirme ohne Anmeldung',
+  accounts: 'Angemeldete aus Pocket ID',
   oidc: 'Pocket ID',
   dji: 'App-Daten aus dem DJI-Entwicklerportal',
   broker: 'MQTT im VPN',
@@ -47,6 +50,7 @@ function SettingsSection({ section, title }: { section: Section; title: string }
   const redirectUrl = useAuthOptions().data?.redirect_url;
   if (section === 'rc') return <RemoteControllersPanel />;
   if (section === 'kiosk') return <KioskTokensPanel />;
+  if (section === 'accounts') return <AccountsPanel />;
   const { data } = settings;
   return (
     // Einstellungen sind ein Objekt, nie leer: `leerText` bleibt ungenutzt.

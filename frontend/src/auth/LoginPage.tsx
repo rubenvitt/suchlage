@@ -46,6 +46,13 @@ export default function LoginPage() {
             description="Das Konto ist in Pocket ID in keiner Suchlage-Gruppe. Die Verwaltung muss es einer Gruppe zuordnen."
           />
         )}
+        {params.get('fehler') === 'gesperrt' && (
+          <Alert
+            type="error"
+            title="Konto gesperrt."
+            description="Die Verwaltung hat dieses Konto in Suchlage gesperrt. Nur sie kann die Sperre aufheben."
+          />
+        )}
         {isPending && <p aria-busy="true">Anmeldeverfahren werden abgerufen …</p>}
         {isError && (
           <>

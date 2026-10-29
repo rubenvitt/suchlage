@@ -304,7 +304,8 @@ pub async fn verify(
 }
 
 /// Konto zu einem geprüften Token. Die einzige Stelle, an der die Schnittstelle der Flugmappe das
-/// Konto nachschlägt – eine Kontosperre (SUL-52) gehört hierher. Konten entstehen hier nie.
+/// Konto nachschlägt; ein gesperrtes Konto (SUL-52) findet `find_by_oidc` nicht. Konten entstehen
+/// hier nie.
 pub async fn account(pool: &SqlitePool, claims: &AccessClaims) -> Result<User, AppError> {
     // Alle Konten haben `operator` oder `admin`; beide dürfen die Schnittstelle nutzen.
     users::find_by_oidc(pool, &claims.issuer, &claims.subject)
