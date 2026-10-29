@@ -22,6 +22,8 @@ pids=""
 cleanup() { for p in $pids; do kill "$p" 2>/dev/null || true; done; $DC down -v >/dev/null 2>&1; rm -rf "$TMP"; }
 trap cleanup EXIT
 $DC up -d --wait
+. scripts/lib/fotos.sh
+fotos_inbox
 pnpm -C frontend install --frozen-lockfile >/dev/null
 # Vor cargo build: Der Server bettet frontend/dist ein.
 pnpm -C frontend build >/dev/null

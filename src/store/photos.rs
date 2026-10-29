@@ -258,9 +258,15 @@ pub async fn of_flight(pool: &SqlitePool, flight_id: i64) -> Result<Vec<PhotoRow
     Ok(rows.iter().map(row).collect())
 }
 
-pub async fn set_thumb_ready(pool: &SqlitePool, id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE photos SET thumb_ready = 1 WHERE id = ?")
+/// Nur für die Zeile, deren Original das Bild zeigt: Eine gelöschte ID kann SQLite neu vergeben.
+pub async fn set_thumb_ready(
+    pool: &SqlitePool,
+    id: i64,
+    object_key: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE photos SET thumb_ready = 1 WHERE id = ? AND object_key = ?")
         .bind(id)
+        .bind(object_key)
         .execute(pool)
         .await?;
     Ok(())
@@ -356,7 +362,16 @@ mod tests {
         let mut again = new("fotos/RC1/DJI_1_T.JPG", "DJI_1_T.JPG", PhotoLens::Thermal);
         again.relative_altitude_m = Some(81.0);
         assert_eq!(upsert(&pool, &again).await.unwrap(), a, "dieselbe Zeile");
-        set_thumb_ready(&pool, a).await.unwrap();
+        set_thumb_ready(&pool, a, "fotos/RC1/anderes.JPG")
+            .await
+            .unwrap();
+        assert!(
+            !get(&pool, a).await.unwrap().unwrap().thumb_ready,
+            "fremdes Bild"
+        );
+        set_thumb_ready(&pool, a, "fotos/RC1/DJI_1_T.JPG")
+            .await
+            .unwrap();
         let p = get(&pool, a).await.unwrap().unwrap();
         assert_eq!(p.relative_altitude_m, Some(81.0));
         assert_eq!(p.lens, PhotoLens::Thermal);

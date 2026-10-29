@@ -12,6 +12,9 @@ use super::stream;
 use super::track::TrackBuilder;
 
 const SYSTEM_PUBLISH_EVERY_MS: i64 = 5_000;
+/// Feldnamen bestimmt das Gerät; ohne Obergrenze wüchse die Systemansicht mit jeder Nachricht.
+const MAX_UNKNOWN_FIELDS: usize = 200;
+const MAX_UNKNOWN_FIELD_CHARS: usize = 128;
 /// Punkte, die vor der bestätigten Startprobe liegen können (Entprellung über 2 Proben).
 const PENDING_POINTS: usize = 4;
 
@@ -199,7 +202,13 @@ impl Situation {
                 invalid_messages,
             } => {
                 for key in unknown_fields {
-                    *self.unknown.entry(key).or_default() += 1;
+                    if let Some(count) = self.unknown.get_mut(&key) {
+                        *count += 1;
+                    } else if self.unknown.len() < MAX_UNKNOWN_FIELDS
+                        && key.chars().count() <= MAX_UNKNOWN_FIELD_CHARS
+                    {
+                        self.unknown.insert(key, 1);
+                    }
                 }
                 self.invalid_messages += invalid_messages;
                 self.system_dirty = true;
@@ -761,6 +770,26 @@ mod tests {
             }]
         );
         assert_eq!(system.invalid_messages, 3);
+    }
+
+    #[test]
+    fn unknown_field_names_stay_bounded() {
+        let mut s = Situation::new(OFF, 1, vec![]);
+        let mut fields: Vec<String> = (0..MAX_UNKNOWN_FIELDS + 50)
+            .map(|i| format!("aircraft.f{i}"))
+            .collect();
+        fields.push("x".repeat(MAX_UNKNOWN_FIELD_CHARS + 1));
+        // Gezählt werden Zeichen, nicht Bytes: Dieser Name passt, ersetzt aber keinen anderen.
+        fields.insert(0, "ä".repeat(MAX_UNKNOWN_FIELD_CHARS));
+        s.apply(Observed {
+            at_ms: 0,
+            observation: Observation::Diagnostics {
+                unknown_fields: fields,
+                invalid_messages: 0,
+            },
+        });
+        assert_eq!(s.unknown.len(), MAX_UNKNOWN_FIELDS);
+        assert!(s.unknown.contains_key(&"ä".repeat(MAX_UNKNOWN_FIELD_CHARS)));
     }
 
     #[test]

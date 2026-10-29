@@ -118,7 +118,7 @@ async fn sts(
     let prefix = rules::object_key_prefix(&sn);
     Ok(Json(ok(dji::sts(&Sts {
         endpoint: &cfg.rc_url,
-        bucket: &cfg.bucket,
+        bucket: &crate::storage::inbox_bucket(&cfg),
         region: &cfg.region,
         object_key_prefix: &prefix,
         access_key_id: &key.access_key_id,
@@ -154,7 +154,7 @@ async fn upload_callback(
         .into());
     }
     let cfg = state.photos.storage()?;
-    if !state.photos.object_exists(&cfg, &input.object_key).await? {
+    if !state.photos.take_upload(&cfg, &input.object_key).await? {
         return Err(AppError::Unprocessable("Foto liegt nicht im Fotospeicher".into()).into());
     }
     let name = rules::display_name(&input.name, &input.object_key);
@@ -305,7 +305,7 @@ mod tests {
 
     fn put_object(seen: &fake::Shared, name: &str) {
         seen.lock().unwrap().objects.insert(
-            format!("/{}/fotos/RC1/{name}", fake::BUCKET),
+            format!("/{}/fotos/RC1/{name}", fake::INBOX),
             b"jpg".to_vec(),
         );
     }
@@ -343,7 +343,7 @@ mod tests {
         let data = &body["data"];
         assert_eq!(data["provider"], "minio");
         assert_eq!(data["endpoint"], "http://100.64.0.10:3900");
-        assert_eq!(data["bucket"], fake::BUCKET);
+        assert_eq!(data["bucket"], fake::INBOX, "nur in den Eingang");
         assert_eq!(data["region"], "garage");
         assert_eq!(data["object_key_prefix"], "fotos/RC1");
         assert_eq!(data["credentials"]["access_key_id"], "GK1");
@@ -372,6 +372,39 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::OK, "{body}");
             assert_eq!(body["data"]["object_key"], format!("fotos/RC1/{name}"));
+            let s = seen.lock().unwrap();
+            assert!(
+                s.objects
+                    .contains_key(&format!("/{}/fotos/RC1/{name}", fake::BUCKET)),
+                "im Fotospeicher"
+            );
+            assert!(
+                !s.objects
+                    .contains_key(&format!("/{}/fotos/RC1/{name}", fake::INBOX)),
+                "aus dem Eingang entfernt"
+            );
+        }
+        // Pilot 2 wiederholt einen Callback, wenn die Antwort verloren geht. Liegt inzwischen etwas
+        // anderes unter dem Namen im Eingang, bleibt das übernommene Original trotzdem.
+        let name = "DJI_20261017143012_0001_T.JPG";
+        let inbox_path = format!("/{}/fotos/RC1/{name}", fake::INBOX);
+        seen.lock()
+            .unwrap()
+            .objects
+            .insert(inbox_path.clone(), b"anders".to_vec());
+        let (status, body) = send(
+            &app.router,
+            post("upload-callback", callback(name, json!(52.9612))),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        {
+            let s = seen.lock().unwrap();
+            assert_eq!(
+                s.objects[&format!("/{}/fotos/RC1/{name}", fake::BUCKET)],
+                b"jpg"
+            );
+            assert!(!s.objects.contains_key(&inbox_path), "Duplikat entfernt");
         }
         let first = shots.recv().await.unwrap();
         assert_eq!(first.photos.len(), 1);

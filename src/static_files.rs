@@ -17,7 +17,9 @@ pub enum Resolved {
 /// Reine Entscheidung, damit sie ohne gebautes Frontend testbar ist.
 pub fn resolve(path: &str, exists: impl Fn(&str) -> bool) -> Resolved {
     let path = path.trim_start_matches('/');
-    if path.starts_with("api/") || path.starts_with("internal/") {
+    // Debug-Builds lesen vom Dateisystem; `..` könnte dort aus `frontend/dist` hinausführen.
+    let escapes = path.contains('\\') || path.split('/').any(|s| s == ".." || s == ".");
+    if escapes || path.starts_with("api/") || path.starts_with("internal/") {
         return Resolved::NotFound;
     }
     if path.is_empty() {
@@ -91,6 +93,18 @@ mod tests {
             resolve("/internal/media/auth", |_| true),
             Resolved::NotFound
         );
+    }
+
+    #[test]
+    fn traversal_never_reaches_the_lookup() {
+        for path in [
+            "/../../proc/self/fd/3",
+            "/assets/../../x",
+            "/./index.html",
+            "/..\\x",
+        ] {
+            assert_eq!(resolve(path, |_| true), Resolved::NotFound, "{path}");
+        }
     }
 
     #[test]

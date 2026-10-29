@@ -18,6 +18,8 @@ export SUCHLAGE_DATA_DIR=./data/dev SUCHLAGE_BIND=127.0.0.1:8080 SUCHLAGE_PUBLIC
 mkdir -p data/dev/video
 DC="docker compose -f deploy/compose.dev.yaml"
 $DC up -d --wait
+. scripts/lib/fotos.sh
+fotos_inbox
 
 pids=""
 cleanup() {

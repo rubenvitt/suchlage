@@ -200,7 +200,7 @@ async fn share_pin(args: &Args, token: &str, workspace: &str) -> Result<(), Stri
 }
 
 /// Lädt eine Auslösung (Wärme 640 × 512, Weit 1600 × 1200) wie Pilot 2 hoch: Zugang über `sts`,
-/// direkt in den Fotospeicher, dann `upload-callback`. `Ok(false)`: Der Server hat keinen Fotospeicher.
+/// direkt in den Eingang des Fotospeichers, dann `upload-callback`. `Ok(false)`: Der Server hat keinen Fotospeicher.
 async fn upload_photo(
     args: &Args,
     token: &str,

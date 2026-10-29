@@ -141,7 +141,7 @@ fn unreachable(e: reqwest::Error) -> AppError {
     AppError::Unavailable("Fotospeicher nicht erreichbar".into())
 }
 
-/// Signierte Anfrage an ein Objekt; `body` mit Inhaltstyp nur bei `PUT`.
+/// Signierte Anfrage an ein Objekt; `body` mit Inhaltstyp nur bei `PUT`, `extra` wird mitsigniert.
 async fn send(
     http: &reqwest::Client,
     bucket: &Bucket,
@@ -149,6 +149,7 @@ async fn send(
     method: reqwest::Method,
     key: &str,
     body: Option<(Vec<u8>, &str)>,
+    extra: Vec<(String, String)>,
 ) -> Result<reqwest::Response, AppError> {
     let path = format!(
         "/{}/{}",
@@ -181,6 +182,7 @@ async fn send(
     if let Some((_, content_type)) = &body {
         headers.push(("content-type".to_string(), content_type.to_string()));
     }
+    headers.extend(extra);
     let auth = authorization(
         &Canonical {
             method: method.as_str(),
@@ -219,7 +221,16 @@ pub async fn head(
     creds: &Credentials,
     key: &str,
 ) -> Result<Option<u64>, AppError> {
-    let res = send(http, bucket, creds, reqwest::Method::HEAD, key, None).await?;
+    let res = send(
+        http,
+        bucket,
+        creds,
+        reqwest::Method::HEAD,
+        key,
+        None,
+        vec![],
+    )
+    .await?;
     match res.status() {
         // Bei HEAD steht die Größe nur im Header; `content_length()` meint den (leeren) Body.
         s if s.is_success() => Ok(Some(
@@ -240,7 +251,7 @@ pub async fn get(
     creds: &Credentials,
     key: &str,
 ) -> Result<reqwest::Response, AppError> {
-    let res = send(http, bucket, creds, reqwest::Method::GET, key, None).await?;
+    let res = send(http, bucket, creds, reqwest::Method::GET, key, None, vec![]).await?;
     match res.status() {
         s if s.is_success() => Ok(res),
         reqwest::StatusCode::NOT_FOUND => Err(AppError::NotFound),
@@ -263,12 +274,44 @@ pub async fn put(
         reqwest::Method::PUT,
         key,
         Some((body, content_type)),
+        vec![],
     )
     .await?;
     if res.status().is_success() {
         Ok(())
     } else {
         Err(refused(&res))
+    }
+}
+
+/// Kopiert `key` aus `source_bucket` unter gleichem Namen nach `bucket`. Garage verweist dabei nur
+/// auf dieselben Blöcke, die Daten werden nicht neu geschrieben. `NotFound`, wenn die Quelle fehlt.
+pub async fn copy(
+    http: &reqwest::Client,
+    bucket: &Bucket,
+    creds: &Credentials,
+    source_bucket: &str,
+    key: &str,
+) -> Result<(), AppError> {
+    let source = format!(
+        "/{}/{}",
+        uri_encode(source_bucket, false),
+        uri_encode(key, true)
+    );
+    let res = send(
+        http,
+        bucket,
+        creds,
+        reqwest::Method::PUT,
+        key,
+        None,
+        vec![("x-amz-copy-source".to_string(), source)],
+    )
+    .await?;
+    match res.status() {
+        s if s.is_success() => Ok(()),
+        reqwest::StatusCode::NOT_FOUND => Err(AppError::NotFound),
+        _ => Err(refused(&res)),
     }
 }
 
@@ -279,7 +322,16 @@ pub async fn delete(
     creds: &Credentials,
     key: &str,
 ) -> Result<(), AppError> {
-    let res = send(http, bucket, creds, reqwest::Method::DELETE, key, None).await?;
+    let res = send(
+        http,
+        bucket,
+        creds,
+        reqwest::Method::DELETE,
+        key,
+        None,
+        vec![],
+    )
+    .await?;
     if res.status().is_success() || res.status() == reqwest::StatusCode::NOT_FOUND {
         Ok(())
     } else {
