@@ -54,6 +54,8 @@ Entscheidungen dieses Entwurfs (bei der Durchsicht zu bestätigen):
 - **Verknüpfen:** wie bisher (vorbereitet → laufend, kein anderer Einsatz läuft), aber ohne `take_over`. Ist die Flugmappe schon mit einem anderen Einsatz verknüpft und diese Verknüpfung nicht gelöst, 409 wie bisher. Eine gelöste Verknüpfung blockiert kein neues Verknüpfen. Verknüpft dieselbe Flugmappe wieder denselben Einsatz, lebt ihre alte Verknüpfung wieder auf (gelöst um wird geleert, Abschnitte und Einträge bleiben ihr zugeordnet); es entsteht keine zweite. Damit bestimmen Einsatz und UUID die Verknüpfung eindeutig, die Flugmappe braucht keine eigene Verknüpfungs-ID.
 - **Abschnitt anlegen:** wird der aktive Abschnitt des Einsatzes und der Flugmappe. Die Flugmappe adressiert wie bisher über ihre eigene Abschnitts-ID; IDs anderer Flugmappen sieht sie nicht.
 - **Flugbuch melden:** Die Flugmappe schreibt jeden Eintrag mit seiner ID (`PUT`, wiederholbar) und löscht ihn mit `DELETE`, wenn er in der Flugmappe gelöscht wird. Ein Eintrag mit Suchlage-Flug, den schon eine andere Flugmappe gemeldet hat, ist ein Konflikt (409). Fehlt Netz, sammelt die Flugmappe die Meldungen und holt sie nach.
+  - *Löschen eines bestätigten Eintrags:* Die Bestätigung entfällt, der Telemetrie-Flug bleibt in Suchlage und ist in allen verknüpften Flugmappen wieder Vorschlag; eine neue Bestätigung ist erlaubt. Antwort 204, ebenso für einen unbekannten oder schon gelöschten Eintrag.
+  - *Reihenfolge beim Nachholen:* Jede Meldung trägt den Änderungszeitpunkt des Eintrags in der Flugmappe. Die Ausgangsliste hält je Eintrag nur den letzten Stand. Suchlage übernimmt eine Meldung nur, wenn sie neuer ist als der gespeicherte Stand, und antwortet auf eine ältere mit 200 und dem gespeicherten Stand (kein Fehler, damit die Ausgangsliste nicht hängt). Ein Löschen hinterlässt eine Löschmarke mit Zeitpunkt; ein älteres `PUT` stellt den Eintrag nicht wieder her.
 - **Abschluss aus der Flugmappe:** setzt „fertig um“ an der Verknüpfung. Sind danach alle nicht gelösten Verknüpfungen fertig, schließt der Einsatz (Regeln wie bisher: kein laufender Flug, sonst merkt die Flugmappe es sich). Ein Eintrag nach „fertig“ wird noch angenommen, solange der Einsatz offen ist.
 - **Lösen in Suchlage:** `operator` und `admin` können eine Verknüpfung lösen (verlorenes Gerät). Gemeldete Einträge bleiben.
 
@@ -70,7 +72,7 @@ Entscheidungen dieses Entwurfs (bei der Durchsicht zu bestätigen):
 | Wer bin ich | unverändert |
 | Offene Einsätze, Einsatz | `links` (Liste aller Verknüpfungen) statt `link`; die Flugmappe erkennt ihre an der UUID |
 | Einsatz anlegen, Mit Einsatz verknüpfen | neu: Fluggerät der Flugmappe; `take_over` entfällt |
-| Flüge des Einsatzes | je Flug neu: bestätigt von (Fluggerät der anderen Flugmappe) oder `null`; eigene Bestätigungen erkennt die Flugmappe an ihrem Eintrag |
+| Flüge des Einsatzes | je Flug neu: bestätigt von (Fluggerät der anderen Flugmappe) oder `null`; eigene Bestätigungen erkennt die Flugmappe an ihrem Eintrag. Weiterhin nur Telemetrie-Flüge: Handeinträge kennt die Flugmappe selbst, die Flugliste mit Handeinträgen ist eine Ansicht der Browser-API von Suchlage, nicht dieser Schnittstelle |
 | Flugbucheintrag melden | neu: `PUT /missions/{id}/logbook/{entry_id}`, `DELETE` ebenso |
 | Einsatz abschließen | meldet den Teil der Flugmappe als fertig; Antwort sagt, ob der Einsatz geschlossen ist |
 
