@@ -470,7 +470,8 @@ einen zweiten Versuch liegen (danach von Hand löschen):
 ```sh
 ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos media'
 ( set -e -o pipefail
-  for v in server-data fotos-meta fotos-data garage-secrets; do   # mit --video: video dazu
+  # video nur, wenn die Sicherung mit --video lief
+  for v in server-data fotos-meta fotos-data garage-secrets $([ -e video-<Stempel>.tgz.age ] && echo video); do
     age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> /srv/suchlage/deploy/restore.sh $v
   done
   # `start` wiederholt das schon beendete video-init nicht; es gibt die Videoablage dem Server-Nutzer.
