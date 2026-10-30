@@ -420,8 +420,9 @@ ssh <host> /srv/suchlage/deploy/backup.sh           # mit --video auch die Flugv
 ```
 
 Je Lauf entstehen `server-data-`, `fotos-meta-`, `fotos-data-` und `garage-secrets-<Stempel>.tgz.age`
-mit demselben Stempel. Sie gehören zusammen. Scheitert ein Schritt, bricht das Skript ab, räumt das
-halbe Archiv weg und startet die Dienste trotzdem wieder. Die Flugvideos (`video`) sind groß und
+mit demselben Stempel. Sie gehören zusammen. Fehlt ein Volume oder `rpc_secret`, sichert das Skript
+gar nichts, statt ein leeres Archiv abzulegen; ein zweiter Lauf gleichzeitig bricht ab. Scheitert
+ein Schritt, räumt es das halbe Archiv weg und startet die Dienste trotzdem wieder. Die Flugvideos (`video`) sind groß und
 fehlen ohne `--video`.
 
 *Einmalig einrichten.* Den Schlüssel erzeugst du auf dem eigenen Rechner, nicht auf dem Host. Der
@@ -433,7 +434,7 @@ age-keygen -o suchlage-backup.key                   # zeigt „Public key: age1�
 rm suchlage-backup.key
 ssh <host> 'sudo apt install -y age &&
   sudo install -d -o "$USER" -m 700 /srv/suchlage/backup &&
-  echo age1… > /srv/suchlage/backup-empfaenger.txt'
+  echo age1… | sudo tee /srv/suchlage/backup-empfaenger.txt'
 ```
 
 Die Datei liegt neben `deploy/`, damit `rsync --delete` sie nicht löscht. Jede weitere Zeile
@@ -460,23 +461,23 @@ scp '<host>:/srv/suchlage/backup/*-<Stempel>.tgz.age' .
 for f in *-<Stempel>.tgz.age; do age -d -i suchlage-backup.key "$f" | tar tzf - >/dev/null && echo "$f ok"; done
 ```
 
-Steht hinter allen vier Dateien „ok“, die Dienste stoppen und die Volumes ersetzen. Das leert jedes
-Volume vor dem Auspacken:
+Steht hinter jeder Datei „ok“ (vier, mit `--video` zusätzlich `video-<Stempel>.tgz.age`), die
+Dienste stoppen und zurückspielen. `deploy/restore.sh` packt am Host erst neben dem alten Inhalt aus
+und tauscht ihn erst, wenn das Archiv vollständig da ist; bricht etwas ab, bleibt das Volume, wie es
+war. Die Klammer bricht beim ersten Fehler ab und startet dann nichts:
 
 ```sh
-ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos'
-for v in server-data fotos-meta fotos-data; do
-  age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> "docker run --rm -i -v suchlage-m1_$v:/d \
-    busybox:1.37.0-uclibc sh -c 'find /d -mindepth 1 -delete && tar xzf - -C /d'"
-done
-age -d -i suchlage-backup.key garage-secrets-<Stempel>.tgz.age | ssh <host> "docker run --rm -i \
-  -v /srv/suchlage/garage-secrets:/d busybox:1.37.0-uclibc sh -c 'find /d -mindepth 1 -delete && tar xzf - -C /d'"
-ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start fotos server'
+ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos media'
+( set -e -o pipefail
+  for v in server-data fotos-meta fotos-data garage-secrets; do   # mit --video: video dazu
+    age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> /srv/suchlage/deploy/restore.sh $v
+  done
+  ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start media fotos server' )
 rm suchlage-backup.key *-<Stempel>.tgz.age
 ```
 
-Für `video` dasselbe mit gestopptem `media`. Besitzer und Rechte stellt `tar` wieder her
-(Server als UID 65532, `rpc_secret` nur für den Besitzer lesbar).
+Besitzer und Rechte stellt `tar` wieder her (Server als UID 65532, `rpc_secret` nur für den
+Besitzer lesbar). Kurz braucht jedes Volume dabei den doppelten Platz.
 
 Was in welchem Volume liegt:
 - `suchlage-m1_server-data`: Datenbank mit Einstellungen, Konten, Einsätzen, Flügen und
