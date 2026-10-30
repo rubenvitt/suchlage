@@ -447,8 +447,9 @@ die erste verschlüsselte Sicherung wie unten zurückgespielt ist:
 ssh <host> 'sudo shred -u /srv/suchlage/backup/*.tgz'
 ```
 
-*Außer Haus.* Die Archive bleiben heute auf dem Host. Verschlüsselt dürfen sie ihn verlassen; wohin
-sie gehen, ist noch offen (SUL-107).
+*Außer Haus.* Die Archive bleiben heute auf dem Host. Verschlüsselt dürfen sie ihn verlassen. Sie
+sollen ins externe Ziel der IUK-Suite-Sicherung (`rclone`); bis das eingerichtet ist (SUL-118),
+bleiben sie hier.
 
 **Wiederherstellung.** Entschlüsselt wird auf dem eigenen Rechner, der private Schlüssel kommt nie
 auf den Host. Erst prüfen, dann zurückspielen:
