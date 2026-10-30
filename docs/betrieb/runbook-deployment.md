@@ -473,6 +473,8 @@ ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop se
   for v in server-data fotos-meta fotos-data garage-secrets; do   # mit --video: video dazu
     age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> /srv/suchlage/deploy/restore.sh $v
   done
+  # `start` wiederholt das schon beendete video-init nicht; es gibt die Videoablage dem Server-Nutzer.
+  ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml run --rm video-init'
   ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start media fotos server'
   rm suchlage-backup.key *-<Stempel>.tgz.age )
 ```
