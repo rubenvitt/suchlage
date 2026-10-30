@@ -38,7 +38,7 @@ server ──Compose-Netz──▶ mqtt, media (WHEP 8889, HLS 8888, Playback 99
 | DJI: App-ID, App-Key, Lizenz | 1Password, Tresor DRK, Item „DJI Cloud API – Suchlage“ | |
 | Workspace-ID | beliebige UUID (`uuidgen`), bleibt danach fest | |
 
-Am Host werden gebraucht: Linux (amd64 oder arm64), Docker Engine mit Compose v2, `rsync`, `openssl`,
+Am Host werden gebraucht: Linux (amd64 oder arm64), Docker Engine mit Compose v2, `rsync`, `openssl`, `age`,
 dazu Traefik oder `cloudflared` mit gültigem Zertifikat für `suchlage.iuk-ue.de`.
 Rechne mit Platz für Flugvideos, grob 1–2 GB pro Flugstunde.
 
@@ -408,20 +408,74 @@ ssh <host> 'docker tag suchlage:<alte Version> suchlage:m1 && cd /srv/suchlage/d
 Fehlt der alte Tag am Host, holt ihn Schritt 3 aus GHCR. Hat ein neuerer Stand die Datenbank
 migriert, hilft der Rückweg nur mit der Sicherung von davor.
 
-**Sicherung.** Server und Fotospeicher werden kurz gestoppt, damit beide SQLite-Datenbanken
-(Suchlage und die Metadaten von Garage) konsistent sind. Nicht während eines Flugs:
+**Sicherung.** `deploy/backup.sh` stoppt Server und Fotospeicher kurz, damit beide
+SQLite-Datenbanken (Suchlage und die Metadaten von Garage) konsistent sind, und legt je Volume ein
+mit `age` verschlüsseltes Archiv unter `/srv/suchlage/backup` ab. Unverschlüsselt liegt dabei nichts
+auf der Platte: `tar` schreibt direkt in `age`. Die Datenbank enthält Geheimnisse im Klartext
+(ADR 0004), geschützt ist sie deshalb nur, solange keine Sicherung unverschlüsselt vorliegt.
+Nicht während eines Flugs:
 
 ```sh
-ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos &&
-  for v in server-data fotos-meta fotos-data; do
-    docker run --rm -v suchlage-m1_$v:/d:ro -v /srv/suchlage/backup:/b busybox:1.37.0-uclibc tar czf /b/$v-$(date +%F).tgz -C /d .
-  done &&
-  docker run --rm -v /srv/suchlage/garage-secrets:/d:ro -v /srv/suchlage/backup:/b busybox:1.37.0-uclibc tar czf /b/garage-secrets-$(date +%F).tgz -C /d . &&
-  docker compose -f compose.m1.yaml start fotos server'
+ssh <host> /srv/suchlage/deploy/backup.sh           # mit --video auch die Flugvideos, stoppt dann auch media
 ```
 
-Die Flugvideos (`video`) sind groß und fehlen deshalb in der Schleife. Wer sie mitsichern will,
-nimmt `video` dazu und stoppt zusätzlich `media`.
+Je Lauf entstehen `server-data-`, `fotos-meta-`, `fotos-data-` und `garage-secrets-<Stempel>.tgz.age`
+mit demselben Stempel. Sie gehören zusammen. Scheitert ein Schritt, bricht das Skript ab, räumt das
+halbe Archiv weg und startet die Dienste trotzdem wieder. Die Flugvideos (`video`) sind groß und
+fehlen ohne `--video`.
+
+*Einmalig einrichten.* Den Schlüssel erzeugst du auf dem eigenen Rechner, nicht auf dem Host. Der
+private Teil gehört nur in 1Password, auf den Host kommt nur der öffentliche:
+
+```sh
+age-keygen -o suchlage-backup.key                   # zeigt „Public key: age1…“
+# Inhalt der Datei in 1Password, Tresor DRK, Item „Suchlage – Sicherungsschlüssel (age)“, dann:
+rm suchlage-backup.key
+ssh <host> 'sudo apt install -y age &&
+  sudo install -d -o "$USER" -m 700 /srv/suchlage/backup &&
+  echo age1… > /srv/suchlage/backup-empfaenger.txt'
+```
+
+Die Datei liegt neben `deploy/`, damit `rsync --delete` sie nicht löscht. Jede weitere Zeile
+`age1…` darin ist ein zusätzlicher Empfänger, etwa ein zweiter Schlüssel für die Vertretung. Ohne
+einen der privaten Schlüssel ist jede Sicherung wertlos.
+
+Archive von vor der Verschlüsselung (`*.tgz`) meldet das Skript bei jedem Lauf. Lösche sie, sobald
+die erste verschlüsselte Sicherung wie unten zurückgespielt ist:
+
+```sh
+ssh <host> 'sudo shred -u /srv/suchlage/backup/*.tgz'
+```
+
+*Außer Haus.* Die Archive bleiben heute auf dem Host. Verschlüsselt dürfen sie ihn verlassen; wohin
+sie gehen, ist noch offen (SUL-107).
+
+**Wiederherstellung.** Entschlüsselt wird auf dem eigenen Rechner, der private Schlüssel kommt nie
+auf den Host. Erst prüfen, dann zurückspielen:
+
+```sh
+scp '<host>:/srv/suchlage/backup/*-<Stempel>.tgz.age' .
+# Schlüssel aus 1Password nach suchlage-backup.key legen
+for f in *-<Stempel>.tgz.age; do age -d -i suchlage-backup.key "$f" | tar tzf - >/dev/null && echo "$f ok"; done
+```
+
+Steht hinter allen vier Dateien „ok“, die Dienste stoppen und die Volumes ersetzen. Das leert jedes
+Volume vor dem Auspacken:
+
+```sh
+ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos'
+for v in server-data fotos-meta fotos-data; do
+  age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> "docker run --rm -i -v suchlage-m1_$v:/d \
+    busybox:1.37.0-uclibc sh -c 'find /d -mindepth 1 -delete && tar xzf - -C /d'"
+done
+age -d -i suchlage-backup.key garage-secrets-<Stempel>.tgz.age | ssh <host> "docker run --rm -i \
+  -v /srv/suchlage/garage-secrets:/d busybox:1.37.0-uclibc sh -c 'find /d -mindepth 1 -delete && tar xzf - -C /d'"
+ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start fotos server'
+rm suchlage-backup.key *-<Stempel>.tgz.age
+```
+
+Für `video` dasselbe mit gestopptem `media`. Besitzer und Rechte stellt `tar` wieder her
+(Server als UID 65532, `rpc_secret` nur für den Besitzer lesbar).
 
 Was in welchem Volume liegt:
 - `suchlage-m1_server-data`: Datenbank mit Einstellungen, Konten, Einsätzen, Flügen und
