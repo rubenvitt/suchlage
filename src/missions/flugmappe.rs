@@ -661,15 +661,7 @@ impl MissionHub {
             store::mark_link_done(&self.pool, link, now_ms).await?;
             self.changed();
         }
-        let progress: Vec<rules::LinkProgress> = store::links(&self.pool, id)
-            .await?
-            .iter()
-            .map(|l| rules::LinkProgress {
-                done: l.done_at_ms.is_some(),
-                released: l.released_at_ms.is_some(),
-            })
-            .collect();
-        let mission = if rules::all_done(&progress) {
+        let mission = if self.all_links_done(id).await? {
             self.change_state_locked(id, MissionState::Closed, now_ms)
                 .await?
         } else {
@@ -719,7 +711,31 @@ impl MissionHub {
         }
         store::release_link(&self.pool, id, link_id, now_ms).await?;
         self.changed();
+        // Sind die übrigen schon fertig, wartet niemand mehr (Spec-Nachtrag, „Flugmappe verloren“).
+        // Fliegt noch etwas, bleibt der Einsatz offen; das Lösen selbst ist trotzdem gelungen.
+        if self.all_links_done(id).await? {
+            match self
+                .change_state_locked(id, MissionState::Closed, now_ms)
+                .await
+            {
+                Err(AppError::Unprocessable(_)) => {}
+                closed => return closed,
+            }
+        }
         self.get(id).await
+    }
+
+    /// Alle nicht gelösten Verknüpfungen sind fertig (`rules::all_done`).
+    async fn all_links_done(&self, id: i64) -> Result<bool, AppError> {
+        let progress: Vec<rules::LinkProgress> = store::links(&self.pool, id)
+            .await?
+            .iter()
+            .map(|l| rules::LinkProgress {
+                done: l.done_at_ms.is_some(),
+                released: l.released_at_ms.is_some(),
+            })
+            .collect();
+        Ok(rules::all_done(&progress))
     }
 }
 
@@ -1942,5 +1958,25 @@ mod tests {
             g.hub.close_from_flugmappe(id, FM_B, 42).await,
             Err(AppError::Conflict(_))
         ));
+
+        // Erst fertig, dann die andere verloren: Das Lösen schließt, wenn nichts mehr fliegt.
+        let h = hub().await;
+        let id = two_flugmappen(&h.hub).await;
+        let link_b = h.hub.get(id).await.unwrap().flugmappe_links[1].id;
+        let first = h.hub.close_from_flugmappe(id, FM_A, 50).await.unwrap();
+        assert_eq!(first.state, MissionState::Running, "B ist offen");
+        flights::insert(&h.hub.pool, &flight(1, None))
+            .await
+            .unwrap();
+        let open = h.hub.release_flugmappe(id, link_b, 51).await.unwrap();
+        assert_eq!(open.state, MissionState::Running, "es fliegt noch");
+        assert_eq!(open.flugmappe_links[1].released_at_ms, Some(51));
+
+        let k = hub().await;
+        let id = two_flugmappen(&k.hub).await;
+        let link_b = k.hub.get(id).await.unwrap().flugmappe_links[1].id;
+        k.hub.close_from_flugmappe(id, FM_A, 60).await.unwrap();
+        let closed = k.hub.release_flugmappe(id, link_b, 61).await.unwrap();
+        assert_eq!(closed.state, MissionState::Closed);
     }
 }
