@@ -187,3 +187,27 @@
   gap: 4px;
   margin-bottom: 12px;
 }
+/* Verknüpfte Flugmappen (SUL-113): je Zeile Fluggerät, wer, Zustand und „Lösen“. */
+.sl-fm-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.sl-fm-links li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sl-fm-links li > span {
+  color: var(--lfh-gedaempft);
+}
+.sl-fm-links li > button {
+  margin-left: auto;
+}
+.sl-fm-release-actions {
+  display: flex;
+  gap: 8px;
+}

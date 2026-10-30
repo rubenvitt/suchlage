@@ -9,6 +9,7 @@ import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
 import type { MissionContents } from '../contract/generated/MissionContents';
 import type { MissionCreate } from '../contract/generated/MissionCreate';
+import type { MissionFlight } from '../contract/generated/MissionFlight';
 import type { MissionUpdate } from '../contract/generated/MissionUpdate';
 import type { PhotoShot } from '../contract/generated/PhotoShot';
 import type { SectionCreate } from '../contract/generated/SectionCreate';
@@ -68,6 +69,16 @@ export const useFlights = (scope: MissionScope, enabled = true) => {
     queryFn: enabled ? () => apiGet<FlightSummary[]>(`/api/flights?mission=${mission}`) : skipToken,
   });
 };
+/**
+ * Flugliste eines Einsatzes: Telemetrie-Flüge und Handeinträge der Flugmappen. Unter `flights`, damit
+ * Flugstart, Landung und `missions_changed` (neue Flugbucheinträge) sie neu laden.
+ */
+export const useMissionFlights = (missionId: number | null) =>
+  useQuery({
+    queryKey: [...queryKeys.flights, 'log', missionId],
+    queryFn:
+      missionId == null ? skipToken : () => apiGet<MissionFlight[]>(`/api/missions/${missionId}/flight-log`),
+  });
 /** `null` steht für eine Adresse ohne gültige Flugnummer: Dann fragt die Abfrage gar nicht erst. */
 export const useFlight = (id: number | null) =>
   useQuery({
@@ -130,6 +141,11 @@ export const useCloseMission = () =>
 export const useUpdateMission = () =>
   useMissionWrite(({ id, ...body }: MissionUpdate & { id: number }) =>
     apiSend<Mission>('PUT', `/api/missions/${id}`, body),
+  );
+/** Flugmappe vom Einsatz lösen (verlorenes Gerät); ihre Flugbucheinträge bleiben. */
+export const useReleaseFlugmappe = () =>
+  useMissionWrite(({ id, linkId }: { id: number; linkId: number }) =>
+    apiSend<Mission>('POST', `/api/missions/${id}/flugmappe-links/${linkId}/release`),
   );
 export const useAddSection = () =>
   useMissionWrite(({ id, ...body }: SectionCreate & { id: number }) =>

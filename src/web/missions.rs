@@ -11,7 +11,8 @@ use axum::{Json, Router};
 use crate::app::AppState;
 use crate::auth::session::{Admin, Operator, Viewer};
 use crate::contract::{
-    Mission, MissionAssign, MissionContents, MissionCreate, MissionUpdate, SectionCreate,
+    Mission, MissionAssign, MissionContents, MissionCreate, MissionFlight, MissionUpdate,
+    SectionCreate,
 };
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -25,6 +26,11 @@ pub fn routes() -> Router<AppState> {
         .route("/missions/{id}/start", post(start))
         .route("/missions/{id}/close", post(close))
         .route("/missions/{id}/sections", post(add_section))
+        .route("/missions/{id}/flight-log", get(flight_log))
+        .route(
+            "/missions/{id}/flugmappe-links/{link_id}/release",
+            post(release_flugmappe),
+        )
         .route(
             "/missions/{id}/sections/{section_id}/map-photo",
             get(map_photo),
@@ -113,6 +119,30 @@ async fn add_section(
     JsonBody(input): JsonBody<SectionCreate>,
 ) -> Result<Json<Mission>, AppError> {
     Ok(Json(state.missions.add_section(id, input, now_ms()).await?))
+}
+
+/// Flugliste des Einsatzes: Telemetrie-Flüge und Handeinträge der Flugmappen (SUL-113). Wie die
+/// Flugliste nur für Konten.
+async fn flight_log(
+    _: Operator,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<MissionFlight>>, AppError> {
+    Ok(Json(state.missions.flight_log(id).await?))
+}
+
+/// Löst eine Flugmappe vom Einsatz (verlorenes Gerät); ihre Einträge bleiben.
+async fn release_flugmappe(
+    _: Operator,
+    State(state): State<AppState>,
+    Path((id, link_id)): Path<(i64, i64)>,
+) -> Result<Json<Mission>, AppError> {
+    Ok(Json(
+        state
+            .missions
+            .release_flugmappe(id, link_id, now_ms())
+            .await?,
+    ))
 }
 
 /// Foto der Papierkarte eines Abschnitts (aus der Flugmappe). Die Flugmappe kann es ersetzen;

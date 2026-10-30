@@ -1,8 +1,10 @@
-//! Schnittstelle für die Flugmappe (`/api/flugmappe/v1`, SUL-66). Die Flugmappe übernimmt die
+//! Schnittstelle für die Flugmappe (`/api/flugmappe/v2`, SUL-66, mehrere Flugmappen SUL-113). Die Flugmappe übernimmt die
 //! erzeugten TypeScript-Typen als Kopie. Felder `snake_case`, Zeiten in ms seit Epoch.
 //!
 //! Einsatzbezogene Aufrufe (`/missions/{id}/…`) tragen den Header [`FLUGMAPPE_MISSION_HEADER`]
 //! mit der Einsatz-ID der Flugmappe; Abschnitte adressiert die Flugmappe über ihre eigene ID.
+//! Mehrere Flugmappen dürfen gleichzeitig mit einem Einsatz verknüpft sein; jede sieht nur ihre
+//! eigenen Abschnitts-IDs.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -13,8 +15,8 @@ use super::live::GeoPoint;
 use super::map::MapElementKind;
 use super::missions::MissionState;
 
-/// Version der Schnittstelle, steht im Pfad (`/v1`) und in [`FmMe`].
-pub const FLUGMAPPE_API_VERSION: u32 = 1;
+/// Version der Schnittstelle, steht im Pfad (`/v2`) und in [`FmMe`].
+pub const FLUGMAPPE_API_VERSION: u32 = 2;
 /// Einsatz-ID der Flugmappe (UUID) bei allen Aufrufen unter `/missions/{id}/…`.
 pub const FLUGMAPPE_MISSION_HEADER: &str = "X-Flugmappe-Einsatz";
 
@@ -28,16 +30,24 @@ pub struct FmMe {
     pub api_version: u32,
 }
 
-/// Mit welcher Flugmappe ein Einsatz verknüpft ist. Die Flugmappe vergleicht die UUID mit ihrer
-/// eigenen: gleich → „mit mir verknüpft“, sonst „mit einer anderen“ (Übernehmen anbieten).
+/// Eine Flugmappe, die mit dem Einsatz verknüpft ist. Die Flugmappe erkennt ihre eigene an der
+/// UUID; die anderen zeigt sie als „ebenfalls verknüpft“.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FmLinkInfo {
     pub flugmappe_mission_id: String,
-    /// Anzeigename des Kontos, das verknüpft (oder übernommen) hat.
+    /// Fluggerät der Flugmappe, z. B. „Matrice 200“.
+    pub aircraft_label: String,
+    /// Anzeigename des Kontos, das verknüpft hat.
     pub linked_by: String,
     #[ts(type = "number")]
     pub linked_at_ms: i64,
+    /// Die Flugmappe hat ihren Teil abgeschlossen.
+    #[ts(type = "number | null")]
+    pub done_at_ms: Option<i64>,
+    /// In Suchlage gelöst: Diese Flugmappe darf nichts mehr am Einsatz, bis sie neu verknüpft.
+    #[ts(type = "number | null")]
+    pub released_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -46,7 +56,8 @@ pub struct FmSection {
     /// ID in Suchlage.
     #[ts(type = "number")]
     pub id: i64,
-    /// `null`: in Suchlage angelegt und (noch) keinem Abschnitt der Flugmappe zugeordnet.
+    /// Abschnitts-ID der aufrufenden Flugmappe; `null`: in Suchlage oder von einer anderen
+    /// Flugmappe angelegt (deren IDs sieht sie nicht).
     pub flugmappe_section_id: Option<String>,
     pub label: String,
     pub location: Option<String>,
@@ -68,10 +79,11 @@ pub struct FmMission {
     #[ts(type = "number")]
     pub created_at_ms: i64,
     pub created_by: String,
-    /// Älteste zuerst; der letzte Abschnitt ist der aktive.
+    /// Älteste zuerst; der letzte ist der aktive des Einsatzes, der letzte mit eigener ID der
+    /// aktive der Flugmappe.
     pub sections: Vec<FmSection>,
-    /// `null`: mit keiner Flugmappe verknüpft.
-    pub link: Option<FmLinkInfo>,
+    /// Alle Verknüpfungen, älteste zuerst, auch gelöste; leer: mit keiner Flugmappe verknüpft.
+    pub links: Vec<FmLinkInfo>,
 }
 
 /// `POST /missions`: neuer Einsatz aus der Flugmappe, läuft sofort.
@@ -85,19 +97,23 @@ pub struct FmMissionCreate {
     /// UUID des Einsatzes in der Flugmappe.
     pub flugmappe_mission_id: String,
     pub flugmappe_section_id: String,
+    /// Fluggerät der Flugmappe, z. B. „Matrice 350 RTK“.
+    pub aircraft_label: String,
 }
 
-/// `POST /missions/{id}/link`: vorbereiteten oder laufenden Einsatz verknüpfen. Ist er mit einer
-/// anderen Flugmappe verknüpft, braucht es `take_over: true` (nach Bestätigung durch den Nutzer).
+/// `POST /missions/{id}/link`: vorbereiteten oder laufenden Einsatz verknüpfen. Andere
+/// verknüpfte Flugmappen stören nicht („Dazukommen“). Verknüpft dieselbe Flugmappe denselben
+/// Einsatz wieder, lebt ihre alte (auch gelöste) Verknüpfung wieder auf.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FmMissionLink {
     pub flugmappe_mission_id: String,
-    /// Aktiver Abschnitt der Flugmappe; wird der aktive Abschnitt in Suchlage.
+    /// Aktiver Abschnitt der Flugmappe; wird der aktive Abschnitt der Flugmappe in Suchlage.
     pub flugmappe_section_id: String,
     pub section_label: String,
     pub section_location: Option<String>,
-    pub take_over: bool,
+    /// Fluggerät der Flugmappe.
+    pub aircraft_label: String,
 }
 
 /// `POST /missions/{id}/sections`: Verlegung in der Flugmappe; wird der aktive Abschnitt.
@@ -142,6 +158,49 @@ pub struct FmFlight {
     pub distance_m: f64,
     /// Auslösungen (eine Auslösung mit mehreren Linsen zählt einmal).
     pub photo_count: u32,
+    /// Fluggerät einer **anderen** Flugmappe, die den Flug bestätigt hat: dann kein Vorschlag
+    /// mehr. `null`: unbestätigt oder von der aufrufenden bestätigt (die kennt ihren Eintrag).
+    pub confirmed_by: Option<String>,
+}
+
+/// `PUT /missions/{id}/logbook/{entry_id}`: ein Flugbucheintrag der Flugmappe, bestätigt
+/// (`flight_id`) oder von Hand. Wiederholbar; Suchlage übernimmt ihn nur mit höherer `revision`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FmLogbookEntry {
+    /// Steigt in der Flugmappe bei jeder Änderung und beim Löschen um eins, ab 1.
+    #[ts(type = "number")]
+    pub revision: i64,
+    /// Bestätigter Telemetrie-Flug dieses Einsatzes; `null`: Handeintrag.
+    #[ts(type = "number | null")]
+    pub flight_id: Option<i64>,
+    /// Abschnitt der Flugmappe; beim bestätigten Flug übernimmt Suchlage ihn auch für den Flug.
+    pub flugmappe_section_id: Option<String>,
+    #[ts(type = "number")]
+    pub started_at_ms: i64,
+    /// `null`: noch in der Luft.
+    #[ts(type = "number | null")]
+    pub landed_at_ms: Option<i64>,
+    /// Fluggerät, z. B. „Matrice 200“.
+    pub aircraft_label: String,
+    /// Fernpilot.
+    pub pilot: Option<String>,
+    /// Landestatus wie in der Flugmappe (Freitext, z. B. „normal“).
+    pub landing_status: Option<String>,
+    /// Änderungszeitpunkt in der Flugmappe, nur zur Anzeige.
+    #[ts(type = "number")]
+    pub changed_at_ms: i64,
+}
+
+/// Antwort auf `PUT …/logbook/{entry_id}`: der gespeicherte Stand. Bei gleicher oder kleinerer
+/// Revision ist das der ältere gespeicherte (kein Fehler), `entry` ist `null` bei einer Löschmarke.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FmLogbookStored {
+    pub entry_id: String,
+    #[ts(type = "number")]
+    pub revision: i64,
+    pub entry: Option<FmLogbookEntry>,
 }
 
 /// Eine Zeichnung aus der Einsatzkarte der Flugmappe. Kreise kommen als Polygon.
@@ -155,7 +214,8 @@ pub struct FmImportFeature {
     pub points: Vec<GeoPoint>,
 }
 
-/// `POST /missions/{id}/map/import`: einmal je Einsatz, beim Verknüpfen.
+/// `POST /missions/{id}/map/import`: einmal je Einsatz, beim Verknüpfen; die Zeichnungen einer
+/// später dazukommenden Flugmappe übernimmt Suchlage nicht mehr.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FmMapImport {

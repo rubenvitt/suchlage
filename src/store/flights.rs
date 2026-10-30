@@ -127,6 +127,14 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<FlightSummary>, sq
     Ok(row.as_ref().map(summary))
 }
 
+/// Einsatz eines Flugs: `None`, wenn es den Flug nicht gibt, `Some(None)` ohne Einsatz.
+pub async fn mission_of(pool: &SqlitePool, id: i64) -> Result<Option<Option<i64>>, sqlx::Error> {
+    sqlx::query_scalar("SELECT mission_id FROM flights WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Spurpunkte in Zeitfolge, an jedem Segmentwechsel getrennt.
 pub async fn segments(pool: &SqlitePool, id: i64) -> Result<Vec<Vec<TrackPoint>>, sqlx::Error> {
     let rows = sqlx::query(

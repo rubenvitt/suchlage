@@ -35,8 +35,8 @@ pub struct MissionHub {
 impl From<rules::Refusal> for AppError {
     fn from(r: rules::Refusal) -> Self {
         match r {
-            rules::Refusal::Conflict(m) => AppError::Conflict(m.into()),
-            rules::Refusal::Unprocessable(m) => AppError::Unprocessable(m.into()),
+            rules::Refusal::Conflict(m) => AppError::Conflict(m.into_owned()),
+            rules::Refusal::Unprocessable(m) => AppError::Unprocessable(m.into_owned()),
         }
     }
 }
@@ -178,7 +178,7 @@ impl MissionHub {
             ));
         }
         // Bei verknüpften Einsätzen ist eine Verlegung Sache der Flugmappe (Spec §4).
-        if mission.flugmappe.is_some() {
+        if mission.has_active_flugmappe() {
             return Err(AppError::Unprocessable(
                 rules::SECTIONS_FROM_FLUGMAPPE.into(),
             ));

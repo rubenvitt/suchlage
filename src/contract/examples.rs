@@ -438,8 +438,8 @@ pub fn photo_shots() -> Vec<PhotoShot> {
     ]
 }
 
-/// Ein laufender Einsatz aus der Flugmappe mit Kartenfoto im zweiten Abschnitt und ein
-/// vorbereiteter aus dem Browser.
+/// Ein laufender Einsatz aus der Flugmappe mit Kartenfoto im zweiten Abschnitt, einer zweiten,
+/// dazugekommenen Flugmappe (M200) und einer gelösten; dazu ein vorbereiteter aus dem Browser.
 pub fn missions() -> Vec<Mission> {
     let section = |id: i64, label: &str, at: i64, photo: Option<i64>| MissionSection {
         id,
@@ -464,10 +464,32 @@ pub fn missions() -> Vec<Mission> {
                 section(5, "Verlegung Waldrand", T0 - 1_200_000, Some(T0 - 900_000)),
             ],
             origin: MissionOrigin::Flugmappe,
-            flugmappe: Some(FlugmappeLink {
-                linked_by: "Gruppenführer I&K".into(),
-                linked_at_ms: T0 - 3_600_000,
-            }),
+            flugmappe_links: vec![
+                FlugmappeLink {
+                    id: 1,
+                    aircraft_label: "Matrice 350 RTK".into(),
+                    linked_by: "Gruppenführer I&K".into(),
+                    linked_at_ms: T0 - 3_600_000,
+                    done_at_ms: None,
+                    released_at_ms: None,
+                },
+                FlugmappeLink {
+                    id: 2,
+                    aircraft_label: "Matrice 200".into(),
+                    linked_by: "Max Muster".into(),
+                    linked_at_ms: T0 - 2_700_000,
+                    done_at_ms: Some(T0 - 300_000),
+                    released_at_ms: None,
+                },
+                FlugmappeLink {
+                    id: 3,
+                    aircraft_label: "Mavic 3T".into(),
+                    linked_by: "Gesa Gast".into(),
+                    linked_at_ms: T0 - 3_000_000,
+                    done_at_ms: None,
+                    released_at_ms: Some(T0 - 2_800_000),
+                },
+            ],
         },
         Mission {
             id: 4,
@@ -480,12 +502,56 @@ pub fn missions() -> Vec<Mission> {
             closed_at_ms: None,
             sections: vec![section(6, "Abschnitt 1", T0 - 600_000, None)],
             origin: MissionOrigin::Web,
-            flugmappe: None,
+            flugmappe_links: vec![],
+        },
+    ]
+}
+
+/// Flugliste des laufenden Einsatzes: ein in der M350-Flugmappe bestätigter Telemetrie-Flug, ein
+/// Handeintrag der M200 und der laufende Telemetrie-Flug, bestätigt in der M200-Flugmappe.
+pub fn mission_flights() -> Vec<MissionFlight> {
+    let landed = flight_landed(6, T0 - 2_400_000);
+    let running = flight_running();
+    vec![
+        MissionFlight {
+            key: "t6".into(),
+            flight_id: Some(6),
+            source: MissionFlightSource::Telemetry,
+            started_at_ms: landed.started_at_ms,
+            ended_at_ms: landed.ended_at_ms,
+            aircraft: "Matrice 350 RTK".into(),
+            section: Some("Abschnitt 1".into()),
+            confirmed_in: Some("Matrice 350 RTK".into()),
+            pilot: Some("Erika Mustermann".into()),
+        },
+        MissionFlight {
+            key: "f1".into(),
+            flight_id: None,
+            source: MissionFlightSource::Flugmappe,
+            started_at_ms: T0 - 1_500_000,
+            ended_at_ms: Some(T0 - 900_000),
+            aircraft: "Matrice 200".into(),
+            section: Some("Verlegung Waldrand".into()),
+            confirmed_in: None,
+            pilot: Some("Max Muster".into()),
+        },
+        MissionFlight {
+            key: "t7".into(),
+            flight_id: Some(7),
+            source: MissionFlightSource::Telemetry,
+            started_at_ms: running.started_at_ms,
+            ended_at_ms: None,
+            aircraft: "Matrice 350 RTK".into(),
+            section: Some("Verlegung Waldrand".into()),
+            confirmed_in: Some("Matrice 200".into()),
+            pilot: Some("Max Muster".into()),
         },
     ]
 }
 
 pub const FM_MISSION_ID: &str = "0f6b2a1e-5d43-4c8e-9b7a-2e1f3c4d5a6b";
+pub const FM_MISSION_ID_M200: &str = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+pub const FM_MISSION_ID_RELEASED: &str = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e";
 pub const FM_SECTION_IDS: [&str; 2] = [
     "6a1d9c2b-3e4f-4a5b-8c7d-9e0f1a2b3c4d",
     "b7e8f9a0-1b2c-4d3e-8f4a-5b6c7d8e9f0a",
@@ -502,7 +568,8 @@ pub fn fm_me() -> FmMe {
 /// Der verknüpfte Einsatz aus `missions()` und der vorbereitete ohne Flugmappe.
 pub fn fm_missions() -> Vec<FmMission> {
     let [linked, prepared] = missions().try_into().unwrap();
-    let fm = |m: Mission, fm_sections: &[&str], link: bool| FmMission {
+    let uuids = [FM_MISSION_ID, FM_MISSION_ID_M200, FM_MISSION_ID_RELEASED];
+    let fm = |m: Mission, fm_sections: &[&str]| FmMission {
         id: m.id,
         name: m.name,
         location: m.location,
@@ -528,18 +595,27 @@ pub fn fm_missions() -> Vec<FmMission> {
                 has_map_photo: s.has_map_photo,
             })
             .collect(),
-        link: link.then(|| FmLinkInfo {
-            flugmappe_mission_id: FM_MISSION_ID.into(),
-            linked_by: m.created_by,
-            linked_at_ms: m.created_at_ms,
-        }),
+        links: m
+            .flugmappe_links
+            .iter()
+            .zip(uuids)
+            .map(|(l, uuid)| FmLinkInfo {
+                flugmappe_mission_id: uuid.into(),
+                aircraft_label: l.aircraft_label.clone(),
+                linked_by: l.linked_by.clone(),
+                linked_at_ms: l.linked_at_ms,
+                done_at_ms: l.done_at_ms,
+                released_at_ms: l.released_at_ms,
+            })
+            .collect(),
     };
-    vec![fm(linked, &FM_SECTION_IDS, true), fm(prepared, &[], false)]
+    vec![fm(linked, &FM_SECTION_IDS), fm(prepared, &[])]
 }
 
-/// Ein gelandeter Flug im ersten Abschnitt und der laufende im zweiten.
+/// Aus Sicht der M350-Flugmappe: ein gelandeter Flug im ersten Abschnitt (von ihr bestätigt) und der
+/// laufende im zweiten, den die M200-Flugmappe bestätigt hat.
 pub fn fm_flights() -> Vec<FmFlight> {
-    let fm = |f: FlightSummary, section: &str, photos: u32| FmFlight {
+    let fm = |f: FlightSummary, section: &str, photos: u32, by: Option<&str>| FmFlight {
         id: f.id,
         flugmappe_section_id: Some(section.into()),
         started_at_ms: f.started_at_ms,
@@ -550,11 +626,31 @@ pub fn fm_flights() -> Vec<FmFlight> {
         max_elevation_m: f.max_elevation_m,
         distance_m: f.distance_m,
         photo_count: photos,
+        confirmed_by: by.map(Into::into),
     };
     vec![
-        fm(flight_landed(6, T0 - 2_400_000), FM_SECTION_IDS[0], 2),
-        fm(flight_running(), FM_SECTION_IDS[1], 0),
+        fm(flight_landed(6, T0 - 2_400_000), FM_SECTION_IDS[0], 2, None),
+        fm(flight_running(), FM_SECTION_IDS[1], 0, Some("Matrice 200")),
     ]
+}
+
+/// Antwort auf das Melden eines Handeintrags.
+pub fn fm_logbook_stored() -> FmLogbookStored {
+    FmLogbookStored {
+        entry_id: "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f".into(),
+        revision: 2,
+        entry: Some(FmLogbookEntry {
+            revision: 2,
+            flight_id: None,
+            flugmappe_section_id: Some(FM_SECTION_IDS[1].into()),
+            started_at_ms: T0 - 1_500_000,
+            landed_at_ms: Some(T0 - 900_000),
+            aircraft_label: "Matrice 200".into(),
+            pilot: Some("Max Muster".into()),
+            landing_status: Some("normal".into()),
+            changed_at_ms: T0 - 850_000,
+        }),
+    }
 }
 
 /// Das Suchgebiet aus `map_elements()` und die Spur des laufenden Flugs.
@@ -772,9 +868,11 @@ pub fn all() -> Vec<Fixture> {
         fx("mapElements", "MapElement[]", &map_elements()),
         fx("photoShots", "PhotoShot[]", &photo_shots()),
         fx("missionList", "Mission[]", &missions()),
+        fx("missionFlights", "MissionFlight[]", &mission_flights()),
         fx("fmMe", "FmMe", &fm_me()),
         fx("fmMissions", "FmMission[]", &fm_missions()),
         fx("fmFlights", "FmFlight[]", &fm_flights()),
+        fx("fmLogbookStored", "FmLogbookStored", &fm_logbook_stored()),
         fx("fmMap", "FmFeatureCollection", &fm_map()),
         fx(
             "meAdmin",
@@ -837,6 +935,8 @@ pub fn assert_roundtrips() {
     roundtrip(fm_me());
     roundtrip(fm_missions());
     roundtrip(fm_flights());
+    roundtrip(fm_logbook_stored());
+    roundtrip(mission_flights());
     roundtrip(fm_map());
     roundtrip(health());
 }

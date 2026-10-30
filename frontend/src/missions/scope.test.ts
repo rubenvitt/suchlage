@@ -12,7 +12,7 @@ const mission = (id: number, state: Mission['state']): Mission => ({
   closed_at_ms: null,
   sections: [],
   origin: 'web',
-  flugmappe: null,
+  flugmappe_links: [],
 });
 const m7 = mission(7, 'prepared');
 const running = mission(3, 'running');

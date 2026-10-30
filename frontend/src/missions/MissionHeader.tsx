@@ -8,16 +8,24 @@ import {
   useCloseMission,
   useMe,
   useMissions,
+  useReleaseFlugmappe,
   useStartMission,
   useUpdateMission,
 } from '../api/queries';
 import { StatusChip, useRollen } from '../components/instrument';
 import { statusFlaeche } from '../components/instrument/statusFlaeche';
+import type { FlugmappeLink } from '../contract/generated/FlugmappeLink';
 import type { Mission } from '../contract/generated/Mission';
 import { useServerNow } from '../live/LiveProvider';
 import { DeleteMissionDialog } from './DeleteMissionDialog';
 import { useSkip } from './entry';
-import { flugmappeHint, MapPhotoThumb, SECTIONS_FROM_FLUGMAPPE } from './flugmappe';
+import {
+  activeLinks,
+  FlugmappeLinks,
+  flugmappeHint,
+  MapPhotoThumb,
+  SECTIONS_FROM_FLUGMAPPE,
+} from './flugmappe';
 import './missions.css';
 import { useMissionScope } from './useMissionScope';
 
@@ -167,7 +175,7 @@ function FlugmappeShort({ mission }: { mission: Mission }) {
   ) : null;
 }
 
-type Dialog = 'section' | 'edit' | 'close' | 'map-photos';
+type Dialog = 'section' | 'edit' | 'close' | 'map-photos' | 'flugmappen';
 
 function Running({ mission }: { mission: Mission }) {
   const now = useServerNow(15_000);
@@ -176,6 +184,7 @@ function Running({ mission }: { mission: Mission }) {
   const [open, setOpen] = useState(false);
   const section = mission.sections.at(-1);
   const hint = flugmappeHint(mission);
+  const linked = activeLinks(mission).length > 0;
   const items: MenuProps['items'] = [
     {
       type: 'group',
@@ -183,23 +192,24 @@ function Running({ mission }: { mission: Mission }) {
       label: 'Einsatz',
       children: [
         // Verknüpft: Abschnitte legt die Flugmappe an (Server: 422).
-        ...(mission.flugmappe ? [] : [{ key: 'section', label: 'Neuer Abschnitt …' }]),
+        ...(linked ? [] : [{ key: 'section', label: 'Neuer Abschnitt …' }]),
         ...(mission.sections.some((s) => s.has_map_photo) ? [{ key: 'map-photos', label: 'Kartenfotos …' }] : []),
         { key: 'edit', label: 'Einsatz bearbeiten' },
         { key: 'flights', label: 'Flüge dieses Einsatzes' },
         { key: 'close', label: 'Einsatz abschließen …', danger: true },
       ],
     },
-    // Nur Anzeige: Herkunft und Verknüpfung, schmal steht das nicht im Kopf.
-    ...(hint
+    // Herkunft und Verknüpfung (schmal steht das nicht im Kopf), dazu die Flugmappen mit „Lösen“.
+    ...(hint || mission.flugmappe_links.length
       ? [
           {
             type: 'group' as const,
             key: 'flugmappe',
             label: 'Flugmappe',
             children: [
-              { key: 'fm-hint', label: hint, disabled: true },
-              ...(mission.flugmappe ? [{ key: 'fm-sections', label: SECTIONS_FROM_FLUGMAPPE, disabled: true }] : []),
+              ...(hint ? [{ key: 'fm-hint', label: hint, disabled: true }] : []),
+              ...(mission.flugmappe_links.length ? [{ key: 'flugmappen', label: 'Verknüpfte Flugmappen …' }] : []),
+              ...(linked ? [{ key: 'fm-sections', label: SECTIONS_FROM_FLUGMAPPE, disabled: true }] : []),
             ],
           },
         ]
@@ -224,6 +234,7 @@ function Running({ mission }: { mission: Mission }) {
       </Dropdown>
       {dialog === 'section' && <SectionDialog mission={mission} onClose={close} />}
       {dialog === 'map-photos' && <MapPhotosDialog mission={mission} onClose={close} />}
+      {dialog === 'flugmappen' && <FlugmappenDialog mission={mission} onClose={close} />}
       {dialog === 'edit' && <EditDialog mission={mission} onClose={close} />}
       {dialog === 'close' && <CloseDialog mission={mission} onClose={close} />}
     </div>
@@ -256,6 +267,55 @@ function SectionDialog({ mission, onClose }: { mission: Mission; onClose: () => 
         </Form.Item>
       </Form>
       {add.isError && <Alert type="error" title={errorText(add.error)} />}
+    </Modal>
+  );
+}
+
+/**
+ * Verknüpfte Flugmappen mit Zustand. „Lösen“ ist der Ausweg bei einem verlorenen Gerät: Die Flugmappe
+ * darf danach nichts mehr am Einsatz, bis sie neu verknüpft; ihre Flugbucheinträge bleiben.
+ */
+function FlugmappenDialog({ mission, onClose }: { mission: Mission; onClose: () => void }) {
+  const release = useReleaseFlugmappe();
+  const [asking, setAsking] = useState<FlugmappeLink | null>(null);
+  return (
+    <Modal open title={`Flugmappen · ${mission.name}`} footer={null} onCancel={onClose}>
+      <p className="sl-mission-fm-sections">
+        Der Einsatz schließt aus der Flugmappe, wenn keine verknüpfte mehr offen ist.
+      </p>
+      <FlugmappeLinks
+        mission={mission}
+        onRelease={setAsking}
+        releasing={release.isPending ? (release.variables?.linkId ?? null) : null}
+      />
+      {asking && (
+        <Alert
+          type="warning"
+          title={`Flugmappe ${asking.aircraft_label} lösen?`}
+          description="Sie kann danach nichts mehr an diesem Einsatz ändern, bis sie neu verknüpft. Gemeldete Flüge bleiben."
+          action={
+            <span className="sl-fm-release-actions">
+              <Button size="small" onClick={() => setAsking(null)}>
+                Abbrechen
+              </Button>
+              <Button
+                size="small"
+                danger
+                loading={release.isPending}
+                onClick={() =>
+                  void release.mutateAsync({ id: mission.id, linkId: asking.id }).then(
+                    () => setAsking(null),
+                    () => {},
+                  )
+                }
+              >
+                Lösen
+              </Button>
+            </span>
+          }
+        />
+      )}
+      {release.isError && <Alert type="error" title={errorText(release.error)} />}
     </Modal>
   );
 }

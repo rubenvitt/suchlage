@@ -5,10 +5,11 @@ import type { MissionState } from "./MissionState";
 
 export type FmMission = { id: number, name: string, location: string | null, state: MissionState, started_at_ms: number | null, created_at_ms: number, created_by: string, 
 /**
- * Älteste zuerst; der letzte Abschnitt ist der aktive.
+ * Älteste zuerst; der letzte ist der aktive des Einsatzes, der letzte mit eigener ID der
+ * aktive der Flugmappe.
  */
 sections: Array<FmSection>, 
 /**
- * `null`: mit keiner Flugmappe verknüpft.
+ * Alle Verknüpfungen, älteste zuerst, auch gelöste; leer: mit keiner Flugmappe verknüpft.
  */
-link: FmLinkInfo | null, };
+links: Array<FmLinkInfo>, };

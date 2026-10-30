@@ -9,7 +9,7 @@ import type { MissionCreate } from '../contract/generated/MissionCreate';
 import type { MissionState } from '../contract/generated/MissionState';
 import type { SectionCreate } from '../contract/generated/SectionCreate';
 import { Frame } from '../shell/Frame';
-import { FlugmappeNote, SECTIONS_FROM_FLUGMAPPE, SectionList } from './flugmappe';
+import { activeLinks, FlugmappeLinks, FlugmappeNote, SECTIONS_FROM_FLUGMAPPE, SectionList } from './flugmappe';
 import './missions.css';
 
 // Der laufende Einsatz steht in der Kopfleiste; das Archiv zeigt die zuletzt abgeschlossenen zuerst.
@@ -72,10 +72,11 @@ function MissionRow({ mission, act }: { mission: Mission; act: Act }) {
         </div>
       </div>
       <FlugmappeNote mission={mission} />
+      <FlugmappeLinks mission={mission} />
       <SectionList mission={mission} />
       {/* Verknüpft: Die Flugmappe legt die Abschnitte an, der Server lehnt hier ab (422). */}
       {mission.state !== 'closed' &&
-        (mission.flugmappe ? (
+        (activeLinks(mission).length > 0 ? (
           <p className="sl-mission-fm-sections">{SECTIONS_FROM_FLUGMAPPE}</p>
         ) : (
           <SectionForm mission={mission} act={act} />

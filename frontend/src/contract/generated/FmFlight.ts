@@ -24,4 +24,9 @@ max_elevation_m: number | null, distance_m: number,
 /**
  * Auslösungen (eine Auslösung mit mehreren Linsen zählt einmal).
  */
-photo_count: number, };
+photo_count: number, 
+/**
+ * Fluggerät einer **anderen** Flugmappe, die den Flug bestätigt hat: dann kein Vorschlag
+ * mehr. `null`: unbestätigt oder von der aufrufenden bestätigt (die kennt ihren Eintrag).
+ */
+confirmed_by: string | null, };

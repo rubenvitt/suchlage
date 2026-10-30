@@ -3,7 +3,8 @@ import type { FmImportFeature } from "./FmImportFeature";
 import type { GeoPoint } from "./GeoPoint";
 
 /**
- * `POST /missions/{id}/map/import`: einmal je Einsatz, beim Verknüpfen.
+ * `POST /missions/{id}/map/import`: einmal je Einsatz, beim Verknüpfen; die Zeichnungen einer
+ * später dazukommenden Flugmappe übernimmt Suchlage nicht mehr.
  */
 export type FmMapImport = { features: Array<FmImportFeature>, 
 /**
