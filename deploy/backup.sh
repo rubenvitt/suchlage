@@ -35,6 +35,19 @@ grep -q '^age1' "$RECIPIENTS" 2>/dev/null ||
 [ -d "$TARGET" ] && [ -w "$TARGET" ] ||
   { echo "$TARGET fehlt oder ist nicht beschreibbar, siehe Runbook „Sicherung“" >&2; exit 1; }
 
+# Docker legt ein fehlendes Volume oder Verzeichnis beim Einhängen leer an. Ein leeres Archiv
+# sähe gültig aus und leerte bei der Wiederherstellung das echte Volume.
+for v in $volumes; do
+  docker volume inspect "suchlage-m1_$v" >/dev/null 2>&1 ||
+    { echo "Volume suchlage-m1_$v fehlt, nichts gesichert" >&2; exit 1; }
+done
+[ -f "$ROOT/garage-secrets/rpc_secret" ] ||
+  { echo "$ROOT/garage-secrets/rpc_secret fehlt, nichts gesichert" >&2; exit 1; }
+
+# Ein zweiter Lauf startete sonst die Dienste, während der erste noch packt.
+exec 9>"$TARGET/.lauf.sperre"
+flock -n 9 || { echo "Es läuft schon eine Sicherung" >&2; exit 1; }
+
 # Alle Archive eines Laufs tragen denselben Stempel und gehören zusammen.
 stamp=$(date +%Y%m%dT%H%M%S)
 part=""
@@ -57,8 +70,9 @@ archive() {
   echo "$out"
 }
 
-$DC stop $services
+# Vor dem Stoppen merken: Bricht `stop` mittendrin ab, startet cleanup die schon gestoppten wieder.
 stopped=$services
+$DC stop $services
 for v in $volumes; do
   archive "$v" "suchlage-m1_$v"
 done
