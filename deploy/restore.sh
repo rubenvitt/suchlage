@@ -23,9 +23,10 @@ exec 9>"$ROOT/backup/.lauf.sperre"
 flock -n 9 || { echo "Es läuft schon eine Sicherung oder Wiederherstellung" >&2; exit 1; }
 
 # Eigene Zuweisung, damit set -e greift, wenn Compose selbst scheitert (etwa ohne .env).
-running=$($DC ps -q --status running --status restarting --status paused server fotos media)
+# video-init läuft vor `media` und schreibt per chown -R ins Video-Volume.
+running=$($DC ps -q --status running --status restarting --status paused server fotos media video-init)
 if [ -n "$running" ]; then
-  echo "Erst stoppen: $DC stop server fotos media" >&2
+  echo "Erst stoppen: $DC stop server fotos media video-init" >&2
   exit 1
 fi
 
