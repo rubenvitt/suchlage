@@ -18,7 +18,13 @@ case "${1:-}" in
   *) echo "Aufruf: restore.sh server-data|fotos-meta|fotos-data|video|garage-secrets < archiv.tgz" >&2; exit 2 ;;
 esac
 
-if [ -n "$($DC ps -q --status running server fotos media)" ]; then
+# Dieselbe Sperre wie backup.sh: Eine Sicherung startete sonst die Dienste mitten im Zurückspielen.
+exec 9>"$ROOT/backup/.lauf.sperre"
+flock -n 9 || { echo "Es läuft schon eine Sicherung oder Wiederherstellung" >&2; exit 1; }
+
+# Eigene Zuweisung, damit set -e greift, wenn Compose selbst scheitert (etwa ohne .env).
+running=$($DC ps -q --status running server fotos media)
+if [ -n "$running" ]; then
   echo "Erst stoppen: $DC stop server fotos media" >&2
   exit 1
 fi
@@ -29,7 +35,13 @@ docker run --rm -i -v "$src":/d "$IMAGE" sh -c '
   trap "rm -rf $neu" EXIT
   rm -rf $neu && mkdir $neu
   tar xzf - -C $neu
+  # Ab hier bleibt der ausgepackte Stand liegen, falls der Tausch scheitert.
+  trap - EXIT
   find /d -mindepth 1 -maxdepth 1 ! -name .wiederherstellung -exec rm -rf {} +
-  find $neu -mindepth 1 -maxdepth 1 -exec mv {} /d/ \;
+  for f in $neu/* $neu/.[!.]* $neu/..?*; do
+    [ -e "$f" ] || continue
+    mv "$f" /d/
+  done
+  rmdir $neu
 '
 echo "$1 zurückgespielt"

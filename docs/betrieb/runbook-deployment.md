@@ -464,7 +464,8 @@ for f in *-<Stempel>.tgz.age; do age -d -i suchlage-backup.key "$f" | tar tzf - 
 Steht hinter jeder Datei „ok“ (vier, mit `--video` zusätzlich `video-<Stempel>.tgz.age`), die
 Dienste stoppen und zurückspielen. `deploy/restore.sh` packt am Host erst neben dem alten Inhalt aus
 und tauscht ihn erst, wenn das Archiv vollständig da ist; bricht etwas ab, bleibt das Volume, wie es
-war. Die Klammer bricht beim ersten Fehler ab und startet dann nichts:
+war. Die Klammer bricht beim ersten Fehler ab, startet dann nichts und lässt Schlüssel und Archive für
+einen zweiten Versuch liegen (danach von Hand löschen):
 
 ```sh
 ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos media'
@@ -472,8 +473,8 @@ ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop se
   for v in server-data fotos-meta fotos-data garage-secrets; do   # mit --video: video dazu
     age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> /srv/suchlage/deploy/restore.sh $v
   done
-  ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start media fotos server' )
-rm suchlage-backup.key *-<Stempel>.tgz.age
+  ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start media fotos server'
+  rm suchlage-backup.key *-<Stempel>.tgz.age )
 ```
 
 Besitzer und Rechte stellt `tar` wieder her (Server als UID 65532, `rpc_secret` nur für den
