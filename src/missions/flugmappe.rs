@@ -1,32 +1,29 @@
-//! Einsätze für die Flugmappe (SUL-66): anlegen, verknüpfen und übernehmen, Abschnitte, Flüge,
-//! Einsatzkarte, Kartenelemente übernehmen, Kartenfoto, Abschluss. Schreibendes läuft unter der
-//! Schreibsperre der Einsätze; jede Änderung meldet `missions_changed` an die Browser.
+//! Einsätze für die Flugmappe (SUL-66, mehrere Flugmappen SUL-113): anlegen, verknüpfen und
+//! dazukommen, Abschnitte, Flüge, Flugbuch, Einsatzkarte, Kartenelemente übernehmen, Kartenfoto,
+//! Abschluss. Schreibendes läuft unter der Schreibsperre der Einsätze; jede Änderung meldet
+//! `missions_changed` an die Browser.
 
 use std::collections::HashMap;
 
 use crate::contract::{
-    FmFeatureCollection, FmFlight, FmLinkInfo, FmMapImport, FmMapImportResult, FmMission,
-    FmMissionCreate, FmMissionLink, FmSection, FmSectionCreate, FmSectionUpdate, MapElementOrigin,
-    Mission, MissionOrigin, MissionState, SectionCreate,
+    FmFeatureCollection, FmFlight, FmLinkInfo, FmLogbookEntry, FmLogbookStored, FmMapImport,
+    FmMapImportResult, FmMission, FmMissionCreate, FmMissionLink, FmSection, FmSectionCreate,
+    FmSectionUpdate, MapElementOrigin, Mission, MissionFlight, MissionFlightSource, MissionOrigin,
+    MissionState, SectionCreate,
 };
 use crate::error::AppError;
 use crate::map::geojson::{self, Track};
 use crate::map::{self, MapChange, NewElement};
-use crate::store::missions::{FlugmappeIds, FlugmappeStart, LinkWrite};
+use crate::store::logbook::{self, MissionEntry, NewEntry, StoredEntry};
+use crate::store::missions::{FlugmappeIds, FlugmappeStart, LinkOp, LinkWrite, NewLink, SectionOp};
 use crate::store::{flights, map_elements, missions as store, photos, remote_controllers};
 
 use super::{MissionHub, rules};
 
-/// Sicht der Flugmappe auf einen Einsatz: mit ihren IDs und der Verknüpfung samt UUID.
-pub fn fm_mission(m: Mission, ids: &FlugmappeIds) -> FmMission {
-    let link = match (&ids.mission, &m.flugmappe) {
-        (Some(id), Some(l)) => Some(FmLinkInfo {
-            flugmappe_mission_id: id.clone(),
-            linked_by: l.linked_by.clone(),
-            linked_at_ms: l.linked_at_ms,
-        }),
-        _ => None,
-    };
+/// Sicht der Flugmappe `caller` auf einen Einsatz: alle Verknüpfungen samt UUID, Abschnitts-IDs
+/// nur ihre eigenen. Ohne `caller` (Auswahlliste ohne Header) keine Abschnitts-IDs.
+pub fn fm_mission(m: Mission, ids: &FlugmappeIds, caller: Option<&str>) -> FmMission {
+    let own = caller.and_then(|c| ids.link(c)).map(|l| l.id);
     FmMission {
         id: m.id,
         name: m.name,
@@ -39,7 +36,7 @@ pub fn fm_mission(m: Mission, ids: &FlugmappeIds) -> FmMission {
             .sections
             .into_iter()
             .map(|s| FmSection {
-                flugmappe_section_id: ids.of_section(s.id).map(Into::into),
+                flugmappe_section_id: own.and_then(|l| ids.of_section(l, s.id)).map(Into::into),
                 id: s.id,
                 label: s.label,
                 location: s.location,
@@ -47,8 +44,114 @@ pub fn fm_mission(m: Mission, ids: &FlugmappeIds) -> FmMission {
                 has_map_photo: s.has_map_photo,
             })
             .collect(),
-        link,
+        links: ids
+            .links
+            .iter()
+            .map(|l| FmLinkInfo {
+                flugmappe_mission_id: l.flugmappe_mission_id.clone(),
+                aircraft_label: l.aircraft_label.clone(),
+                linked_by: l.linked_by.clone(),
+                linked_at_ms: l.linked_at_ms,
+                done_at_ms: l.done_at_ms,
+                released_at_ms: l.released_at_ms,
+            })
+            .collect(),
     }
+}
+
+/// Zustand der Verknüpfung der Flugmappe `caller` an diesem Einsatz.
+fn own(ids: &FlugmappeIds, caller: &str) -> rules::Own {
+    match ids.link(caller) {
+        None => rules::Own::None,
+        Some(l) if l.released_at_ms.is_some() => rules::Own::Released,
+        Some(_) => rules::Own::Active,
+    }
+}
+
+/// Ein gespeicherter Eintrag in der Sicht seiner Flugmappe.
+fn stored_view(e: StoredEntry, ids: &FlugmappeIds) -> FmLogbookStored {
+    let entry = (!e.deleted).then(|| FmLogbookEntry {
+        revision: e.revision,
+        flight_id: e.flight_id,
+        flugmappe_section_id: e
+            .section_id
+            .and_then(|s| ids.of_section(e.link_id, s))
+            .map(Into::into),
+        started_at_ms: e.started_at_ms.unwrap_or_default(),
+        landed_at_ms: e.landed_at_ms,
+        aircraft_label: e.aircraft_label.clone().unwrap_or_default(),
+        pilot: e.pilot.clone(),
+        landing_status: e.landing_status.clone(),
+        changed_at_ms: e.changed_at_ms.unwrap_or_default(),
+    });
+    FmLogbookStored {
+        entry_id: e.entry_id,
+        revision: e.revision,
+        entry,
+    }
+}
+
+/// Flugliste eines Einsatzes: Telemetrie-Flüge (bestätigt mit dem Eintrag der Flugmappe) und
+/// Handeinträge, nach Start. `rc_labels`: Bezeichnung je Fernsteuerung.
+pub fn flight_log(
+    mission: &Mission,
+    telemetry: Vec<(crate::contract::FlightSummary, Option<i64>)>,
+    entries: Vec<MissionEntry>,
+    rc_labels: &HashMap<String, String>,
+) -> Vec<MissionFlight> {
+    let section = |id: Option<i64>| {
+        id.and_then(|id| mission.sections.iter().find(|s| s.id == id))
+            .map(|s| s.label.clone())
+    };
+    let confirmed: HashMap<i64, &MissionEntry> = entries
+        .iter()
+        .filter_map(|e| e.entry.flight_id.map(|f| (f, e)))
+        .collect();
+    let mut out: Vec<MissionFlight> = telemetry
+        .into_iter()
+        .map(|(f, section_id)| {
+            let entry = confirmed.get(&f.id);
+            MissionFlight {
+                key: format!("t{}", f.id),
+                flight_id: Some(f.id),
+                source: MissionFlightSource::Telemetry,
+                started_at_ms: f.started_at_ms,
+                ended_at_ms: f.ended_at_ms,
+                aircraft: entry
+                    .and_then(|e| e.entry.aircraft_label.clone())
+                    .or_else(|| rc_labels.get(&f.gateway_sn).cloned())
+                    .unwrap_or(f.aircraft_sn),
+                section: section(section_id),
+                confirmed_in: entry.map(|e| e.link_aircraft_label.clone()),
+                pilot: entry.and_then(|e| e.entry.pilot.clone()),
+            }
+        })
+        .collect();
+    out.extend(
+        entries
+            .iter()
+            .filter(|e| e.entry.flight_id.is_none())
+            .map(|e| MissionFlight {
+                key: format!("f{}", e.entry.id),
+                flight_id: None,
+                source: MissionFlightSource::Flugmappe,
+                started_at_ms: e.entry.started_at_ms.unwrap_or_default(),
+                ended_at_ms: e.entry.landed_at_ms,
+                aircraft: e.entry.aircraft_label.clone().unwrap_or_default(),
+                section: section(e.entry.section_id),
+                confirmed_in: None,
+                pilot: e.entry.pilot.clone(),
+            }),
+    );
+    // Gleiche Startzeit: Telemetrie zuerst.
+    out.sort_by(|a, b| {
+        (a.started_at_ms, a.flight_id.is_none(), &a.key).cmp(&(
+            b.started_at_ms,
+            b.flight_id.is_none(),
+            &b.key,
+        ))
+    });
+    out
 }
 
 fn validation(e: String) -> AppError {
@@ -56,34 +159,44 @@ fn validation(e: String) -> AppError {
 }
 
 impl MissionHub {
-    async fn fm_view(&self, mission: Mission) -> Result<FmMission, AppError> {
+    async fn fm_view(&self, mission: Mission, caller: Option<&str>) -> Result<FmMission, AppError> {
         let ids = store::flugmappe_ids(&self.pool, mission.id).await?;
-        Ok(fm_mission(mission, &ids))
+        Ok(fm_mission(mission, &ids, caller))
     }
 
-    /// Einsatz, an dem die aufrufende Flugmappe arbeiten darf (404, sonst 409 bei fremder Bindung).
-    async fn bound(&self, id: i64, caller: &str) -> Result<(Mission, FlugmappeIds), AppError> {
+    /// Einsatz, an dem die aufrufende Flugmappe arbeiten darf, mit der ID ihrer Verknüpfung (404,
+    /// sonst 409 ohne oder mit gelöster Verknüpfung).
+    async fn bound(&self, id: i64, caller: &str) -> Result<(Mission, FlugmappeIds, i64), AppError> {
         let mission = self.get(id).await?;
         let ids = store::flugmappe_ids(&self.pool, id).await?;
-        rules::binding(ids.mission.as_deref(), caller)?;
-        Ok((mission, ids))
+        rules::binding(own(&ids, caller))?;
+        let link = ids.link(caller).expect("gebunden").id;
+        Ok((mission, ids, link))
     }
 
     /// Wie `bound`, aber nur für einen offenen Einsatz (422, wenn abgeschlossen).
-    async fn bound_open(&self, id: i64, caller: &str) -> Result<(Mission, FlugmappeIds), AppError> {
-        let (mission, ids) = self.bound(id, caller).await?;
-        if mission.state == MissionState::Closed {
+    async fn bound_open(
+        &self,
+        id: i64,
+        caller: &str,
+    ) -> Result<(Mission, FlugmappeIds, i64), AppError> {
+        let bound = self.bound(id, caller).await?;
+        if bound.0.state == MissionState::Closed {
             return Err(AppError::Unprocessable(rules::CLOSED.into()));
         }
-        Ok((mission, ids))
+        Ok(bound)
     }
 
-    /// Vorbereitete und laufende Einsätze zur Auswahl in der Flugmappe.
-    pub async fn flugmappe_missions(&self) -> Result<Vec<FmMission>, AppError> {
+    /// Vorbereitete und laufende Einsätze zur Auswahl in der Flugmappe; mit `caller` samt ihren
+    /// Abschnitts-IDs.
+    pub async fn flugmappe_missions(
+        &self,
+        caller: Option<&str>,
+    ) -> Result<Vec<FmMission>, AppError> {
         let mut out = Vec::new();
         for m in self.list().await? {
             if m.state != MissionState::Closed {
-                out.push(self.fm_view(m).await?);
+                out.push(self.fm_view(m, caller).await?);
             }
         }
         Ok(out)
@@ -107,21 +220,23 @@ impl MissionHub {
                 .map_err(validation)?,
             section_label: rules::name(&input.section_label, "Bezeichnung").map_err(validation)?,
             section_location: rules::location(input.section_location),
+            aircraft_label: rules::aircraft_label(&input.aircraft_label).map_err(validation)?,
         };
+        let caller = start.flugmappe_mission_id.as_str();
         let _serial = self.writes.lock().await;
-        if let Some(existing) =
-            store::find_by_flugmappe(&self.pool, &start.flugmappe_mission_id).await?
-        {
+        if let Some(existing) = store::find_by_flugmappe(&self.pool, caller).await? {
             let mission = self.get(existing).await?;
+            let ids = store::flugmappe_ids(&self.pool, existing).await?;
+            // Angelegt hat sie ihn, wenn ihre Verknüpfung die erste ist und aus der Anlage stammt.
+            let first = ids.links.first();
             rules::create_again(rules::Existing {
                 state: mission.state,
                 created_by_caller: mission.origin == MissionOrigin::Flugmappe
-                    && mission
-                        .flugmappe
-                        .as_ref()
-                        .is_some_and(|l| l.linked_at_ms == mission.created_at_ms),
+                    && first.is_some_and(|l| {
+                        l.flugmappe_mission_id == caller && l.linked_at_ms == mission.created_at_ms
+                    }),
             })?;
-            return self.fm_view(mission).await;
+            return Ok(fm_mission(mission, &ids, Some(caller)));
         }
         if store::running_id(&self.pool).await?.is_some() {
             return Err(AppError::Conflict(rules::OTHER_RUNNING.into()));
@@ -129,11 +244,12 @@ impl MissionHub {
         let id = store::create_from_flugmappe(&self.pool, &start, now_ms).await?;
         self.map.set_pilot_scope(Some(id));
         self.changed();
-        self.fm_view(self.get(id).await?).await
+        self.fm_view(self.get(id).await?, Some(caller)).await
     }
 
-    /// Verknüpft einen vorbereiteten (dann läuft er) oder laufenden Einsatz; eine fremde
-    /// Verknüpfung nur mit `take_over`. Der aktive Abschnitt wird der der Flugmappe.
+    /// Verknüpft einen vorbereiteten (dann läuft er) oder laufenden Einsatz, auch wenn schon
+    /// andere Flugmappen daran arbeiten. Der aktive Abschnitt wird der der Flugmappe, wenn er
+    /// keiner gehört; sonst bekommt sie einen neuen.
     pub async fn link(
         &self,
         id: i64,
@@ -145,42 +261,69 @@ impl MissionHub {
             rules::flugmappe_mission_id(&input.flugmappe_mission_id).map_err(validation)?;
         let section =
             rules::flugmappe_section_id(&input.flugmappe_section_id).map_err(validation)?;
-        let label = rules::name(&input.section_label, "Bezeichnung").map_err(validation)?;
-        let location = rules::location(input.section_location);
+        let section_input = SectionCreate {
+            label: rules::name(&input.section_label, "Bezeichnung").map_err(validation)?,
+            location: rules::location(input.section_location),
+        };
+        let aircraft_label = rules::aircraft_label(&input.aircraft_label).map_err(validation)?;
         let _serial = self.writes.lock().await;
         let mission = self.get(id).await?;
         let ids = store::flugmappe_ids(&self.pool, id).await?;
         let running = store::running_id(&self.pool).await?;
         let plan = rules::link(rules::LinkFacts {
             state: mission.state,
-            linked: ids.mission.as_deref(),
-            caller: &caller,
-            take_over: input.take_over,
+            own: own(&ids, &caller),
             other_running: running.is_some_and(|r| r != id),
             caller_linked_elsewhere: store::find_by_flugmappe(&self.pool, &caller)
                 .await?
                 .is_some_and(|other| other != id),
         })?;
-        let sections: Vec<(i64, Option<&str>)> = mission
+        let own_link = ids.link(&caller).map(|l| l.id);
+        let facts: Vec<rules::SectionFact> = ids
             .sections
             .iter()
-            .map(|s| (s.id, ids.of_section(s.id)))
+            .map(|s| rules::SectionFact {
+                id: s.id,
+                owned: s.link_id.is_some(),
+                own_id: own_link.and_then(|l| ids.of_section(l, s.id)),
+            })
             .collect();
-        let bind_section = match rules::section_for_link(&sections, &section) {
-            rules::SectionStep::Bind(section_id) => Some((
+        let section_op = match rules::section_for_link(&facts, &section) {
+            rules::SectionStep::Known(_) => SectionOp::Keep,
+            rules::SectionStep::Bind(section_id) => SectionOp::Bind {
                 section_id,
-                section.as_str(),
-                label.as_str(),
-                location.as_deref(),
-            )),
-            rules::SectionStep::Known(_) => None,
+                flugmappe_section_id: &section,
+                input: &section_input,
+            },
+            rules::SectionStep::Create => SectionOp::Create {
+                flugmappe_section_id: &section,
+                input: &section_input,
+            },
         };
-        // Starten, Verknüpfen und Abschnitt binden in einer Transaktion. Ein zweiter laufender
-        // Einsatz scheitert am Teilindex (409), dann bleibt auch die Verknüpfung ungeschrieben.
+        let link_op = match (plan.write, own_link) {
+            (rules::LinkWriteKind::Keep, Some(l)) => LinkOp::Keep(l),
+            (rules::LinkWriteKind::Revive, Some(l)) => LinkOp::Revive {
+                id: l,
+                aircraft_label: &aircraft_label,
+            },
+            _ => LinkOp::Insert(NewLink {
+                flugmappe_mission_id: &caller,
+                linked_by,
+                aircraft_label: &aircraft_label,
+            }),
+        };
+        let nothing_to_do = !plan.start
+            && matches!(link_op, LinkOp::Keep(_))
+            && matches!(section_op, SectionOp::Keep);
+        if nothing_to_do {
+            return Ok(fm_mission(mission, &ids, Some(&caller)));
+        }
+        // Starten, Verknüpfen und Abschnitt in einer Transaktion. Ein zweiter laufender Einsatz
+        // scheitert am Teilindex (409), dann bleibt auch die Verknüpfung ungeschrieben.
         let write = LinkWrite {
             start: plan.start,
-            link: plan.write_link.then_some((caller.as_str(), linked_by)),
-            bind_section,
+            link: link_op,
+            section: section_op,
         };
         store::link_flugmappe(&self.pool, id, &write, now_ms).await?;
         if plan.start {
@@ -188,11 +331,11 @@ impl MissionHub {
                 .set_pilot_scope(store::running_id(&self.pool).await?);
         }
         self.changed();
-        self.fm_view(self.get(id).await?).await
+        self.fm_view(self.get(id).await?, Some(&caller)).await
     }
 
-    /// Verlegung in der Flugmappe: neuer aktiver Abschnitt. Eine bekannte ID liefert den Einsatz
-    /// unverändert (Wiederholung).
+    /// Verlegung in der Flugmappe: neuer aktiver Abschnitt des Einsatzes und der Flugmappe. Eine
+    /// bekannte ID liefert den Einsatz unverändert (Wiederholung).
     pub async fn add_flugmappe_section(
         &self,
         id: i64,
@@ -207,13 +350,13 @@ impl MissionHub {
             location: rules::location(input.location),
         };
         let _serial = self.writes.lock().await;
-        let (mission, ids) = self.bound_open(id, caller).await?;
-        if ids.section(&section).is_some() {
-            return self.fm_view(mission).await;
+        let (mission, ids, link) = self.bound_open(id, caller).await?;
+        if ids.section(link, &section).is_some() {
+            return Ok(fm_mission(mission, &ids, Some(caller)));
         }
-        store::add_section_from_flugmappe(&self.pool, id, &section, &input, now_ms).await?;
+        store::add_section_from_flugmappe(&self.pool, id, link, &section, &input, now_ms).await?;
         self.changed();
-        self.fm_view(self.get(id).await?).await
+        self.fm_view(self.get(id).await?, Some(caller)).await
     }
 
     /// Bezeichnung und Ort eines Abschnitts der Flugmappe nachreichen (SUL-81). Ohne Änderung
@@ -230,29 +373,30 @@ impl MissionHub {
             location: rules::location(input.location),
         };
         let _serial = self.writes.lock().await;
-        let (mission, ids) = self.bound_open(id, caller).await?;
+        let (mission, ids, link) = self.bound_open(id, caller).await?;
         let section = ids
-            .section(flugmappe_section_id)
+            .section(link, flugmappe_section_id)
             .ok_or(AppError::NotFound)?;
         let unchanged = mission
             .sections
             .iter()
             .any(|s| s.id == section && s.label == input.label && s.location == input.location);
         if unchanged {
-            return self.fm_view(mission).await;
+            return Ok(fm_mission(mission, &ids, Some(caller)));
         }
         store::update_section(&self.pool, section, &input).await?;
         self.changed();
-        self.fm_view(self.get(id).await?).await
+        self.fm_view(self.get(id).await?, Some(caller)).await
     }
 
-    /// Flüge des Einsatzes als Vorschläge für das Flugbuch, älteste zuerst.
+    /// Telemetrie-Flüge des Einsatzes als Vorschläge für das Flugbuch, älteste zuerst; mit der
+    /// Flugmappe, die einen schon bestätigt hat, wenn es eine andere ist.
     pub async fn flugmappe_flights(
         &self,
         id: i64,
         caller: &str,
     ) -> Result<Vec<FmFlight>, AppError> {
-        let (_, ids) = self.bound(id, caller).await?;
+        let (_, ids, link) = self.bound(id, caller).await?;
         let shots: HashMap<i64, u32> = photos::shots_per_flight(&self.pool, id)
             .await?
             .into_iter()
@@ -261,13 +405,22 @@ impl MissionHub {
             .await?
             .into_iter()
             .collect();
+        let confirmed_by: HashMap<i64, String> = logbook::of_mission(&self.pool, id)
+            .await?
+            .into_iter()
+            .filter(|e| e.entry.link_id != link)
+            .filter_map(|e| e.entry.flight_id.map(|f| (f, e.link_aircraft_label)))
+            .collect();
         Ok(flights::of_mission_with_section(&self.pool, id)
             .await?
             .into_iter()
             .map(|(f, section)| FmFlight {
-                flugmappe_section_id: section.and_then(|s| ids.of_section(s)).map(Into::into),
+                flugmappe_section_id: section
+                    .and_then(|s| ids.of_section(link, s))
+                    .map(Into::into),
                 aircraft_label: labels.get(&f.gateway_sn).cloned(),
                 photo_count: shots.get(&f.id).copied().unwrap_or(0),
+                confirmed_by: confirmed_by.get(&f.id).cloned(),
                 id: f.id,
                 started_at_ms: f.started_at_ms,
                 ended_at_ms: f.ended_at_ms,
@@ -279,6 +432,86 @@ impl MissionHub {
             .collect())
     }
 
+    /// Meldet einen Flugbucheintrag der Flugmappe (bestätigt oder von Hand). Nur eine höhere
+    /// Revision ändert etwas; sonst kommt der gespeicherte Stand zurück. Ein Flug, den eine
+    /// andere Flugmappe bestätigt hat, ist ein Konflikt (409).
+    pub async fn put_logbook_entry(
+        &self,
+        id: i64,
+        caller: &str,
+        entry_id: &str,
+        input: FmLogbookEntry,
+        now_ms: i64,
+    ) -> Result<FmLogbookStored, AppError> {
+        let entry_id = rules::logbook_entry_id(entry_id).map_err(validation)?;
+        let input = rules::logbook_entry(input).map_err(validation)?;
+        let _serial = self.writes.lock().await;
+        let (_, ids, link) = self.bound_open(id, caller).await?;
+        let stored = logbook::get(&self.pool, link, &entry_id).await?;
+        if let Some(s) = stored.filter(|s| !rules::newer(Some(s.revision), input.revision)) {
+            return Ok(stored_view(s, &ids));
+        }
+        let section_id = match input.flugmappe_section_id.as_deref() {
+            Some(fm) => Some(
+                ids.section(link, fm)
+                    .ok_or_else(|| AppError::Unprocessable(rules::SECTION_UNKNOWN.into()))?,
+            ),
+            None => None,
+        };
+        if let Some(flight) = input.flight_id {
+            if flights::mission_of(&self.pool, flight).await? != Some(Some(id)) {
+                return Err(AppError::Unprocessable(rules::FLIGHT_NOT_IN_MISSION.into()));
+            }
+            let holder = logbook::holder(&self.pool, flight).await?;
+            rules::confirmation(
+                holder.as_ref().map(|(link_id, label)| rules::Holder {
+                    link_id: *link_id,
+                    aircraft_label: label,
+                }),
+                link,
+            )?;
+        }
+        let entry = NewEntry {
+            revision: input.revision,
+            flight_id: input.flight_id,
+            section_id,
+            started_at_ms: input.started_at_ms,
+            landed_at_ms: input.landed_at_ms,
+            aircraft_label: input.aircraft_label,
+            pilot: input.pilot,
+            landing_status: input.landing_status,
+            changed_at_ms: input.changed_at_ms,
+        };
+        logbook::put(&self.pool, link, &entry_id, &entry, now_ms).await?;
+        self.changed();
+        let stored = logbook::get(&self.pool, link, &entry_id)
+            .await?
+            .expect("eben geschrieben");
+        Ok(stored_view(stored, &ids))
+    }
+
+    /// Löscht einen Flugbucheintrag der Flugmappe: Mit höherer Revision bleibt eine Löschmarke
+    /// (eine Bestätigung entfällt, der Telemetrie-Flug bleibt); sonst ändert sich nichts.
+    pub async fn delete_logbook_entry(
+        &self,
+        id: i64,
+        caller: &str,
+        entry_id: &str,
+        revision: i64,
+        now_ms: i64,
+    ) -> Result<(), AppError> {
+        let entry_id = rules::logbook_entry_id(entry_id).map_err(validation)?;
+        let revision = rules::revision(revision).map_err(validation)?;
+        let _serial = self.writes.lock().await;
+        let (_, _, link) = self.bound_open(id, caller).await?;
+        let stored = logbook::get(&self.pool, link, &entry_id).await?;
+        if rules::newer(stored.map(|s| s.revision), revision) {
+            logbook::tombstone(&self.pool, link, &entry_id, revision, now_ms).await?;
+            self.changed();
+        }
+        Ok(())
+    }
+
     /// Einsatzkarte: alle Kartenelemente, Flugspuren mit `section` nur aus diesem Abschnitt der
     /// Flugmappe (unbekannt → 404).
     pub async fn flugmappe_map(
@@ -287,9 +520,9 @@ impl MissionHub {
         caller: &str,
         section: Option<&str>,
     ) -> Result<FmFeatureCollection, AppError> {
-        let (_, ids) = self.bound(id, caller).await?;
+        let (_, ids, link) = self.bound(id, caller).await?;
         let only = match section {
-            Some(fm) => Some(ids.section(fm).ok_or(AppError::NotFound)?),
+            Some(fm) => Some(ids.section(link, fm).ok_or(AppError::NotFound)?),
             None => None,
         };
         let elements = self.map.list_in(Some(id)).await?;
@@ -299,7 +532,9 @@ impl MissionHub {
                 continue;
             }
             tracks.push(Track {
-                flugmappe_section_id: section.and_then(|s| ids.of_section(s)).map(Into::into),
+                flugmappe_section_id: section
+                    .and_then(|s| ids.of_section(link, s))
+                    .map(Into::into),
                 segments: flights::segments(&self.pool, flight.id).await?,
                 flight,
             });
@@ -307,7 +542,8 @@ impl MissionHub {
         Ok(geojson::feature_collection(&elements, &tracks))
     }
 
-    /// Übernimmt Zeichnungen und Standort der Flugmappe einmal je Einsatz; danach ein No-op.
+    /// Übernimmt Zeichnungen und Standort der Flugmappe einmal je Einsatz; danach ein No-op,
+    /// auch für eine später dazukommende Flugmappe.
     pub async fn import_map(
         &self,
         id: i64,
@@ -318,7 +554,7 @@ impl MissionHub {
     ) -> Result<FmMapImportResult, AppError> {
         let drawings = rules::import(&input).map_err(validation)?;
         let _serial = self.writes.lock().await;
-        let (mission, ids) = self.bound_open(id, caller).await?;
+        let (mission, ids, link) = self.bound_open(id, caller).await?;
         if ids.map_imported_at_ms.is_some() {
             return Ok(FmMapImportResult { imported: 0 });
         }
@@ -341,6 +577,10 @@ impl MissionHub {
                 map::element(new, now_ms)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // Der Standort setzt den Ort des aktiven Abschnitts dieser Flugmappe.
+        let active = ids
+            .active_section(link)
+            .or_else(|| mission.sections.last().map(|s| s.id));
         // Markieren, anlegen und den Ort setzen in einer Transaktion: Scheitert etwas, bleibt
         // nichts, und eine Wiederholung legt nichts doppelt an. Verteilt wird erst danach.
         let map_serial = self.map.serial().await;
@@ -351,8 +591,8 @@ impl MissionHub {
         for e in &elements {
             map_elements::insert(&mut *tx, e).await?;
         }
-        if let (Some(p), Some(active)) = (input.standort, mission.sections.last()) {
-            store::set_section_location_if_empty(&mut *tx, active.id, &rules::standort_location(p))
+        if let (Some(p), Some(active)) = (input.standort, active) {
+            store::set_section_location_if_empty(&mut *tx, active, &rules::standort_location(p))
                 .await?;
         }
         tx.commit().await?;
@@ -379,9 +619,9 @@ impl MissionHub {
             return Err(AppError::Validation("Kartenfoto muss ein JPEG sein".into()));
         }
         let _serial = self.writes.lock().await;
-        let (_, ids) = self.bound_open(id, caller).await?;
+        let (_, ids, link) = self.bound_open(id, caller).await?;
         let section = ids
-            .section(flugmappe_section_id)
+            .section(link, flugmappe_section_id)
             .ok_or(AppError::NotFound)?;
         let path = self.map_photo_path(section);
         let tmp = path.with_extension(format!("jpg.{}.tmp", uuid::Uuid::new_v4()));
@@ -399,7 +639,9 @@ impl MissionHub {
         Ok(())
     }
 
-    /// Abschluss aus der Flugmappe. Schon abgeschlossen ist kein Fehler (Abschluss nachholen).
+    /// Abschluss aus der Flugmappe: meldet ihren Teil als fertig. Der Einsatz schließt erst, wenn
+    /// keine nicht gelöste Verknüpfung mehr offen ist (und nichts mehr fliegt, sonst 422 und die
+    /// Flugmappe holt den Abschluss nach). Schon abgeschlossen ist kein Fehler.
     pub async fn close_from_flugmappe(
         &self,
         id: i64,
@@ -407,20 +649,77 @@ impl MissionHub {
         now_ms: i64,
     ) -> Result<FmMission, AppError> {
         let _serial = self.writes.lock().await;
-        let (mission, _) = self.bound(id, caller).await?;
-        let mission = if mission.state == MissionState::Closed {
-            mission
-        } else {
+        let (mission, ids, link) = self.bound(id, caller).await?;
+        if mission.state == MissionState::Closed {
+            return Ok(fm_mission(mission, &ids, Some(caller)));
+        }
+        let already_done = ids
+            .links
+            .iter()
+            .any(|l| l.id == link && l.done_at_ms.is_some());
+        if !already_done {
+            store::mark_link_done(&self.pool, link, now_ms).await?;
+            self.changed();
+        }
+        let progress: Vec<rules::LinkProgress> = store::links(&self.pool, id)
+            .await?
+            .iter()
+            .map(|l| rules::LinkProgress {
+                done: l.done_at_ms.is_some(),
+                released: l.released_at_ms.is_some(),
+            })
+            .collect();
+        let mission = if rules::all_done(&progress) {
             self.change_state_locked(id, MissionState::Closed, now_ms)
                 .await?
+        } else {
+            self.get(id).await?
         };
-        self.fm_view(mission).await
+        self.fm_view(mission, Some(caller)).await
     }
 
     /// Ein verknüpfter Einsatz für die Flugmappe (nur mit passender Bindung).
     pub async fn flugmappe_mission(&self, id: i64, caller: &str) -> Result<FmMission, AppError> {
-        let (mission, ids) = self.bound(id, caller).await?;
-        Ok(fm_mission(mission, &ids))
+        let (mission, ids, _) = self.bound(id, caller).await?;
+        Ok(fm_mission(mission, &ids, Some(caller)))
+    }
+
+    /// Flugliste eines Einsatzes für den Browser: Telemetrie und Flugbücher der Flugmappen.
+    pub async fn flight_log(&self, id: i64) -> Result<Vec<MissionFlight>, AppError> {
+        let mission = self.get(id).await?;
+        let labels: HashMap<String, String> = remote_controllers::labels(&self.pool)
+            .await?
+            .into_iter()
+            .collect();
+        let telemetry = flights::of_mission_with_section(&self.pool, id).await?;
+        let entries = logbook::of_mission(&self.pool, id).await?;
+        Ok(flight_log(&mission, telemetry, entries, &labels))
+    }
+
+    /// Löst eine Verknüpfung in Suchlage (verlorenes Gerät). Gemeldete Einträge bleiben.
+    /// Wiederholt ist kein Fehler.
+    pub async fn release_flugmappe(
+        &self,
+        id: i64,
+        link_id: i64,
+        now_ms: i64,
+    ) -> Result<Mission, AppError> {
+        let _serial = self.writes.lock().await;
+        let mission = self.get(id).await?;
+        let link = mission
+            .flugmappe_links
+            .iter()
+            .find(|l| l.id == link_id)
+            .ok_or(AppError::NotFound)?;
+        if mission.state == MissionState::Closed {
+            return Err(AppError::Unprocessable(rules::CLOSED.into()));
+        }
+        if !link.is_active() {
+            return Ok(mission);
+        }
+        store::release_link(&self.pool, id, link_id, now_ms).await?;
+        self.changed();
+        self.get(id).await
     }
 }
 
@@ -434,6 +733,8 @@ mod tests {
 
     const FM_A: &str = "0f6b2a1e-5d43-4c8e-9b7a-2e1f3c4d5a6b";
     const FM_B: &str = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    const E1: &str = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+    const E2: &str = "4d5e6f7a-8b9c-4d0e-8f1a-2b3c4d5e6f7a";
 
     struct Fixture {
         hub: MissionHub,
@@ -459,16 +760,17 @@ mod tests {
             section_location: Some(" ".into()),
             flugmappe_mission_id: fm.to_uppercase(),
             flugmappe_section_id: "s1".into(),
+            aircraft_label: " Matrice 350 RTK ".into(),
         }
     }
 
-    fn link_input(fm: &str, section: &str, take_over: bool) -> FmMissionLink {
+    fn link_input(fm: &str, section: &str) -> FmMissionLink {
         FmMissionLink {
             flugmappe_mission_id: fm.into(),
             flugmappe_section_id: section.into(),
             section_label: "Abschnitt A".into(),
             section_location: None,
-            take_over,
+            aircraft_label: "Matrice 200".into(),
         }
     }
 
@@ -484,6 +786,18 @@ mod tests {
         .await
         .unwrap()
         .id
+    }
+
+    /// Laufender Einsatz aus Flugmappe A, dazu verknüpft B (mit eigenem Abschnitt „t1“).
+    async fn two_flugmappen(hub: &MissionHub) -> i64 {
+        let m = hub
+            .create_from_flugmappe(create_input(FM_A), "Testpilot", 10)
+            .await
+            .unwrap();
+        hub.link(m.id, link_input(FM_B, "t1"), "Zweite", 20)
+            .await
+            .unwrap();
+        m.id
     }
 
     #[tokio::test]
@@ -502,10 +816,14 @@ mod tests {
         );
         assert_eq!(m.sections[0].flugmappe_section_id.as_deref(), Some("s1"));
         assert_eq!(m.sections[0].location, None, "leerer Ort heißt keiner");
-        let link = m.link.unwrap();
+        let link = &m.links[0];
         assert_eq!(
-            (link.flugmappe_mission_id.as_str(), link.linked_by.as_str()),
-            (FM_A, "Testpilot")
+            (
+                link.flugmappe_mission_id.as_str(),
+                link.linked_by.as_str(),
+                link.aircraft_label.as_str()
+            ),
+            (FM_A, "Testpilot", "Matrice 350 RTK")
         );
         assert_eq!(
             f.hub.get(m.id).await.unwrap().origin,
@@ -529,12 +847,21 @@ mod tests {
             matches!(&err, AppError::Unprocessable(m) if m == rules::CLOSED),
             "abgeschlossen: 422, {err:?}"
         );
-        let mut bad = create_input(FM_B);
-        bad.flugmappe_mission_id = "keine-uuid".into();
-        assert!(matches!(
-            f.hub.create_from_flugmappe(bad, "x", 14).await,
-            Err(AppError::Validation(_))
-        ));
+        for bad in [
+            FmMissionCreate {
+                flugmappe_mission_id: "keine-uuid".into(),
+                ..create_input(FM_B)
+            },
+            FmMissionCreate {
+                aircraft_label: " ".into(),
+                ..create_input(FM_B)
+            },
+        ] {
+            assert!(matches!(
+                f.hub.create_from_flugmappe(bad, "x", 14).await,
+                Err(AppError::Validation(_))
+            ));
+        }
     }
 
     #[tokio::test]
@@ -555,16 +882,14 @@ mod tests {
         assert!(changes.try_recv().is_err(), "nichts geändert");
         assert_eq!(f.hub.list().await.unwrap().len(), 1);
 
-        // Übernommen: Die UUID der neuen Flugmappe gehört zu einem Einsatz, den sie nicht angelegt hat.
+        // Dazugekommen: Die UUID der zweiten gehört zu einem Einsatz, den sie nicht angelegt hat.
         f.hub
-            .link(m.id, link_input(FM_B, "t1", true), "Zweite", 20)
+            .link(m.id, link_input(FM_B, "t1"), "Zweite", 20)
             .await
             .unwrap();
-        let mut by_b = create_input(FM_B);
-        by_b.flugmappe_section_id = "t1".into();
         let err = f
             .hub
-            .create_from_flugmappe(by_b, "Zweite", 21)
+            .create_from_flugmappe(create_input(FM_B), "Zweite", 21)
             .await
             .unwrap_err();
         assert_eq!(err.to_string(), rules::FLUGMAPPE_TAKEN);
@@ -575,7 +900,7 @@ mod tests {
         let f = hub().await;
         let id = prepared(&f.hub, "Aus dem Browser").await;
         f.hub
-            .link(id, link_input(FM_A, "s1", false), "Testpilot", 5)
+            .link(id, link_input(FM_A, "s1"), "Testpilot", 5)
             .await
             .unwrap();
         let err = f
@@ -599,14 +924,14 @@ mod tests {
         .unwrap();
         assert!(
             f.hub
-                .link(id, link_input(FM_A, "s1", false), "Testpilot", 20)
+                .link(id, link_input(FM_A, "s1"), "Testpilot", 20)
                 .await
                 .is_err()
         );
         let m = f.hub.get(id).await.unwrap();
         assert_eq!(
-            (m.state, m.flugmappe),
-            (MissionState::Prepared, None),
+            (m.state, m.flugmappe_links),
+            (MissionState::Prepared, vec![]),
             "ganz oder gar nicht"
         );
         assert_eq!(f.hub.map.pilot_scope(), None);
@@ -617,7 +942,7 @@ mod tests {
             .unwrap();
         let linked = f
             .hub
-            .link(id, link_input(FM_A, "s1", false), "Testpilot", 21)
+            .link(id, link_input(FM_A, "s1"), "Testpilot", 21)
             .await
             .unwrap();
         assert_eq!(linked.state, MissionState::Running);
@@ -633,8 +958,12 @@ mod tests {
         // Am Hub vorbei, wie ein Start, der die Prüfung überholt hätte.
         let write = LinkWrite {
             start: true,
-            link: Some((FM_A, "Testpilot")),
-            bind_section: None,
+            link: LinkOp::Insert(NewLink {
+                flugmappe_mission_id: FM_A,
+                linked_by: "Testpilot",
+                aircraft_label: "M200",
+            }),
+            section: SectionOp::Keep,
         };
         let err: AppError = store::link_flugmappe(&f.hub.pool, b, &write, 3)
             .await
@@ -642,16 +971,19 @@ mod tests {
             .into();
         assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
         let m = f.hub.get(b).await.unwrap();
-        assert_eq!((m.state, m.flugmappe), (MissionState::Prepared, None));
+        assert_eq!(
+            (m.state, m.flugmappe_links),
+            (MissionState::Prepared, vec![])
+        );
     }
 
     #[tokio::test]
-    async fn linking_starts_a_prepared_mission_and_binds_its_active_section() {
+    async fn a_second_flugmappe_joins_with_its_own_section() {
         let f = hub().await;
         let id = prepared(&f.hub, "Vorbereitet").await;
         let m = f
             .hub
-            .link(id, link_input(FM_A, "s1", false), "Testpilot", 20)
+            .link(id, link_input(FM_A, "s1"), "Testpilot", 20)
             .await
             .unwrap();
         assert_eq!(
@@ -664,45 +996,54 @@ mod tests {
                 m.sections[0].flugmappe_section_id.as_deref(),
                 m.sections[0].label.as_str()
             ),
-            (Some("s1"), "Abschnitt A")
+            (Some("s1"), "Abschnitt A"),
+            "der Browser-Abschnitt wird der der Flugmappe"
         );
         // Wiederholt: nichts ändert sich, auch nicht wer verknüpft hat.
+        let mut changes = f.hub.subscribe();
         let again = f
             .hub
-            .link(id, link_input(FM_A, "s1", false), "Jemand", 30)
+            .link(id, link_input(FM_A, "s1"), "Jemand", 30)
             .await
             .unwrap();
         assert_eq!(again, m);
+        assert!(changes.try_recv().is_err());
         assert_eq!(f.hub.get(id).await.unwrap().origin, MissionOrigin::Web);
 
-        // Eine zweite Flugmappe braucht Übernehmen; danach ist die erste abgelöst.
-        let err = f
+        // Eine zweite kommt einfach dazu; der aktive Abschnitt gehört der ersten, also ein neuer.
+        let joined = f
             .hub
-            .link(id, link_input(FM_B, "t1", false), "Zweite", 40)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
-        let taken = f
-            .hub
-            .link(id, link_input(FM_B, "t1", true), "Zweite", 50)
+            .link(id, link_input(FM_B, "s1"), "Zweite", 50)
             .await
             .unwrap();
-        let link = taken.link.unwrap();
-        assert_eq!(
-            (
-                link.flugmappe_mission_id.as_str(),
-                link.linked_by.as_str(),
-                link.linked_at_ms
-            ),
-            (FM_B, "Zweite", 50)
-        );
-        assert_eq!(
-            taken.sections[0].flugmappe_section_id.as_deref(),
-            Some("t1")
-        );
-        let err = f.hub.flugmappe_flights(id, FM_A).await.unwrap_err();
-        assert_eq!(err.to_string(), rules::OTHER_FLUGMAPPE);
+        assert_eq!(joined.links.len(), 2);
+        assert_eq!(joined.links[1].linked_by, "Zweite");
+        let own: Vec<_> = joined
+            .sections
+            .iter()
+            .map(|s| s.flugmappe_section_id.as_deref())
+            .collect();
+        assert_eq!(own, vec![None, Some("s1")], "nur ihre eigene ID");
+        let for_a = f.hub.flugmappe_mission(id, FM_A).await.unwrap();
+        let own_a: Vec<_> = for_a
+            .sections
+            .iter()
+            .map(|s| s.flugmappe_section_id.as_deref())
+            .collect();
+        assert_eq!(own_a, vec![Some("s1"), None]);
+        assert!(f.hub.flugmappe_flights(id, FM_A).await.is_ok());
         assert!(f.hub.flugmappe_flights(id, FM_B).await.is_ok());
+
+        let list = f.hub.flugmappe_missions(None).await.unwrap();
+        assert!(
+            list[0]
+                .sections
+                .iter()
+                .all(|s| s.flugmappe_section_id.is_none()),
+            "ohne Header keine Abschnitts-IDs"
+        );
+        let list = f.hub.flugmappe_missions(Some(FM_B)).await.unwrap();
+        assert_eq!(list[0].sections, joined.sections);
     }
 
     #[tokio::test]
@@ -713,32 +1054,68 @@ mod tests {
         f.hub.start(a, 2).await.unwrap();
         let err = f
             .hub
-            .link(b, link_input(FM_A, "s1", false), "x", 3)
+            .link(b, link_input(FM_A, "s1"), "x", 3)
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
         assert_eq!(
-            f.hub.get(b).await.unwrap().flugmappe,
-            None,
+            f.hub.get(b).await.unwrap().flugmappe_links,
+            vec![],
             "nichts geschrieben"
         );
         f.hub.close(b, 4).await.unwrap();
         let err = f
             .hub
-            .link(b, link_input(FM_A, "s1", true), "x", 5)
+            .link(b, link_input(FM_A, "s1"), "x", 5)
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Unprocessable(_)), "{err:?}");
         // Laufend ohne Flugmappe: darf verknüpft werden.
-        assert!(
-            f.hub
-                .link(a, link_input(FM_A, "s1", false), "x", 6)
-                .await
-                .is_ok()
-        );
+        assert!(f.hub.link(a, link_input(FM_A, "s1"), "x", 6).await.is_ok());
         assert!(matches!(
-            f.hub.link(999, link_input(FM_A, "s1", false), "x", 7).await,
+            f.hub.link(999, link_input(FM_A, "s1"), "x", 7).await,
             Err(AppError::NotFound)
+        ));
+        let mut bad = link_input(FM_B, "s1");
+        bad.aircraft_label = String::new();
+        assert!(matches!(
+            f.hub.link(a, bad, "x", 8).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_released_flugmappe_is_409_until_it_links_again() {
+        let f = hub().await;
+        let id = two_flugmappen(&f.hub).await;
+        let link_b = f.hub.get(id).await.unwrap().flugmappe_links[1].id;
+        assert!(matches!(
+            f.hub.release_flugmappe(id, 999, 30).await,
+            Err(AppError::NotFound)
+        ));
+        let m = f.hub.release_flugmappe(id, link_b, 30).await.unwrap();
+        assert_eq!(m.flugmappe_links[1].released_at_ms, Some(30));
+        let again = f.hub.release_flugmappe(id, link_b, 31).await.unwrap();
+        assert_eq!(again, m, "wiederholt kein Fehler");
+        let err = f.hub.flugmappe_flights(id, FM_B).await.unwrap_err();
+        assert_eq!(err.to_string(), rules::RELEASED);
+        assert!(f.hub.flugmappe_flights(id, FM_A).await.is_ok());
+
+        // Wiederverknüpfen belebt die alte Verknüpfung samt Abschnitt.
+        let back = f
+            .hub
+            .link(id, link_input(FM_B, "t1"), "Zweite", 40)
+            .await
+            .unwrap();
+        assert_eq!(back.links.len(), 2, "keine zweite Verknüpfung");
+        assert_eq!(back.links[1].released_at_ms, None);
+        assert_eq!(back.sections.len(), 2, "Abschnitt bekannt");
+        assert!(f.hub.flugmappe_flights(id, FM_B).await.is_ok());
+
+        f.hub.close(id, 50).await.unwrap();
+        assert!(matches!(
+            f.hub.release_flugmappe(id, link_b, 51).await,
+            Err(AppError::Unprocessable(_))
         ));
     }
 
@@ -801,6 +1178,36 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Unprocessable(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn the_same_local_section_id_of_two_flugmappen_does_not_collide() {
+        let f = hub().await;
+        let id = two_flugmappen(&f.hub).await;
+        let input = |label: &str| FmSectionCreate {
+            flugmappe_section_id: "s2".into(),
+            label: label.into(),
+            location: None,
+        };
+        f.hub
+            .add_flugmappe_section(id, FM_A, input("Verlegung A"), 30)
+            .await
+            .unwrap();
+        let b = f
+            .hub
+            .add_flugmappe_section(id, FM_B, input("Verlegung B"), 31)
+            .await
+            .unwrap();
+        assert_eq!(b.sections.len(), 4);
+        assert_eq!(
+            b.sections.last().unwrap().label,
+            "Verlegung B",
+            "aktiv für Suchlage: der zuletzt angelegte"
+        );
+        let ids = store::flugmappe_ids(&f.hub.pool, id).await.unwrap();
+        let (la, lb) = (ids.link(FM_A).unwrap().id, ids.link(FM_B).unwrap().id);
+        assert_ne!(ids.section(la, "s2"), ids.section(lb, "s2"));
+        assert_eq!(ids.active_section(la), ids.section(la, "s2"));
     }
 
     #[tokio::test]
@@ -971,14 +1378,15 @@ mod tests {
                     f.flugmappe_section_id.as_deref(),
                     f.photo_count,
                     f.aircraft_label.as_deref(),
+                    f.confirmed_by.as_deref(),
                 )
             })
             .collect();
         assert_eq!(
             summary,
             vec![
-                (1, Some("s1"), 2, Some("RC Plus 1")),
-                (3, Some("s2"), 0, Some("RC Plus 1"))
+                (1, Some("s1"), 2, Some("RC Plus 1"), None),
+                (3, Some("s2"), 0, Some("RC Plus 1"), None)
             ]
         );
         assert!(list[1].ended_at_ms.is_none(), "laufender Flug erkennbar");
@@ -998,6 +1406,283 @@ mod tests {
         assert!(matches!(
             f.hub.flugmappe_map(m.id, FM_B, None).await,
             Err(AppError::Conflict(_))
+        ));
+    }
+
+    fn entry(revision: i64, flight_id: Option<i64>, section: Option<&str>) -> FmLogbookEntry {
+        FmLogbookEntry {
+            revision,
+            flight_id,
+            flugmappe_section_id: section.map(Into::into),
+            started_at_ms: 1_000,
+            landed_at_ms: Some(1_500),
+            aircraft_label: "Matrice 200".into(),
+            pilot: Some("Max Muster".into()),
+            landing_status: Some("normal".into()),
+            changed_at_ms: 1_600,
+        }
+    }
+
+    #[tokio::test]
+    async fn two_flugmappen_confirm_a_flight_only_once() {
+        let f = hub().await;
+        let id = two_flugmappen(&f.hub).await;
+        flights::insert(&f.hub.pool, &flight(1, Some(1_500)))
+            .await
+            .unwrap();
+        let confirmed = f
+            .hub
+            .put_logbook_entry(id, FM_B, E1, entry(1, Some(1), Some("t1")), 30)
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                confirmed.revision,
+                confirmed
+                    .entry
+                    .as_ref()
+                    .unwrap()
+                    .flugmappe_section_id
+                    .as_deref()
+            ),
+            (1, Some("t1"))
+        );
+        // Suchlage übernimmt den Abschnitt der Bestätigung für den Flug.
+        let section_b = f.hub.flugmappe_mission(id, FM_B).await.unwrap().sections[1].id;
+        let (_, section) = flights::of_mission_with_section(&f.hub.pool, id)
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(section, Some(section_b));
+
+        let for_a = f.hub.flugmappe_flights(id, FM_A).await.unwrap();
+        assert_eq!(for_a[0].confirmed_by.as_deref(), Some("Matrice 200"));
+        assert_eq!(for_a[0].flugmappe_section_id, None, "Abschnitt der anderen");
+        let for_b = f.hub.flugmappe_flights(id, FM_B).await.unwrap();
+        assert_eq!(for_b[0].confirmed_by, None, "eigene Bestätigung");
+
+        let err = f
+            .hub
+            .put_logbook_entry(id, FM_A, E2, entry(1, Some(1), None), 31)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, AppError::Conflict(m) if m == "Flug wurde von Matrice 200 bestätigt"),
+            "{err:?}"
+        );
+
+        // Gelöscht: Der Flug bleibt und ist wieder Vorschlag; A darf ihn jetzt bestätigen.
+        f.hub
+            .delete_logbook_entry(id, FM_B, E1, 2, 32)
+            .await
+            .unwrap();
+        assert_eq!(flights::of_mission(&f.hub.pool, id).await.unwrap().len(), 1);
+        assert_eq!(
+            f.hub.flugmappe_flights(id, FM_A).await.unwrap()[0].confirmed_by,
+            None
+        );
+        assert!(
+            f.hub
+                .put_logbook_entry(id, FM_A, E2, entry(1, Some(1), None), 33)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn logbook_reports_follow_the_revision() {
+        let f = hub().await;
+        let id = two_flugmappen(&f.hub).await;
+        let put = |rev: i64, label: &str| {
+            let mut e = entry(rev, None, Some("t1"));
+            e.aircraft_label = label.into();
+            f.hub.put_logbook_entry(id, FM_B, E1, e, 40)
+        };
+        assert_eq!(put(2, "Neu").await.unwrap().revision, 2);
+        let older = put(1, "Alt").await.unwrap();
+        assert_eq!(
+            (older.revision, older.entry.unwrap().aircraft_label.as_str()),
+            (2, "Neu"),
+            "älter: der gespeicherte Stand, kein Fehler"
+        );
+        // Ein verspätetes DELETE löscht keinen neueren Eintrag.
+        f.hub
+            .delete_logbook_entry(id, FM_B, E1, 2, 41)
+            .await
+            .unwrap();
+        assert!(put(2, "Neu").await.unwrap().entry.is_some());
+        f.hub
+            .delete_logbook_entry(id, FM_B, E1, 3, 42)
+            .await
+            .unwrap();
+        f.hub
+            .delete_logbook_entry(id, FM_B, E1, 3, 43)
+            .await
+            .unwrap();
+        let gone = put(3, "Wieder").await.unwrap();
+        assert_eq!(
+            (gone.revision, gone.entry),
+            (3, None),
+            "nicht wiederhergestellt"
+        );
+        assert!(put(4, "Wieder").await.unwrap().entry.is_some());
+        // Unbekannt gelöscht: eine Löschmarke, die eine ältere Meldung abfängt.
+        f.hub
+            .delete_logbook_entry(id, FM_B, E2, 5, 44)
+            .await
+            .unwrap();
+        let late = f
+            .hub
+            .put_logbook_entry(id, FM_B, E2, entry(4, None, None), 45)
+            .await
+            .unwrap();
+        assert_eq!(late.entry, None);
+
+        let log = f.hub.flight_log(id).await.unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(
+            (
+                log[0].source,
+                log[0].aircraft.as_str(),
+                log[0].section.as_deref()
+            ),
+            (
+                MissionFlightSource::Flugmappe,
+                "Wieder",
+                Some("Abschnitt A")
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn logbook_reports_are_checked() {
+        let f = hub().await;
+        // Flug 9 ohne Einsatz: Er gehört nicht zum Einsatz und lässt sich nicht bestätigen.
+        flights::insert(&f.hub.pool, &flight(9, Some(9_500)))
+            .await
+            .unwrap();
+        let id = two_flugmappen(&f.hub).await;
+        for (e, expected) in [
+            (entry(1, Some(9), None), "Unprocessable"),
+            (entry(1, Some(404), None), "Unprocessable"),
+            (entry(1, None, Some("s9")), "Unprocessable"),
+            (entry(1, None, Some("s1")), "Unprocessable"),
+            (entry(0, None, None), "Validation"),
+        ] {
+            let err = f
+                .hub
+                .put_logbook_entry(id, FM_B, E1, e, 30)
+                .await
+                .unwrap_err();
+            assert!(format!("{err:?}").starts_with(expected), "{err:?}");
+        }
+        assert!(matches!(
+            f.hub
+                .put_logbook_entry(id, FM_B, "e1", entry(1, None, None), 30)
+                .await,
+            Err(AppError::Validation(_))
+        ));
+        let stranger = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e";
+        assert!(matches!(
+            f.hub
+                .put_logbook_entry(id, stranger, E1, entry(1, None, None), 30)
+                .await,
+            Err(AppError::Conflict(_))
+        ));
+        // Nach dem Abschluss: 422, Suchlage zeigt den Eintrag nicht.
+        f.hub.close(id, 31).await.unwrap();
+        for result in [
+            f.hub
+                .put_logbook_entry(id, FM_A, E1, entry(1, None, None), 32)
+                .await
+                .map(|_| ()),
+            f.hub.delete_logbook_entry(id, FM_A, E1, 1, 32).await,
+        ] {
+            assert!(
+                matches!(result, Err(AppError::Unprocessable(_))),
+                "{result:?}"
+            );
+        }
+        assert!(
+            f.hub
+                .flight_log(id)
+                .await
+                .unwrap()
+                .iter()
+                .all(|e| e.flight_id.is_some())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_flight_log_shows_telemetry_and_hand_entries() {
+        let f = hub().await;
+        let pool = &f.hub.pool;
+        let id = two_flugmappen(&f.hub).await;
+        let (rc, _) = remote_controllers::create(pool, "RC Plus 1", 0)
+            .await
+            .unwrap();
+        remote_controllers::bind(pool, rc.id, "RC1", "pw", "k", 1)
+            .await
+            .unwrap();
+        flights::insert(pool, &flight(1, Some(1_500)))
+            .await
+            .unwrap();
+        flights::insert(pool, &flight(3, None)).await.unwrap();
+        let mut confirmed = entry(1, Some(1), None);
+        confirmed.aircraft_label = "Matrice 350 RTK".into();
+        f.hub
+            .put_logbook_entry(id, FM_A, E1, confirmed, 30)
+            .await
+            .unwrap();
+        let mut hand = entry(1, None, Some("t1"));
+        hand.started_at_ms = 2_000;
+        hand.landed_at_ms = Some(2_500);
+        f.hub
+            .put_logbook_entry(id, FM_B, E2, hand, 31)
+            .await
+            .unwrap();
+        let log = f.hub.flight_log(id).await.unwrap();
+        let summary: Vec<_> = log
+            .iter()
+            .map(|e| {
+                (
+                    e.flight_id,
+                    e.source,
+                    e.aircraft.as_str(),
+                    e.confirmed_in.as_deref(),
+                    e.section.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (
+                    Some(1),
+                    MissionFlightSource::Telemetry,
+                    "Matrice 350 RTK",
+                    Some("Matrice 350 RTK"),
+                    Some("Abschnitt A")
+                ),
+                (
+                    None,
+                    MissionFlightSource::Flugmappe,
+                    "Matrice 200",
+                    None,
+                    Some("Abschnitt A")
+                ),
+                (
+                    Some(3),
+                    MissionFlightSource::Telemetry,
+                    "RC Plus 1",
+                    None,
+                    Some("Abschnitt A")
+                ),
+            ]
+        );
+        assert!(matches!(
+            f.hub.flight_log(999).await,
+            Err(AppError::NotFound)
         ));
     }
 
@@ -1075,10 +1760,21 @@ mod tests {
 
         let again = f
             .hub
-            .import_map(m.id, FM_A, input, "Testpilot", 12)
+            .import_map(m.id, FM_A, input.clone(), "Testpilot", 12)
             .await
             .unwrap();
         assert_eq!(again.imported, 0);
+        // Eine dazukommende Flugmappe übernimmt nichts mehr.
+        f.hub
+            .link(m.id, link_input(FM_B, "t1"), "Zweite", 13)
+            .await
+            .unwrap();
+        let joined = f
+            .hub
+            .import_map(m.id, FM_B, input, "Zweite", 14)
+            .await
+            .unwrap();
+        assert_eq!(joined.imported, 0);
         assert_eq!(f.hub.map.list_in(Some(m.id)).await.unwrap().len(), 2);
     }
 
@@ -1213,6 +1909,38 @@ mod tests {
                 .await,
             Err(AppError::Unprocessable(_))
         ));
-        assert!(f.hub.flugmappe_missions().await.unwrap().is_empty());
+        assert!(f.hub.flugmappe_missions(None).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_mission_closes_only_with_the_last_open_flugmappe() {
+        let f = hub().await;
+        let id = two_flugmappen(&f.hub).await;
+        let first = f.hub.close_from_flugmappe(id, FM_A, 30).await.unwrap();
+        assert_eq!(first.state, MissionState::Running, "B fliegt noch");
+        assert_eq!(first.links[0].done_at_ms, Some(30));
+        let again = f.hub.close_from_flugmappe(id, FM_A, 31).await.unwrap();
+        assert_eq!(again.links[0].done_at_ms, Some(30), "erste Zeit bleibt");
+        // Nach „fertig“ nimmt Suchlage noch Einträge an, solange der Einsatz offen ist.
+        assert!(
+            f.hub
+                .put_logbook_entry(id, FM_A, E1, entry(1, None, None), 32)
+                .await
+                .is_ok()
+        );
+        let last = f.hub.close_from_flugmappe(id, FM_B, 33).await.unwrap();
+        assert_eq!(last.state, MissionState::Closed);
+
+        // Eine gelöste Flugmappe wartet niemand ab.
+        let g = hub().await;
+        let id = two_flugmappen(&g.hub).await;
+        let link_b = g.hub.get(id).await.unwrap().flugmappe_links[1].id;
+        g.hub.release_flugmappe(id, link_b, 40).await.unwrap();
+        let closed = g.hub.close_from_flugmappe(id, FM_A, 41).await.unwrap();
+        assert_eq!(closed.state, MissionState::Closed);
+        assert!(matches!(
+            g.hub.close_from_flugmappe(id, FM_B, 42).await,
+            Err(AppError::Conflict(_))
+        ));
     }
 }

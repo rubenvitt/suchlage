@@ -10,6 +10,7 @@ export type Mission = { id: number, name: string, location: string | null, state
  */
 sections: Array<MissionSection>, origin: MissionOrigin, 
 /**
- * `null`: mit keiner Flugmappe verknüpft. Dann legt Suchlage auch Abschnitte an.
+ * Verknüpfte Flugmappen, älteste zuerst, auch gelöste. Ohne nicht gelöste legt Suchlage
+ * auch Abschnitte an.
  */
-flugmappe: FlugmappeLink | null, };
+flugmappe_links: Array<FlugmappeLink>, };

@@ -15,6 +15,7 @@ import type { RemoteControllerCreated } from '../contract/generated/RemoteContro
 import type { SetupResult } from '../contract/generated/SetupResult';
 import { demoElements, demoFlightMissions, demoPhotos, matchesMission } from '../demo/missionData';
 import type { MissionAssign } from '../contract/generated/MissionAssign';
+import type { MissionFlight } from '../contract/generated/MissionFlight';
 import * as fx from '../contract/fixtures.generated';
 
 /** Ein laufender und ein vorbereiteter Beispiel-Einsatz. */
@@ -39,7 +40,7 @@ export const missionFixtures = (): Mission[] => [
       },
     ],
     origin: 'web',
-    flugmappe: null,
+    flugmappe_links: [],
   },
   {
     id: 2,
@@ -52,13 +53,13 @@ export const missionFixtures = (): Mission[] => [
     closed_at_ms: null,
     sections: [],
     origin: 'web',
-    flugmappe: null,
+    flugmappe_links: [],
   },
 ];
 
 /** Zustandsbehaftete Einsatz-Routen mit den Regeln des Servers (ein laufender Einsatz, 409 beim Starten, 422 beim Löschen eines laufenden). */
 export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
-  const missions = initial.map((m) => ({ ...m }));
+  const missions = initial.map((m) => ({ ...m, flugmappe_links: m.flugmappe_links.map((l) => ({ ...l })) }));
   const find = (id: unknown) => missions.find((m) => m.id === Number(id));
   return [
     http.get('/api/missions', () => HttpResponse.json(missions)),
@@ -75,7 +76,7 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         closed_at_ms: null,
         sections: [],
         origin: 'web',
-        flugmappe: null,
+        flugmappe_links: [],
       };
       missions.push(created);
       return HttpResponse.json(created);
@@ -125,7 +126,7 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
     http.post('/api/missions/:id/sections', async ({ params, request }) => {
       const m = find(params.id);
       if (!m) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
-      if (m.flugmappe)
+      if (m.flugmappe_links.some((l) => l.released_at_ms == null))
         return HttpResponse.json(
           { error: 'Abschnitte kommen bei diesem Einsatz aus der Flugmappe' },
           { status: 422 },
@@ -139,6 +140,13 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         has_map_photo: false,
         map_photo_at_ms: null,
       });
+      return HttpResponse.json(m);
+    }),
+    http.post('/api/missions/:id/flugmappe-links/:link/release', ({ params }) => {
+      const m = find(params.id);
+      const link = m?.flugmappe_links.find((l) => l.id === Number(params.link));
+      if (!m || !link) return HttpResponse.json({ error: 'Nicht gefunden' }, { status: 404 });
+      link.released_at_ms ??= Date.now();
       return HttpResponse.json(m);
     }),
     // Vorschau-Modus: eine skizzierte Papierkarte statt eines echten Kartenfotos.
@@ -171,6 +179,30 @@ export const handlersFor = (me: Me, missions: Mission[] = missionFixtures()) => 
     http.get('/api/auth/options', () => HttpResponse.json(fx.authOptionsOidc)),
     http.post('/api/auth/logout', noContent),
     http.get('/api/situation', () => HttpResponse.json(fx.snapshotFlying)),
+    // Der Einsatz aus der Flugmappe zeigt die Beispiel-Flugliste mit Handeintrag, die übrigen ihre
+    // aufgezeichneten Flüge.
+    http.get('/api/missions/:id/flight-log', ({ params }) => {
+      const id = Number(params.id);
+      if (missions.find((m) => m.id === id)?.origin === 'flugmappe') return HttpResponse.json(fx.missionFlights);
+      return HttpResponse.json(
+        fx.flightList
+          .filter((f) => flightMissions.get(f.id) === id)
+          .sort((a, b) => a.started_at_ms - b.started_at_ms)
+          .map(
+            (f): MissionFlight => ({
+              key: `t${f.id}`,
+              flight_id: f.id,
+              source: 'telemetry',
+              started_at_ms: f.started_at_ms,
+              ended_at_ms: f.ended_at_ms,
+              aircraft: 'RC Plus 1',
+              section: missions.find((m) => m.id === id)?.sections.at(-1)?.label ?? null,
+              confirmed_in: null,
+              pilot: null,
+            }),
+          ),
+      );
+    }),
     http.get('/api/flights', ({ request }) =>
       HttpResponse.json(
         fx.flightList.filter((f) => matchesMission(request.url, flightMissions.get(f.id) ?? null)),

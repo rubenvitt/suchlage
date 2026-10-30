@@ -6,6 +6,7 @@ import type { FlightDetail } from './generated/FlightDetail';
 import type { FlightSummary } from './generated/FlightSummary';
 import type { FmFeatureCollection } from './generated/FmFeatureCollection';
 import type { FmFlight } from './generated/FmFlight';
+import type { FmLogbookStored } from './generated/FmLogbookStored';
 import type { FmMe } from './generated/FmMe';
 import type { FmMission } from './generated/FmMission';
 import type { Health } from './generated/Health';
@@ -14,6 +15,7 @@ import type { LiveEvent } from './generated/LiveEvent';
 import type { MapElement } from './generated/MapElement';
 import type { Me } from './generated/Me';
 import type { Mission } from './generated/Mission';
+import type { MissionFlight } from './generated/MissionFlight';
 import type { PhotoShot } from './generated/PhotoShot';
 import type { RemoteControllerView } from './generated/RemoteControllerView';
 import type { SettingsView } from './generated/SettingsView';
@@ -1027,10 +1029,32 @@ export const missionList: Mission[] = [
     "closed_at_ms": null,
     "created_at_ms": 1792146400000,
     "created_by": "Gruppenführer I&K",
-    "flugmappe": {
-      "linked_at_ms": 1792146400000,
-      "linked_by": "Gruppenführer I&K"
-    },
+    "flugmappe_links": [
+      {
+        "aircraft_label": "Matrice 350 RTK",
+        "done_at_ms": null,
+        "id": 1,
+        "linked_at_ms": 1792146400000,
+        "linked_by": "Gruppenführer I&K",
+        "released_at_ms": null
+      },
+      {
+        "aircraft_label": "Matrice 200",
+        "done_at_ms": 1792149700000,
+        "id": 2,
+        "linked_at_ms": 1792147300000,
+        "linked_by": "Max Muster",
+        "released_at_ms": null
+      },
+      {
+        "aircraft_label": "Mavic 3T",
+        "done_at_ms": null,
+        "id": 3,
+        "linked_at_ms": 1792147000000,
+        "linked_by": "Gesa Gast",
+        "released_at_ms": 1792147200000
+      }
+    ],
     "id": 3,
     "location": "Forst Nord",
     "name": "Vermisste Person Waldweg",
@@ -1060,7 +1084,7 @@ export const missionList: Mission[] = [
     "closed_at_ms": null,
     "created_at_ms": 1792149400000,
     "created_by": "Erika Mustermann",
-    "flugmappe": null,
+    "flugmappe_links": [],
     "id": 4,
     "location": null,
     "name": "Übung Kiesgrube",
@@ -1080,8 +1104,44 @@ export const missionList: Mission[] = [
   }
 ];
 
+export const missionFlights: MissionFlight[] = [
+  {
+    "aircraft": "Matrice 350 RTK",
+    "confirmed_in": "Matrice 350 RTK",
+    "ended_at_ms": 1792148680000,
+    "flight_id": 6,
+    "key": "t6",
+    "pilot": "Erika Mustermann",
+    "section": "Abschnitt 1",
+    "source": "telemetry",
+    "started_at_ms": 1792147600000
+  },
+  {
+    "aircraft": "Matrice 200",
+    "confirmed_in": null,
+    "ended_at_ms": 1792149100000,
+    "flight_id": null,
+    "key": "f1",
+    "pilot": "Max Muster",
+    "section": "Verlegung Waldrand",
+    "source": "flugmappe",
+    "started_at_ms": 1792148500000
+  },
+  {
+    "aircraft": "Matrice 350 RTK",
+    "confirmed_in": "Matrice 200",
+    "ended_at_ms": null,
+    "flight_id": 7,
+    "key": "t7",
+    "pilot": "Max Muster",
+    "section": "Verlegung Waldrand",
+    "source": "telemetry",
+    "started_at_ms": 1792149400000
+  }
+];
+
 export const fmMe: FmMe = {
-  "api_version": 1,
+  "api_version": 2,
   "name": "Gruppenführer I&K",
   "role": "operator"
 };
@@ -1091,11 +1151,32 @@ export const fmMissions: FmMission[] = [
     "created_at_ms": 1792146400000,
     "created_by": "Gruppenführer I&K",
     "id": 3,
-    "link": {
-      "flugmappe_mission_id": "0f6b2a1e-5d43-4c8e-9b7a-2e1f3c4d5a6b",
-      "linked_at_ms": 1792146400000,
-      "linked_by": "Gruppenführer I&K"
-    },
+    "links": [
+      {
+        "aircraft_label": "Matrice 350 RTK",
+        "done_at_ms": null,
+        "flugmappe_mission_id": "0f6b2a1e-5d43-4c8e-9b7a-2e1f3c4d5a6b",
+        "linked_at_ms": 1792146400000,
+        "linked_by": "Gruppenführer I&K",
+        "released_at_ms": null
+      },
+      {
+        "aircraft_label": "Matrice 200",
+        "done_at_ms": 1792149700000,
+        "flugmappe_mission_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "linked_at_ms": 1792147300000,
+        "linked_by": "Max Muster",
+        "released_at_ms": null
+      },
+      {
+        "aircraft_label": "Mavic 3T",
+        "done_at_ms": null,
+        "flugmappe_mission_id": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+        "linked_at_ms": 1792147000000,
+        "linked_by": "Gesa Gast",
+        "released_at_ms": 1792147200000
+      }
+    ],
     "location": "Forst Nord",
     "name": "Vermisste Person Waldweg",
     "sections": [
@@ -1123,7 +1204,7 @@ export const fmMissions: FmMission[] = [
     "created_at_ms": 1792149400000,
     "created_by": "Erika Mustermann",
     "id": 4,
-    "link": null,
+    "links": [],
     "location": null,
     "name": "Übung Kiesgrube",
     "sections": [
@@ -1145,6 +1226,7 @@ export const fmFlights: FmFlight[] = [
   {
     "aircraft_label": "RC Plus 1",
     "aircraft_sn": "ACSIM0001",
+    "confirmed_by": null,
     "distance_m": 2310.0,
     "end_reason": "landed",
     "ended_at_ms": 1792148680000,
@@ -1157,6 +1239,7 @@ export const fmFlights: FmFlight[] = [
   {
     "aircraft_label": "RC Plus 1",
     "aircraft_sn": "ACSIM0001",
+    "confirmed_by": "Matrice 200",
     "distance_m": 431.0,
     "end_reason": null,
     "ended_at_ms": null,
@@ -1167,6 +1250,22 @@ export const fmFlights: FmFlight[] = [
     "started_at_ms": 1792149400000
   }
 ];
+
+export const fmLogbookStored: FmLogbookStored = {
+  "entry": {
+    "aircraft_label": "Matrice 200",
+    "changed_at_ms": 1792149150000,
+    "flight_id": null,
+    "flugmappe_section_id": "b7e8f9a0-1b2c-4d3e-8f4a-5b6c7d8e9f0a",
+    "landed_at_ms": 1792149100000,
+    "landing_status": "normal",
+    "pilot": "Max Muster",
+    "revision": 2,
+    "started_at_ms": 1792148500000
+  },
+  "entry_id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+  "revision": 2
+};
 
 export const fmMap: FmFeatureCollection = {
   "features": [

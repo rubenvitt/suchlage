@@ -7,4 +7,8 @@ export type FmMissionCreate = { name: string, location: string | null, section_l
 /**
  * UUID des Einsatzes in der Flugmappe.
  */
-flugmappe_mission_id: string, flugmappe_section_id: string, };
+flugmappe_mission_id: string, flugmappe_section_id: string, 
+/**
+ * Fluggerät der Flugmappe, z. B. „Matrice 350 RTK“.
+ */
+aircraft_label: string, };

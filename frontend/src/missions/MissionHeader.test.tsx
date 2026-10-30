@@ -286,9 +286,7 @@ test('verknüpft: „· Flugmappe“ im Kopf, kein „Neuer Abschnitt …“, He
   const note = await screen.findByText('· Flugmappe');
   expect(note).toHaveAttribute(
     'title',
-    expect.stringMatching(
-      /^aus der Flugmappe · mit Flugmappe verknüpft · Gruppenführer I&K · \d\d\.\d\d\., \d\d:\d\d$/,
-    ),
+    expect.stringMatching(/^aus der Flugmappe · mit 2 Flugmappen verknüpft · Matrice 350 RTK, Matrice 200$/),
   );
   await userEvent.click(screen.getByRole('button', { name: /Vermisste Person Waldweg/ }));
   const menu = within(await screen.findByRole('menu'));
@@ -298,8 +296,39 @@ test('verknüpft: „· Flugmappe“ im Kopf, kein „Neuer Abschnitt …“, He
     'true',
   );
   expect(
-    menu.getByText(/^aus der Flugmappe · mit Flugmappe verknüpft · Gruppenführer I&K/),
+    menu.getByText('aus der Flugmappe · mit 2 Flugmappen verknüpft · Matrice 350 RTK, Matrice 200'),
   ).toBeInTheDocument();
+});
+
+test('„Verknüpfte Flugmappen …“ zeigt jede mit Zustand; „Lösen“ fragt nach und löst nur die eine', async () => {
+  show('/', [linked]);
+  const sent: string[] = [];
+  server.use(
+    http.post('/api/missions/:id/flugmappe-links/:link/release', ({ params }) => {
+      sent.push(`${String(params.id)}/${String(params.link)}`);
+      return HttpResponse.json(linked);
+    }),
+  );
+  await userEvent.click(await screen.findByRole('button', { name: /Vermisste Person Waldweg/ }));
+  await userEvent.click(await screen.findByText('Verknüpfte Flugmappen …'));
+  const dialog = within(await screen.findByRole('dialog'));
+  const items = within(dialog.getByRole('list', { name: /^Flugmappen von/ })).getAllByRole('listitem');
+  expect(items.map((li) => li.querySelector('strong')?.textContent)).toEqual([
+    'Matrice 350 RTK',
+    'Matrice 200',
+    'Mavic 3T',
+  ]);
+  expect(within(items[1]!).getByText('fertig')).toBeInTheDocument();
+  expect(within(items[2]!).getByText('gelöst')).toBeInTheDocument();
+  // Gelöste Flugmappen lassen sich nicht noch einmal lösen.
+  expect(within(items[2]!).queryByRole('button')).not.toBeInTheDocument();
+  await userEvent.click(dialog.getByRole('button', { name: 'Lösen: Flugmappe Matrice 200' }));
+  expect(await dialog.findByText('Flugmappe Matrice 200 lösen?')).toBeInTheDocument();
+  expect(sent).toEqual([]);
+  await userEvent.click(dialog.getByRole('button', { name: 'Lösen' }));
+  const m200 = linked.flugmappe_links.find((l) => l.aircraft_label === 'Matrice 200')!;
+  await vi.waitFor(() => expect(sent).toEqual([`${linked.id}/${m200.id}`]));
+  await vi.waitFor(() => expect(dialog.queryByText('Flugmappe Matrice 200 lösen?')).not.toBeInTheDocument());
 });
 
 test('„Kartenfotos …“ zeigt das Kartenfoto des Abschnitts mit Versionszeichen, groß im neuen Tab', async () => {

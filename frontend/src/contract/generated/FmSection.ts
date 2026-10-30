@@ -6,6 +6,7 @@ export type FmSection = {
  */
 id: number, 
 /**
- * `null`: in Suchlage angelegt und (noch) keinem Abschnitt der Flugmappe zugeordnet.
+ * Abschnitts-ID der aufrufenden Flugmappe; `null`: in Suchlage oder von einer anderen
+ * Flugmappe angelegt (deren IDs sieht sie nicht).
  */
 flugmappe_section_id: string | null, label: string, location: string | null, created_at_ms: number, has_map_photo: boolean, };

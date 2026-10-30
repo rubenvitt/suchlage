@@ -4,7 +4,7 @@ Lokaler, internetunabhängiger Lagehub für Personensuchen im Katastrophenschutz
 
 Nachfolger von `uav-lagebild` (archiviert). Stand: M1 abgenommen, M2 (Kartenelemente) umgesetzt, Feldabnahme offen.
 
-Die Flugmappe (`uav-checklists`) legt über `/api/flugmappe/v1` Einsätze an und verknüpft sie; eingeschaltet wird das unter *Einstellungen → Flugmappe* (Runbook: `docs/betrieb/runbook-deployment.md`, Schritt 11).
+Die Flugmappe (`uav-checklists`) legt über `/api/flugmappe/v2` Einsätze an und verknüpft sie; eingeschaltet wird das unter *Einstellungen → Flugmappe* (Runbook: `docs/betrieb/runbook-deployment.md`, Schritt 11).
 
 Jeder Push auf `main` wird ein Release `v<Version>` mit Image in GHCR; welcher Stand läuft, zeigt die Systemseite (Runbook: `docs/betrieb/runbook-deployment.md`, Schritt 3).
 

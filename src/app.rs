@@ -88,7 +88,7 @@ pub fn router(state: AppState) -> Router {
         .merge(crate::web::devlog::routes())
         // Schnittstelle für die Flugmappe: Bearer statt Sitzung, eigenes CORS (SUL-66).
         .nest(
-            "/flugmappe/v1",
+            "/flugmappe/v2",
             crate::web::flugmappe::routes(state.settings.clone()),
         )
         // Schnittstelle für den Lagemonitor: Großbild-Token als Bearer, nur lesen.

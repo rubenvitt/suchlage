@@ -1,9 +1,12 @@
-//! Schnittstelle für die Flugmappe (`/api/flugmappe/v1`, SUL-66). Anmeldung per Zugriffstoken
+//! Schnittstelle für die Flugmappe (`/api/flugmappe/v2`, SUL-66, mehrere Flugmappen SUL-113). Anmeldung per Zugriffstoken
 //! (`auth::bearer`), keine Sitzungscookies. CORS nur hier und nur für den eingestellten Ursprung;
 //! die Einstellung gilt ohne Neustart.
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{
+    DefaultBodyLimit, FromRequest, FromRequestParts, OptionalFromRequestParts, Path, Query,
+    Request, State,
+};
 use axum::http::header::{
     ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
     ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN, VARY,
@@ -19,9 +22,9 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::auth::bearer::FlugmappeUser;
 use crate::contract::{
-    FLUGMAPPE_API_VERSION, FLUGMAPPE_MISSION_HEADER, FmFeatureCollection, FmFlight, FmMapImport,
-    FmMapImportResult, FmMe, FmMission, FmMissionCreate, FmMissionLink, FmSectionCreate,
-    FmSectionUpdate,
+    FLUGMAPPE_API_VERSION, FLUGMAPPE_MISSION_HEADER, FmFeatureCollection, FmFlight, FmLogbookEntry,
+    FmLogbookStored, FmMapImport, FmMapImportResult, FmMe, FmMission, FmMissionCreate,
+    FmMissionLink, FmSectionCreate, FmSectionUpdate,
 };
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -34,7 +37,7 @@ pub const MAP_PHOTO_MAX_BYTES: usize = 8 * 1024 * 1024;
 /// Zeichnungen der Flugmappe können groß sein (200 Elemente mit bis zu 1000 Punkten).
 pub const MAP_IMPORT_MAX_BYTES: usize = 2 * 1024 * 1024;
 
-const ALLOW_METHODS: &str = "GET, POST, PUT, OPTIONS";
+const ALLOW_METHODS: &str = "GET, POST, PUT, DELETE, OPTIONS";
 const ALLOW_HEADERS: &str = "Authorization, Content-Type, X-Flugmappe-Einsatz";
 const PREFLIGHT_MAX_AGE_S: &str = "600";
 
@@ -47,6 +50,10 @@ pub fn routes(settings: SettingsHandle) -> Router<AppState> {
         .route("/missions/{id}/sections", post(add_section))
         .route("/missions/{id}/sections/{section_id}", put(update_section))
         .route("/missions/{id}/flights", get(flights))
+        .route(
+            "/missions/{id}/logbook/{entry_id}",
+            put(put_logbook).delete(delete_logbook),
+        )
         .route("/missions/{id}/map", get(map))
         .route(
             "/missions/{id}/map/import",
@@ -131,6 +138,20 @@ impl<S: Send + Sync> FromRequestParts<S> for Binding {
     }
 }
 
+/// Ohne Header ist es kein Fehler (Auswahlliste); ein ungültiger bleibt 400.
+impl<S: Send + Sync> OptionalFromRequestParts<S> for Binding {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Option<Self>, AppError> {
+        if !parts.headers.contains_key(FLUGMAPPE_MISSION_HEADER) {
+            return Ok(None);
+        }
+        <Self as FromRequestParts<S>>::from_request_parts(parts, state)
+            .await
+            .map(Some)
+    }
+}
+
 /// Body des Kartenfotos; über der Grenze der Route 413.
 struct PhotoBody(Bytes);
 
@@ -163,12 +184,16 @@ async fn me(FlugmappeUser(user): FlugmappeUser) -> Json<FmMe> {
     })
 }
 
-/// Vorbereitete und laufende Einsätze zur Auswahl.
+/// Vorbereitete und laufende Einsätze zur Auswahl. Mit Header samt den eigenen Abschnitts-IDs.
 async fn missions(
     _: FlugmappeUser,
+    binding: Option<Binding>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<FmMission>>, AppError> {
-    Ok(Json(state.missions.flugmappe_missions().await?))
+    let caller = binding.map(|Binding(fm)| fm);
+    Ok(Json(
+        state.missions.flugmappe_missions(caller.as_deref()).await?,
+    ))
 }
 
 async fn create(
@@ -245,6 +270,42 @@ async fn flights(
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<FmFlight>>, AppError> {
     Ok(Json(state.missions.flugmappe_flights(id, &fm).await?))
+}
+
+async fn put_logbook(
+    _: FlugmappeUser,
+    Binding(fm): Binding,
+    State(state): State<AppState>,
+    Path((id, entry_id)): Path<(i64, String)>,
+    JsonBody(input): JsonBody<FmLogbookEntry>,
+) -> Result<Json<FmLogbookStored>, AppError> {
+    Ok(Json(
+        state
+            .missions
+            .put_logbook_entry(id, &fm, &entry_id, input, now_ms())
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct DeleteQuery {
+    /// Revision des Löschens in der Flugmappe.
+    revision: i64,
+}
+
+/// Immer 204, auch wiederholt oder für einen unbekannten Eintrag.
+async fn delete_logbook(
+    _: FlugmappeUser,
+    Binding(fm): Binding,
+    State(state): State<AppState>,
+    Path((id, entry_id)): Path<(i64, String)>,
+    Query(q): Query<DeleteQuery>,
+) -> Result<StatusCode, AppError> {
+    state
+        .missions
+        .delete_logbook_entry(id, &fm, &entry_id, q.revision, now_ms())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -381,7 +442,7 @@ mod tests {
     ) -> Request<Body> {
         let mut req = Request::builder()
             .method(method)
-            .uri(format!("/api/flugmappe/v1{uri}"));
+            .uri(format!("/api/flugmappe/v2{uri}"));
         if let Some(t) = token {
             req = req.header(header::AUTHORIZATION, format!("Bearer {t}"));
         }
@@ -415,7 +476,8 @@ mod tests {
         async fn create(&self, fm: &str) -> (StatusCode, Value) {
             let body = json!({
                 "name": "Vermisste Person", "location": "Forst", "section_label": "Abschnitt 1",
-                "section_location": null, "flugmappe_mission_id": fm, "flugmappe_section_id": "s1"
+                "section_location": null, "flugmappe_mission_id": fm, "flugmappe_section_id": "s1",
+                "aircraft_label": "Matrice 350 RTK"
             });
             self.call("POST", "/missions", None, Some(body)).await
         }
@@ -425,6 +487,11 @@ mod tests {
             assert_eq!(status, StatusCode::OK, "{m}");
             m["id"].as_i64().unwrap()
         }
+    }
+
+    fn link_body(fm: &str, section: &str) -> Value {
+        json!({"flugmappe_mission_id": fm, "flugmappe_section_id": section,
+               "section_label": "Abschnitt 1", "section_location": null, "aircraft_label": "Matrice 200"})
     }
 
     fn flight(id: i64, ended: Option<i64>) -> FlightSummary {
@@ -448,7 +515,7 @@ mod tests {
             (status, body["error"].as_str()),
             (StatusCode::UNAUTHORIZED, Some("Nicht angemeldet"))
         );
-        let basic = Request::get("/api/flugmappe/v1/me")
+        let basic = Request::get("/api/flugmappe/v2/me")
             .header(header::AUTHORIZATION, "Basic dXNlcjpwdw==")
             .body(Body::empty())
             .unwrap();
@@ -501,7 +568,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
             body,
-            json!({"name": "Testpilot", "role": "admin", "api_version": 1})
+            json!({"name": "Testpilot", "role": "admin", "api_version": 2})
         );
     }
 
@@ -550,8 +617,9 @@ mod tests {
         let (status, m) = s.create(FM_A).await;
         assert_eq!(status, StatusCode::OK, "{m}");
         assert_eq!(m["state"], "running");
-        assert_eq!(m["link"]["flugmappe_mission_id"], FM_A);
-        assert_eq!(m["link"]["linked_by"], "Testpilot");
+        assert_eq!(m["links"][0]["flugmappe_mission_id"], FM_A);
+        assert_eq!(m["links"][0]["linked_by"], "Testpilot");
+        assert_eq!(m["links"][0]["aircraft_label"], "Matrice 350 RTK");
         assert_eq!(m["sections"][0]["flugmappe_section_id"], "s1");
         let id = m["id"].as_i64().unwrap();
 
@@ -566,6 +634,7 @@ mod tests {
         assert_eq!(flights[0]["flugmappe_section_id"], "s1");
         assert_eq!(flights[0]["end_reason"], "landed");
         assert_eq!(flights[0]["photo_count"], 0);
+        assert_eq!(flights[0]["confirmed_by"], Value::Null);
 
         let (status, body) = s
             .call("GET", &format!("/missions/{id}/flights"), None, None)
@@ -583,6 +652,16 @@ mod tests {
 
         let (status, list) = s.call("GET", "/missions", None, None).await;
         assert_eq!((status, list[0]["id"].as_i64()), (StatusCode::OK, Some(id)));
+        assert_eq!(
+            list[0]["sections"][0]["flugmappe_section_id"],
+            Value::Null,
+            "ohne Header keine Abschnitts-IDs"
+        );
+        let (status, list) = s.call("GET", "/missions", Some(FM_A), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list[0]["sections"][0]["flugmappe_section_id"], "s1");
+        let (status, _) = s.call("GET", "/missions", Some("kaputt"), None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
         let (status, one) = s
             .call("GET", &format!("/missions/{id}"), Some(FM_A), None)
             .await;
@@ -650,23 +729,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_second_running_mission_and_a_foreign_binding_are_409() {
+    async fn a_second_running_mission_and_an_unlinked_flugmappe_are_409() {
         let s = setup().await;
         let id = s.created(FM_A).await;
         let (status, body) = s.create(FM_B).await;
         assert_eq!(status, StatusCode::CONFLICT, "{body}");
         assert_eq!(body["error"], "Es läuft bereits ein anderer Einsatz");
-        let (status, body) = s
-            .call("GET", &format!("/missions/{id}/flights"), Some(FM_B), None)
-            .await;
-        assert_eq!(status, StatusCode::CONFLICT);
-        assert_eq!(
-            body["error"],
-            "Der Einsatz ist mit einer anderen Flugmappe verknüpft"
-        );
         let section = json!({"flugmappe_section_id": "t2", "label": "Verlegung", "location": null});
         let import = json!({"features": [], "standort": null});
+        let entry = json!({"revision": 1, "flight_id": null, "flugmappe_section_id": null,
+            "started_at_ms": 1, "landed_at_ms": null, "aircraft_label": "M200", "pilot": null,
+            "landing_status": null, "changed_at_ms": 1});
+        let logbook = format!("/missions/{id}/logbook/{FM_A}");
         for (method, uri, body) in [
+            ("GET", format!("/missions/{id}/flights"), None),
             ("POST", format!("/missions/{id}/sections"), Some(section)),
             (
                 "PUT",
@@ -676,19 +752,31 @@ mod tests {
             ("GET", format!("/missions/{id}"), None),
             ("GET", format!("/missions/{id}/map"), None),
             ("POST", format!("/missions/{id}/map/import"), Some(import)),
+            ("PUT", logbook.clone(), Some(entry)),
+            ("DELETE", format!("{logbook}?revision=1"), None),
             ("POST", format!("/missions/{id}/close"), None),
         ] {
             let (status, body) = s.call(method, &uri, Some(FM_B), body).await;
             assert_eq!(status, StatusCode::CONFLICT, "{method} {uri}: {body}");
             assert_eq!(
                 body["error"],
-                "Der Einsatz ist mit einer anderen Flugmappe verknüpft"
+                "Der Einsatz ist nicht mit dieser Flugmappe verknüpft"
             );
         }
         let (_, m) = s
             .call("GET", &format!("/missions/{id}"), Some(FM_A), None)
             .await;
         assert_eq!(m["state"], "running", "die fremde schließt nichts");
+    }
+
+    #[tokio::test]
+    async fn the_old_version_is_gone() {
+        let s = setup().await;
+        let req = Request::get("/api/flugmappe/v1/me")
+            .header(header::AUTHORIZATION, format!("Bearer {}", s.token))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&s.app.router, req).await.0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -742,45 +830,227 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn taking_over_replaces_the_old_flugmappe() {
+    async fn two_flugmappen_work_on_one_mission() {
         let s = setup().await;
         let id = s.created(FM_A).await;
-        let link = |take_over: bool| {
-            json!({"flugmappe_mission_id": FM_B, "flugmappe_section_id": "t1",
-                   "section_label": "Abschnitt 1", "section_location": null, "take_over": take_over})
-        };
-        let (status, _) = s
-            .call(
-                "POST",
-                &format!("/missions/{id}/link"),
-                None,
-                Some(link(false)),
-            )
-            .await;
-        assert_eq!(status, StatusCode::CONFLICT);
         let (status, m) = s
             .call(
                 "POST",
                 &format!("/missions/{id}/link"),
                 None,
-                Some(link(true)),
+                Some(link_body(FM_B, "s1")),
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{m}");
-        assert_eq!(m["link"]["flugmappe_mission_id"], FM_B);
-        assert_eq!(m["sections"][0]["flugmappe_section_id"], "t1");
+        assert_eq!(m["links"].as_array().unwrap().len(), 2);
+        assert_eq!(m["links"][1]["aircraft_label"], "Matrice 200");
+        assert_eq!(m["sections"][0]["flugmappe_section_id"], Value::Null);
+        assert_eq!(m["sections"][1]["flugmappe_section_id"], "s1");
+        crate::store::flights::insert(&s.app.state.pool, &flight(1, Some(5_000)))
+            .await
+            .unwrap();
+        for fm in [FM_A, FM_B] {
+            let (status, _) = s
+                .call("GET", &format!("/missions/{id}/flights"), Some(fm), None)
+                .await;
+            assert_eq!(status, StatusCode::OK, "beide lesen");
+        }
+
+        let entry = |flight: Value, section: Value| {
+            json!({"revision": 1, "flight_id": flight, "flugmappe_section_id": section,
+                "started_at_ms": 1_000, "landed_at_ms": 5_000, "aircraft_label": "Matrice 350 RTK",
+                "pilot": "Erika", "landing_status": "normal", "changed_at_ms": 6_000})
+        };
+        let e1 = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+        let e2 = "4d5e6f7a-8b9c-4d0e-8f1a-2b3c4d5e6f7a";
+        let (status, stored) = s
+            .call(
+                "PUT",
+                &format!("/missions/{id}/logbook/{e1}"),
+                Some(FM_A),
+                Some(entry(json!(1), json!("s1"))),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{stored}");
+        assert_eq!(stored["entry"]["flight_id"], 1);
+        let (status, again) = s
+            .call(
+                "PUT",
+                &format!("/missions/{id}/logbook/{e1}"),
+                Some(FM_A),
+                Some(entry(json!(1), json!("s1"))),
+            )
+            .await;
+        assert_eq!((status, &again), (StatusCode::OK, &stored), "wiederholbar");
+        let (status, body) = s
+            .call(
+                "PUT",
+                &format!("/missions/{id}/logbook/{e2}"),
+                Some(FM_B),
+                Some(entry(json!(1), json!("s1"))),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"], "Flug wurde von Matrice 350 RTK bestätigt");
+        let (_, flights) = s
+            .call("GET", &format!("/missions/{id}/flights"), Some(FM_B), None)
+            .await;
+        assert_eq!(flights[0]["confirmed_by"], "Matrice 350 RTK");
+        // Der Handeintrag der zweiten.
         let (status, _) = s
-            .call("GET", &format!("/missions/{id}/flights"), Some(FM_A), None)
+            .call(
+                "PUT",
+                &format!("/missions/{id}/logbook/{e2}"),
+                Some(FM_B),
+                Some(entry(Value::Null, json!("s1"))),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let op = s.app.cookie(Role::Operator).await;
+        let (status, log) = send(
+            &s.app.router,
+            with_cookie(get(&format!("/api/missions/{id}/flight-log")), &op),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{log}");
+        let sources: Vec<_> = log
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| (e["source"].as_str().unwrap(), e["confirmed_in"].clone()))
+            .collect();
+        assert_eq!(
+            sources,
+            vec![
+                ("telemetry", json!("Matrice 350 RTK")),
+                ("flugmappe", Value::Null)
+            ]
+        );
+
+        // Abschluss der ersten schließt den Einsatz nicht.
+        let close = format!("/missions/{id}/close");
+        let (status, m) = s.call("POST", &close, Some(FM_A), None).await;
+        assert_eq!(
+            (status, m["state"].as_str()),
+            (StatusCode::OK, Some("running"))
+        );
+        let (status, m) = s.call("POST", &close, Some(FM_B), None).await;
+        assert_eq!(
+            (status, m["state"].as_str()),
+            (StatusCode::OK, Some("closed"))
+        );
+        let (status, _) = s
+            .call(
+                "PUT",
+                &format!("/missions/{id}/logbook/{e2}"),
+                Some(FM_B),
+                Some(
+                    json!({"revision": 2, "flight_id": null, "flugmappe_section_id": null,
+                    "started_at_ms": 1, "landed_at_ms": null, "aircraft_label": "M200",
+                    "pilot": null, "landing_status": null, "changed_at_ms": 1}),
+                ),
+            )
             .await;
         assert_eq!(
             status,
-            StatusCode::CONFLICT,
-            "die abgelöste bekommt nichts mehr"
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "nach dem Abschluss"
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_logbook_entries_is_always_204() {
+        let s = setup().await;
+        let id = s.created(FM_A).await;
+        let e1 = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+        let uri = |rev: &str| format!("/missions/{id}/logbook/{e1}{rev}");
+        for _ in 0..2 {
+            let (status, _) = s
+                .call("DELETE", &uri("?revision=3"), Some(FM_A), None)
+                .await;
+            assert_eq!(status, StatusCode::NO_CONTENT);
+        }
         let (status, _) = s
-            .call("GET", &format!("/missions/{id}/flights"), Some(FM_B), None)
+            .call("DELETE", &uri("?revision=1"), Some(FM_A), None)
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "älter: unverändert");
+        let (status, _) = s.call("DELETE", &uri(""), Some(FM_A), None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "ohne Revision");
+        let (status, stored) = s
+            .call(
+                "PUT",
+                &uri(""),
+                Some(FM_A),
+                Some(
+                    json!({"revision": 2, "flight_id": null, "flugmappe_section_id": null,
+                    "started_at_ms": 1, "landed_at_ms": null, "aircraft_label": "M200",
+                    "pilot": null, "landing_status": null, "changed_at_ms": 1}),
+                ),
+            )
             .await;
         assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            stored,
+            json!({"entry_id": e1, "revision": 3, "entry": null})
+        );
+    }
+
+    #[tokio::test]
+    async fn the_browser_releases_a_lost_flugmappe() {
+        let s = setup().await;
+        let id = s.created(FM_A).await;
+        s.call(
+            "POST",
+            &format!("/missions/{id}/link"),
+            None,
+            Some(link_body(FM_B, "t1")),
+        )
+        .await;
+        let link_b = s.app.state.missions.get(id).await.unwrap().flugmappe_links[1].id;
+        let release = format!("/api/missions/{id}/flugmappe-links/{link_b}/release");
+        let kiosk = s.app.cookie(Role::Kiosk).await;
+        let (status, _) = send(
+            &s.app.router,
+            with_cookie(post_json(&release, json!({})), &kiosk),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let op = s.app.cookie(Role::Operator).await;
+        let (status, m) = send(
+            &s.app.router,
+            with_cookie(post_json(&release, json!({})), &op),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{m}");
+        assert!(m["flugmappe_links"][1]["released_at_ms"].is_number());
+        let (status, body) = s
+            .call("GET", &format!("/missions/{id}/flights"), Some(FM_B), None)
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["error"], "Verknüpfung in Suchlage gelöst");
+        let other = format!("/api/missions/{}/flugmappe-links/{link_b}/release", id + 1);
+        let (status, _) = send(
+            &s.app.router,
+            with_cookie(post_json(&other, json!({})), &op),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "Verknüpfung eines anderen Einsatzes"
+        );
+        // Neu verknüpfen geht.
+        let (status, m) = s
+            .call(
+                "POST",
+                &format!("/missions/{id}/link"),
+                None,
+                Some(link_body(FM_B, "t1")),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{m}");
+        assert_eq!(m["links"][1]["released_at_ms"], Value::Null);
     }
 
     #[tokio::test]
@@ -814,10 +1084,13 @@ mod tests {
             )
             .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        let link = json!({"flugmappe_mission_id": FM_A, "flugmappe_section_id": "s1",
-                          "section_label": "Abschnitt 1", "section_location": null, "take_over": false});
         let (status, _) = s
-            .call("POST", &format!("/missions/{id}/link"), None, Some(link))
+            .call(
+                "POST",
+                &format!("/missions/{id}/link"),
+                None,
+                Some(link_body(FM_A, "s1")),
+            )
             .await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         let (status, list) = s.call("GET", "/missions", None, None).await;
@@ -885,7 +1158,7 @@ mod tests {
     fn preflight(origin: &str) -> Request<Body> {
         Request::builder()
             .method("OPTIONS")
-            .uri("/api/flugmappe/v1/missions/1/sections/s1/photo")
+            .uri("/api/flugmappe/v2/missions/1/sections/s1/photo")
             .header(header::ORIGIN, origin)
             .header(header::ACCESS_CONTROL_REQUEST_METHOD, "PUT")
             .header(
@@ -903,11 +1176,10 @@ mod tests {
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
         let h = res.headers();
         assert_eq!(h[header::ACCESS_CONTROL_ALLOW_ORIGIN], ORIGIN);
+        let methods = h[header::ACCESS_CONTROL_ALLOW_METHODS].to_str().unwrap();
         assert!(
-            h[header::ACCESS_CONTROL_ALLOW_METHODS]
-                .to_str()
-                .unwrap()
-                .contains("PUT")
+            methods.contains("PUT") && methods.contains("DELETE"),
+            "{methods}"
         );
         assert!(
             h[header::ACCESS_CONTROL_ALLOW_HEADERS]
@@ -928,7 +1200,7 @@ mod tests {
         );
 
         // Auch Fehlerantworten tragen die Erlaubnis, sonst sieht die Flugmappe den Status nicht.
-        let req = Request::get("/api/flugmappe/v1/me")
+        let req = Request::get("/api/flugmappe/v2/me")
             .header(header::ORIGIN, ORIGIN)
             .body(Body::empty())
             .unwrap();
@@ -960,7 +1232,7 @@ mod tests {
 
     fn photo(id: i64, section: &str, bytes: Vec<u8>, token: &str, fm: &str) -> Request<Body> {
         Request::put(format!(
-            "/api/flugmappe/v1/missions/{id}/sections/{section}/photo"
+            "/api/flugmappe/v2/missions/{id}/sections/{section}/photo"
         ))
         .header(header::AUTHORIZATION, format!("Bearer {token}"))
         .header("X-Flugmappe-Einsatz", fm)
@@ -1032,6 +1304,6 @@ mod tests {
         );
         let (_, list) = send(&s.app.router, with_cookie(get("/api/missions"), &op)).await;
         assert_eq!(list[0]["origin"], "flugmappe");
-        assert_eq!(list[0]["flugmappe"]["linked_by"], "Testpilot");
+        assert_eq!(list[0]["flugmappe_links"][0]["linked_by"], "Testpilot");
     }
 }

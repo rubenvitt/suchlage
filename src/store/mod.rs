@@ -3,6 +3,7 @@
 pub mod device_state;
 pub mod flights;
 pub mod kiosk;
+pub mod logbook;
 pub mod map_elements;
 pub mod missions;
 pub mod photos;

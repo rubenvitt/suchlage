@@ -1,4 +1,6 @@
-import { StatusChip } from '../components/instrument';
+import { Button } from 'antd';
+import { StatusChip, type StatusTon } from '../components/instrument';
+import type { FlugmappeLink } from '../contract/generated/FlugmappeLink';
 import type { Mission } from '../contract/generated/Mission';
 import type { MissionSection } from '../contract/generated/MissionSection';
 
@@ -13,11 +15,21 @@ const at = (ms: number) =>
     minute: '2-digit',
   });
 
-/** „mit Flugmappe verknüpft · Name · 14.10., 08:46“; `null` ohne Verknüpfung. */
+/** Nicht gelöste Verknüpfungen: Diese Flugmappen arbeiten (noch) am Einsatz. */
+export const activeLinks = (m: Mission) => m.flugmappe_links.filter((l) => l.released_at_ms == null);
+
+/**
+ * „mit Flugmappe verknüpft · Matrice 350 RTK · Name · 14.10., 08:46“, bei mehreren „mit 2 Flugmappen
+ * verknüpft · Matrice 350 RTK, Matrice 200“; `null` ohne nicht gelöste Verknüpfung.
+ */
 export function linkText(m: Mission): string | null {
-  return m.flugmappe
-    ? `mit Flugmappe verknüpft · ${m.flugmappe.linked_by} · ${at(m.flugmappe.linked_at_ms)}`
-    : null;
+  const links = activeLinks(m);
+  if (links.length === 0) return null;
+  if (links.length === 1) {
+    const [l] = links;
+    return `mit Flugmappe verknüpft · ${l.aircraft_label} · ${l.linked_by} · ${at(l.linked_at_ms)}`;
+  }
+  return `mit ${links.length} Flugmappen verknüpft · ${links.map((l) => l.aircraft_label).join(', ')}`;
 }
 
 /** Herkunft und Verknüpfung in einer Zeile (Kopfleiste); `null` bei reinen Suchlage-Einsätzen. */
@@ -35,6 +47,56 @@ export function FlugmappeNote({ mission }: { mission: Mission }) {
       {mission.origin === 'flugmappe' && <StatusChip ton="neutral" wort="aus der Flugmappe" />}
       {link && <span>{link}</span>}
     </p>
+  );
+}
+
+/** Zustand einer Verknüpfung: offen (arbeitet), fertig (Teil abgeschlossen), gelöst (in Suchlage). */
+export function linkState(l: FlugmappeLink): { wort: string; ton: StatusTon } {
+  if (l.released_at_ms != null) return { wort: 'gelöst', ton: 'neutral' };
+  if (l.done_at_ms != null) return { wort: 'fertig', ton: 'normal' };
+  return { wort: 'offen', ton: 'bedien' };
+}
+
+/**
+ * Verknüpfte Flugmappen eines Einsatzes mit Fluggerät, wer verknüpft hat, und Zustand. Mit
+ * `onRelease` je nicht gelöster ein „Lösen“ (verlorenes Gerät).
+ */
+export function FlugmappeLinks({
+  mission,
+  onRelease,
+  releasing,
+}: {
+  mission: Mission;
+  onRelease?: (link: FlugmappeLink) => void;
+  /** Die Verknüpfung, die gerade gelöst wird. */
+  releasing?: number | null;
+}) {
+  if (mission.flugmappe_links.length === 0) return null;
+  return (
+    <ul className="sl-fm-links" aria-label={`Flugmappen von ${mission.name}`}>
+      {mission.flugmappe_links.map((l) => {
+        const state = linkState(l);
+        return (
+          <li key={l.id}>
+            <strong>{l.aircraft_label}</strong>
+            <span>
+              {l.linked_by} · {at(l.linked_at_ms)}
+            </span>
+            <StatusChip ton={state.ton} wort={state.wort} />
+            {onRelease && l.released_at_ms == null && (
+              <Button
+                size="small"
+                loading={releasing === l.id}
+                aria-label={`Lösen: Flugmappe ${l.aircraft_label}`}
+                onClick={() => onRelease(l)}
+              >
+                Lösen
+              </Button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

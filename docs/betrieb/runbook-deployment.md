@@ -19,7 +19,7 @@ direkt aus dem Internet erreichbar.
 Browser (Internet) ──HTTPS 443──▶ Traefik / cloudflared ──▶ 127.0.0.1:8080  server
 Browser (Tailnet)  ──UDP 8189──────────────────────────────▶ <TS-IP>:8189     media (WebRTC-Bild)
 RC Plus (Internet) ──HTTPS 443 (/pilot, /map/api/v1, /media/api/v1, /storage/api/v1, WebSocket /pilot/ws)──▶ Traefik / cloudflared
-Flugmappe (Browser) ─HTTPS 443 (/api/flugmappe/v1, Zugriffstoken aus Pocket ID)──▶ Traefik / cloudflared
+Flugmappe (Browser) ─HTTPS 443 (/api/flugmappe/v2, Zugriffstoken aus Pocket ID)──▶ Traefik / cloudflared
 RC Plus (Tailnet)  ──TCP 1883──────────────────────────────▶ <TS-IP>:1883     mqtt
 RC Plus (Tailnet)  ──TCP 1935──────────────────────────────▶ <TS-IP>:1935     media (RTMP)
 RC Plus (Tailnet)  ──TCP 3900──────────────────────────────▶ <TS-IP>:3900     fotos (S3, Garage)
@@ -323,7 +323,7 @@ curl -s -H "Authorization: Bearer <Teil hinter #>" https://suchlage.iuk-ue.de/ap
 
 ## 11. Flugmappe verknüpfen (optional)
 
-Die Flugmappe (`uav.iuk-ue.de`) legt über `/api/flugmappe/v1/…` Einsätze in Suchlage an, verknüpft
+Die Flugmappe (`uav.iuk-ue.de`) legt über `/api/flugmappe/v2/…` Einsätze in Suchlage an, verknüpft
 sie, schickt Abschnitte und Kartenfotos und liest Flüge und Karte. Sie meldet sich dabei mit ihrem
 eigenen Zugriffstoken aus **derselben** Pocket ID an, die Suchlage für die Anmeldung nutzt (Schritt 7).
 
@@ -340,11 +340,15 @@ eigenen Zugriffstoken aus **derselben** Pocket ID an, die Suchlage für die Anme
    oder Verwaltung und muss sich **einmal in Suchlage angemeldet** haben. Suchlage legt über die
    Schnittstelle keine Konten an; ein unbekanntes Konto bekommt 403.
 
+**Version 2 (SUL-113):** Seit mehrere Flugmappen an einem Einsatz arbeiten können, gibt es nur noch
+`/api/flugmappe/v2`; `/v1` antwortet 404. Suchlage und Flugmappe am selben Tag ausrollen, Suchlage
+zuerst. Eine vorhandene Verknüpfung übernimmt die Migration mit dem Fluggerät „Fluggerät unbekannt“.
+
 Schritt 6 deckt den Pfad schon ab. Gegenprobe von außen:
 
 ```sh
-curl -s -o /dev/null -w '%{http_code}\n' https://suchlage.iuk-ue.de/api/flugmappe/v1/me   # 401 (an), 503 (aus)
-curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://suchlage.iuk-ue.de/api/flugmappe/v1/me \
+curl -s -o /dev/null -w '%{http_code}\n' https://suchlage.iuk-ue.de/api/flugmappe/v2/me   # 401 (an), 503 (aus)
+curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://suchlage.iuk-ue.de/api/flugmappe/v2/me \
   -H 'Origin: https://uav.iuk-ue.de' -H 'Access-Control-Request-Method: GET'                # 204
 ```
 

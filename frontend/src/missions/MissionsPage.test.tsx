@@ -129,9 +129,11 @@ test('aus der Flugmappe und verknüpft: Hinweis, Kartenfoto am Abschnitt, kein �
   await screen.findByText(linked.name);
   const row = within(screen.getByText(linked.name).closest('li')!);
   expect(row.getByText('aus der Flugmappe')).toBeInTheDocument();
-  expect(
-    row.getByText(/^mit Flugmappe verknüpft · Gruppenführer I&K · \d\d\.\d\d\., \d\d:\d\d$/),
-  ).toBeInTheDocument();
+  expect(row.getByText('mit 2 Flugmappen verknüpft · Matrice 350 RTK, Matrice 200')).toBeInTheDocument();
+  // Die Liste der Flugmappen zeigt auch die gelöste, aber ohne „Lösen“ (das steht im Einsatzmenü).
+  const fms = within(row.getByRole('list', { name: `Flugmappen von ${linked.name}` }));
+  expect(fms.getAllByRole('listitem')).toHaveLength(3);
+  expect(fms.queryByRole('button')).not.toBeInTheDocument();
   expect(row.getByText('Abschnitte kommen aus der Flugmappe')).toBeInTheDocument();
   expect(row.queryByRole('button', { name: /Abschnitt anlegen/ })).not.toBeInTheDocument();
   expect(row.queryByLabelText(/Abschnitt zu/)).not.toBeInTheDocument();
