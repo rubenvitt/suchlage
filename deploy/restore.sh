@@ -23,7 +23,7 @@ exec 9>"$ROOT/backup/.lauf.sperre"
 flock -n 9 || { echo "Es läuft schon eine Sicherung oder Wiederherstellung" >&2; exit 1; }
 
 # Eigene Zuweisung, damit set -e greift, wenn Compose selbst scheitert (etwa ohne .env).
-running=$($DC ps -q --status running server fotos media)
+running=$($DC ps -q --status running --status restarting --status paused server fotos media)
 if [ -n "$running" ]; then
   echo "Erst stoppen: $DC stop server fotos media" >&2
   exit 1
@@ -39,9 +39,12 @@ docker run --rm -i -v "$src":/d "$IMAGE" sh -c '
   trap - EXIT
   find /d -mindepth 1 -maxdepth 1 ! -name .wiederherstellung -exec rm -rf {} +
   for f in $neu/* $neu/.[!.]* $neu/..?*; do
-    [ -e "$f" ] || continue
+    [ -e "$f" ] || [ -L "$f" ] || continue
     mv "$f" /d/
   done
+  # Rechte und Besitzer der Wurzel stehen im Archiv als ".", also an $neu.
+  chown "$(stat -c %u:%g $neu)" /d
+  chmod "$(stat -c %a $neu)" /d
   rmdir $neu
 '
 echo "$1 zurückgespielt"
