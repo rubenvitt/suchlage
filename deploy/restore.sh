@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
 # Auf dem vServer: spielt ein entschlüsseltes Archiv aus deploy/backup.sh zurück (ADR 0004, SUL-107).
 # Aufruf vom eigenen Rechner, der private Schlüssel bleibt dort:
+#   ssh <host> /srv/suchlage/deploy/restore.sh stoppen
 #   age -d -i suchlage-backup.key server-data-<Stempel>.tgz.age | ssh <host> /srv/suchlage/deploy/restore.sh server-data
+#   ssh <host> /srv/suchlage/deploy/restore.sh starten
 #
 # Packt erst neben den alten Inhalt aus und tauscht erst, wenn `tar` fertig ist. Bricht der Strom ab
 # (falscher Schlüssel, Netz, volle Platte), bleibt das Ziel unverändert. Braucht dafür kurz den
 # doppelten Platz im Volume. Läuft nur, solange Server, Fotospeicher und MediaMTX gestoppt sind.
 set -euo pipefail
-cd "$(dirname "$0")"
-ROOT=$(cd .. && pwd)
-DC="docker compose -f compose.m1.yaml"
-IMAGE=busybox:1.37.0-uclibc
+. "$(dirname "$0")/sicherung.sh"
 
+dienste="server fotos media"
 case "${1:-}" in
-  server-data|fotos-meta|fotos-data|video) src=suchlage-m1_$1 ;;
-  garage-secrets) src=$ROOT/garage-secrets ;;
-  *) echo "Aufruf: restore.sh server-data|fotos-meta|fotos-data|video|garage-secrets < archiv.tgz" >&2; exit 2 ;;
+  stoppen) $DC stop $dienste; exit ;;
+  starten)
+    # `start` wiederholt das schon beendete video-init nicht.
+    if hat_video_init; then $DC run --rm video-init; fi
+    $DC start media fotos server
+    exit ;;
 esac
+src=$(quelle "${1:-}") ||
+  { echo "Aufruf: restore.sh stoppen|starten|server-data|fotos-meta|fotos-data|video|garage-secrets < archiv.tgz" >&2; exit 2; }
 
 # Dieselbe Sperre wie backup.sh: Eine Sicherung startete sonst die Dienste mitten im Zurückspielen.
 exec 9>"$ROOT/backup/.lauf.sperre"
@@ -24,9 +29,10 @@ flock -n 9 || { echo "Es läuft schon eine Sicherung oder Wiederherstellung" >&2
 
 # Eigene Zuweisung, damit set -e greift, wenn Compose selbst scheitert (etwa ohne .env).
 # video-init läuft vor `media` und schreibt per chown -R ins Video-Volume.
-running=$($DC ps -q --status running --status restarting --status paused server fotos media video-init)
+if hat_video_init; then dienste="$dienste video-init"; fi
+running=$($DC ps -q --status running --status restarting --status paused $dienste)
 if [ -n "$running" ]; then
-  echo "Erst stoppen: $DC stop server fotos media video-init" >&2
+  echo "Erst stoppen: restore.sh stoppen" >&2
   exit 1
 fi
 

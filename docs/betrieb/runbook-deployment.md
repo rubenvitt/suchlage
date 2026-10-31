@@ -445,6 +445,23 @@ Die Datei liegt neben `deploy/`, damit `rsync --delete` sie nicht löscht. Jede 
 `age1…` darin ist ein zusätzlicher Empfänger, etwa ein zweiter Schlüssel für die Vertretung. Ohne
 einen der privaten Schlüssel ist jede Sicherung wertlos.
 
+*Anderes Layout am Host.* Die Skripte erwarten das Layout dieses Runbooks: `deploy/compose.m1.yaml`
+und Volumes `suchlage-m1_*`. Liegt der Stack anders, etwa mit Bind-Mounts, legst du die Skripte
+(`backup.sh`, `restore.sh`, `sicherung.sh`) in ein Verzeichnis `deploy/` unterhalb des Wurzelordners.
+Dort liegen auch `backup/`, `backup-empfaenger.txt` und `garage-secrets/`. Daneben kommt eine
+`sicherung.env`:
+
+```sh
+SUCHLAGE_COMPOSE=/pfad/zu/compose.yaml
+SUCHLAGE_SERVER_DATA=/data/suchlage/server          # Volume-Name oder absoluter Pfad
+SUCHLAGE_FOTOS_META=/data/suchlage/fotos/meta
+SUCHLAGE_FOTOS_DATA=/data/suchlage/fotos/data
+SUCHLAGE_VIDEO=/data/suchlage/video
+```
+
+Ohne die Datei gelten die Werte dieses Runbooks. Fehlt ein Verzeichnis, sichert das Skript auch hier
+nichts.
+
 Archive von vor der Verschlüsselung (`*.tgz`) meldet das Skript bei jedem Lauf. Lösche sie, sobald
 die erste verschlüsselte Sicherung wie unten zurückgespielt ist:
 
@@ -452,9 +469,10 @@ die erste verschlüsselte Sicherung wie unten zurückgespielt ist:
 ssh <host> 'sudo shred -u /srv/suchlage/backup/*.tgz'
 ```
 
-*Außer Haus.* Die Archive bleiben heute auf dem Host. Verschlüsselt dürfen sie ihn verlassen. Sie
-sollen ins externe Ziel der IUK-Suite-Sicherung (`rclone`); bis das eingerichtet ist (SUL-118),
-bleiben sie hier.
+*Außer Haus.* Verschlüsselt dürfen die Archive den Host verlassen. Läuft der Stack neben der
+IUK-Suite (heute auf `iuk-services`), nimmt deren Kopia-Sicherung den Wurzelordner und damit `backup/`
+mit nach außen; ein eigener Weg ist dann nicht nötig (entschieden 31.10.2026). Ein Host ohne solche
+Sicherung behält die Archive nur lokal.
 
 **Wiederherstellung.** Entschlüsselt wird auf dem eigenen Rechner, der private Schlüssel kommt nie
 auf den Host. Erst prüfen, dann zurückspielen:
@@ -472,15 +490,13 @@ war. Die Klammer bricht beim ersten Fehler ab, startet dann nichts und lässt Sc
 einen zweiten Versuch liegen (danach von Hand löschen):
 
 ```sh
-ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml stop server fotos media'
+ssh <host> /srv/suchlage/deploy/restore.sh stoppen
 ( set -e -o pipefail
   # video nur, wenn die Sicherung mit --video lief
   for v in server-data fotos-meta fotos-data garage-secrets $([ -e video-<Stempel>.tgz.age ] && echo video); do
     age -d -i suchlage-backup.key $v-<Stempel>.tgz.age | ssh <host> /srv/suchlage/deploy/restore.sh $v
   done
-  # `start` wiederholt das schon beendete video-init nicht; es gibt die Videoablage dem Server-Nutzer.
-  ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml run --rm video-init'
-  ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml start media fotos server'
+  ssh <host> /srv/suchlage/deploy/restore.sh starten          # mit video-init, falls vorhanden
   rm suchlage-backup.key *-<Stempel>.tgz.age )
 ```
 
