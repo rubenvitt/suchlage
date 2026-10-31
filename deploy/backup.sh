@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Auf dem vServer: sichert Suchlage verschlüsselt nach /srv/suchlage/backup (ADR 0004, SUL-107).
+# Pfade und Quellen stehen in sicherung.sh, abweichende in /srv/suchlage/sicherung.env.
 # Aufruf: ssh <host> /srv/suchlage/deploy/backup.sh [--video]
 #
 # Server und Fotospeicher stehen dafür kurz still, damit beide SQLite-Datenbanken (Suchlage und
@@ -14,12 +15,9 @@
 # bash statt sh wegen pipefail: Ein Fehler von `tar` darf nicht hinter einem erfolgreichen `age`
 # verschwinden.
 set -euo pipefail
-cd "$(dirname "$0")"
-ROOT=$(cd .. && pwd)
+. "$(dirname "$0")/sicherung.sh"
 RECIPIENTS=$ROOT/backup-empfaenger.txt
 TARGET=$ROOT/backup
-DC="docker compose -f compose.m1.yaml"
-IMAGE=busybox:1.37.0-uclibc
 
 volumes="server-data fotos-meta fotos-data"
 services="server fotos"
@@ -35,11 +33,8 @@ grep -q '^age1' "$RECIPIENTS" 2>/dev/null ||
 [ -d "$TARGET" ] && [ -w "$TARGET" ] ||
   { echo "$TARGET fehlt oder ist nicht beschreibbar, siehe Runbook „Sicherung“" >&2; exit 1; }
 
-# Docker legt ein fehlendes Volume oder Verzeichnis beim Einhängen leer an. Ein leeres Archiv
-# sähe gültig aus und leerte bei der Wiederherstellung das echte Volume.
 for v in $volumes; do
-  docker volume inspect "suchlage-m1_$v" >/dev/null 2>&1 ||
-    { echo "Volume suchlage-m1_$v fehlt, nichts gesichert" >&2; exit 1; }
+  quelle_da "$(quelle "$v")" || { echo "$(quelle "$v") fehlt, nichts gesichert" >&2; exit 1; }
 done
 [ -f "$ROOT/garage-secrets/rpc_secret" ] ||
   { echo "$ROOT/garage-secrets/rpc_secret fehlt, nichts gesichert" >&2; exit 1; }
@@ -60,11 +55,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# $1 Name des Archivs, $2 Quelle für `docker run -v` (Volume oder absoluter Pfad)
+# $1 Name des Archivs
 archive() {
   local out=$TARGET/$1-$stamp.tgz.age
   part=$out.part
-  docker run --rm -v "$2":/d:ro "$IMAGE" tar czf - -C /d . | (umask 077 && age -R "$RECIPIENTS" -o "$part")
+  docker run --rm -v "$(quelle "$1")":/d:ro "$IMAGE" tar czf - -C /d . | (umask 077 && age -R "$RECIPIENTS" -o "$part")
   mv "$part" "$out"
   part=""
   echo "$out"
@@ -73,10 +68,9 @@ archive() {
 # Vor dem Stoppen merken: Bricht `stop` mittendrin ab, startet cleanup die schon gestoppten wieder.
 stopped=$services
 $DC stop $services
-for v in $volumes; do
-  archive "$v" "suchlage-m1_$v"
+for v in $volumes garage-secrets; do
+  archive "$v"
 done
-archive garage-secrets "$ROOT/garage-secrets"
 
 # Unverschlüsselte Archive aus der Zeit vor SUL-107 dürfen hier nicht liegen bleiben.
 old=$(find "$TARGET" -maxdepth 1 -name '*.tgz' -print)
