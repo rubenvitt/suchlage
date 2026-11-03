@@ -32,7 +32,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rust-embed = "8"
 mime_guess = "2"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.7", features = ["trace", "catch-panic", "request-id", "set-header", "limit"] }
+tower-http = { version = "0.7", features = ["trace", "catch-panic", "request-id", "set-header", "limit", "compression-gzip"] }
 ts-rs = "12"
 sha2 = "0.11"
 hex = "0.4"
