@@ -59,8 +59,16 @@ pub struct LmLage {
     #[ts(type = "number")]
     pub server_time_ms: i64,
     pub mission: Option<LmMission>,
-    /// Kartenelemente und Flugspuren des Einsatzes, wie für die Flugmappe.
-    pub map: FmFeatureCollection,
+    /// Kartenelemente und Flugspuren des Einsatzes, wie für die Flugmappe. Fehlt nur, wenn der
+    /// Lagemonitor mit `?karte=` gefragt hat und sie unverändert ist oder nicht gebraucht wird.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub map: Option<FmFeatureCollection>,
+    /// Fassung von `map`, auch wenn sie fehlt. Zurück als `?karte=<map_etag>` kommt die Karte nur
+    /// bei einer Änderung; `?karte=aus` lässt sie ganz weg. Ohne `karte` kommt sie wie immer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub map_etag: Option<String>,
     pub aircraft: Vec<LmAircraft>,
     pub videos: Vec<LmVideo>,
 }

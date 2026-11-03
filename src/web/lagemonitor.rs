@@ -5,13 +5,16 @@
 use std::collections::HashMap;
 
 use axum::body::Bytes;
-use axum::extract::{FromRef, FromRequestParts, Path, RawQuery, State};
+use axum::extract::{FromRef, FromRequestParts, Path, Query, RawQuery, State};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
+use tower_http::compression::CompressionLayer;
 
 use crate::app::AppState;
 use crate::contract::{
@@ -28,7 +31,9 @@ const _: () = assert!(FRESHNESS_LOST_MS < FLIGHT_CLOSE_AFTER_MS);
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/lage", get(lage))
+        // gzip, wenn der Lagemonitor es kann: Flugspuren sind Koordinatenlisten und schrumpfen auf
+        // ein Fünftel, und der FüKw hängt am Mobilfunk. Video bleibt unberührt.
+        .route("/lage", get(lage).layer(CompressionLayer::new().gzip(true)))
         .route("/video/{gateway_sn}/whep", post(whep))
         .route("/video/{gateway_sn}/hls/{*file}", get(hls))
 }
@@ -95,24 +100,59 @@ pub fn videos_of(snapshot: &SituationSnapshot, labels: &HashMap<String, String>)
         .collect()
 }
 
+#[derive(Deserialize)]
+pub struct LageQuery {
+    /// `aus` oder die `map_etag` der letzten Antwort (siehe [`LmLage::map_etag`]).
+    karte: Option<String>,
+}
+
+/// Fassung der Karte: die ersten 8 Byte des SHA-256 ihrer JSON-Form.
+pub fn map_etag(map: &FmFeatureCollection) -> String {
+    let json = serde_json::to_vec(map).unwrap_or_default();
+    hex::encode(&Sha256::digest(&json)[..8])
+}
+
+/// Die Karte, wenn der Lagemonitor sie braucht, und immer ihre Fassung. Der Lagemonitor fragt alle
+/// 5 s nach den Drohnen, die Flugspuren aber nur selten und nur bei einer Änderung.
+pub fn map_for(
+    map: FmFeatureCollection,
+    karte: Option<&str>,
+) -> (Option<FmFeatureCollection>, Option<String>) {
+    let etag = map_etag(&map);
+    let send = match karte {
+        None => true,
+        Some("aus") => false,
+        Some(known) => known != etag,
+    };
+    (send.then_some(map), Some(etag))
+}
+
 async fn lage(
     _: LagemonitorClient,
     State(state): State<AppState>,
+    Query(query): Query<LageQuery>,
 ) -> Result<Json<LmLage>, AppError> {
     let snapshot = state.situation.snapshot().await?;
+    let karte = query.karte.as_deref();
     let Some((mission, map)) = state.missions.lagemonitor().await? else {
+        let (map, map_etag) = map_for(
+            FmFeatureCollection {
+                kind: FmFeatureCollectionType::FeatureCollection,
+                features: Vec::new(),
+            },
+            karte,
+        );
         return Ok(Json(LmLage {
             api_version: LAGEMONITOR_API_VERSION,
             server_time_ms: snapshot.server_time_ms,
             mission: None,
-            map: FmFeatureCollection {
-                kind: FmFeatureCollectionType::FeatureCollection,
-                features: Vec::new(),
-            },
+            map,
+            map_etag,
             aircraft: Vec::new(),
             videos: Vec::new(),
         }));
     };
+    let (map, map_etag) = map_for(map, karte);
     let labels: HashMap<String, String> = store::remote_controllers::labels(&state.pool)
         .await?
         .into_iter()
@@ -122,6 +162,7 @@ async fn lage(
         server_time_ms: snapshot.server_time_ms,
         mission: Some(mission),
         map,
+        map_etag,
         aircraft: aircraft_of(&snapshot, &labels),
         videos: videos_of(&snapshot, &labels),
     }))
@@ -226,6 +267,65 @@ mod tests {
         );
         assert_eq!(json["map"]["features"], serde_json::json!([]));
         assert_eq!(json["videos"], serde_json::json!([]));
+    }
+
+    fn bearer_at(token: &str, path: &str) -> Request<axum::body::Body> {
+        let mut req = get(path);
+        req.headers_mut()
+            .insert(AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
+        req
+    }
+
+    #[test]
+    fn the_map_comes_without_karte_or_when_it_changed() {
+        let map = || FmFeatureCollection {
+            kind: FmFeatureCollectionType::FeatureCollection,
+            features: Vec::new(),
+        };
+        let etag = map_etag(&map());
+        assert_eq!(map_for(map(), None), (Some(map()), Some(etag.clone())));
+        assert_eq!(
+            map_for(map(), Some("alt")),
+            (Some(map()), Some(etag.clone()))
+        );
+        assert_eq!(map_for(map(), Some(&etag)), (None, Some(etag.clone())));
+        assert_eq!(map_for(map(), Some("aus")), (None, Some(etag)));
+    }
+
+    #[tokio::test]
+    async fn karte_drops_the_unchanged_map_and_old_clients_still_get_it() {
+        let app = test_app().await;
+        let (_, secret) = store::kiosk::create(&app.state.pool, "FüKw", 0)
+            .await
+            .unwrap();
+        let (_, json) = send(&app.router, bearer(&secret)).await;
+        let etag = json["map_etag"].as_str().unwrap().to_string();
+        assert!(json["map"].is_object(), "ohne `karte` wie bisher");
+        let path = format!("/api/lagemonitor/v1/lage?karte={etag}");
+        let (_, json) = send(&app.router, bearer_at(&secret, &path)).await;
+        assert!(json.get("map").is_none());
+        assert_eq!(json["map_etag"], etag.as_str());
+        let (_, json) = send(
+            &app.router,
+            bearer_at(&secret, "/api/lagemonitor/v1/lage?karte=aus"),
+        )
+        .await;
+        assert!(json.get("map").is_none());
+    }
+
+    #[tokio::test]
+    async fn lage_is_gzipped_when_asked() {
+        let app = test_app().await;
+        let (_, secret) = store::kiosk::create(&app.state.pool, "FüKw", 0)
+            .await
+            .unwrap();
+        let mut req = bearer(&secret);
+        req.headers_mut()
+            .insert(axum::http::header::ACCEPT_ENCODING, "gzip".parse().unwrap());
+        let res = tower::ServiceExt::oneshot(app.router.clone(), req)
+            .await
+            .unwrap();
+        assert_eq!(res.headers()[axum::http::header::CONTENT_ENCODING], "gzip");
     }
 
     #[tokio::test]

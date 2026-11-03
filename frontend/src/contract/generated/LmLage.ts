@@ -9,6 +9,12 @@ import type { LmVideo } from "./LmVideo";
  */
 export type LmLage = { api_version: number, server_time_ms: number, mission: LmMission | null, 
 /**
- * Kartenelemente und Flugspuren des Einsatzes, wie für die Flugmappe.
+ * Kartenelemente und Flugspuren des Einsatzes, wie für die Flugmappe. Fehlt nur, wenn der
+ * Lagemonitor mit `?karte=` gefragt hat und sie unverändert ist oder nicht gebraucht wird.
  */
-map: FmFeatureCollection, aircraft: Array<LmAircraft>, videos: Array<LmVideo>, };
+map?: FmFeatureCollection, 
+/**
+ * Fassung von `map`, auch wenn sie fehlt. Zurück als `?karte=<map_etag>` kommt die Karte nur
+ * bei einer Änderung; `?karte=aus` lässt sie ganz weg. Ohne `karte` kommt sie wie immer.
+ */
+map_etag?: string, aircraft: Array<LmAircraft>, videos: Array<LmVideo>, };
