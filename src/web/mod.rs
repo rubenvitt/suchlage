@@ -2,6 +2,7 @@
 pub mod admin;
 pub mod auth;
 pub mod devlog;
+pub mod einsatztagebuch;
 pub mod flights;
 pub mod flugmappe;
 pub mod lagemonitor;
