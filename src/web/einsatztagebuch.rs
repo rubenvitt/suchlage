@@ -57,12 +57,15 @@ pub struct EinsaetzeQuery {
 
 /// Laufende und seit `since_ms` abgeschlossene Einsätze; laufende zuerst, dann zuletzt beendete
 /// zuerst. Vorbereitete fehlen: Sie liefen nie, im Einsatztagebuch gibt es nichts zu verknüpfen.
+/// Aus demselben Grund fehlt ein Einsatz, der ohne Start geschlossen wurde.
 pub fn selectable(missions: Vec<Mission>, since_ms: i64) -> Vec<EtbMission> {
     let mut out: Vec<EtbMission> = missions
         .into_iter()
         .filter(|m| match m.state {
             MissionState::Running => true,
-            MissionState::Closed => m.closed_at_ms.is_some_and(|t| t >= since_ms),
+            MissionState::Closed => {
+                m.started_at_ms.is_some() && m.closed_at_ms.is_some_and(|t| t >= since_ms)
+            }
             MissionState::Prepared => false,
         })
         .map(|m| EtbMission {
@@ -152,7 +155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lists_running_and_recently_closed_but_not_prepared() {
+    async fn lists_running_and_recently_closed_but_not_prepared_or_never_started() {
         let app = test_app().await;
         let (_, secret) = store::kiosk::create(&app.state.pool, "Suite", 0)
             .await
@@ -189,6 +192,17 @@ mod tests {
         app.state
             .missions
             .create(create("Vorbereitet"), "T", 1)
+            .await
+            .unwrap();
+        let nie_gelaufen = app
+            .state
+            .missions
+            .create(create("Nie gelaufen"), "T", 1)
+            .await
+            .unwrap();
+        app.state
+            .missions
+            .close(nie_gelaufen.id, now - 500)
             .await
             .unwrap();
         let laeuft = app
