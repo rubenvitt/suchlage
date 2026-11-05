@@ -782,6 +782,7 @@ pub fn kiosk_tokens() -> Vec<KioskTokenView> {
         id: 1,
         label: "FüKw Großbild".into(),
         created_at_ms: T0 - 3_600_000,
+        einsatztagebuch: false,
     }]
 }
 

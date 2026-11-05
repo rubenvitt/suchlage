@@ -237,6 +237,8 @@ pub struct KioskTokenView {
     pub label: String,
     #[ts(type = "number")]
     pub created_at_ms: i64,
+    /// Zugang der IUK-Suite: darf Einsätze für das Einsatztagebuch sperren (IDA-359).
+    pub einsatztagebuch: bool,
 }
 
 /// Ein Konto aus Pocket ID, wie es die Verwaltung sieht. Die Rolle kommt bei jeder Anmeldung aus
@@ -262,6 +264,11 @@ pub struct AccountView {
 #[ts(export)]
 pub struct KioskTokenCreate {
     pub label: String,
+    /// Zugang der IUK-Suite (siehe [`KioskTokenView::einsatztagebuch`]); fehlt er, ein reiner
+    /// Anzeige-Zugang.
+    #[serde(default)]
+    #[ts(optional)]
+    pub einsatztagebuch: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Popconfirm } from 'antd';
+import { Alert, Button, Checkbox, Form, Input, Popconfirm, Tag } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError, apiSend } from '../api/client';
@@ -60,7 +60,10 @@ export function KioskTokensPanel() {
             <tbody>
               {data?.map((t) => (
                 <tr key={t.id}>
-                  <td>{t.label}</td>
+                  <td>
+                    {t.label}
+                    {t.einsatztagebuch && <Tag style={{ marginInlineStart: 8 }}>IUK-Suite</Tag>}
+                  </td>
                   <td className="sl-num">{createdAt(t.created_at_ms)}</td>
                   <td className="sl-cell-action">
                     <Popconfirm
@@ -99,6 +102,9 @@ export function KioskTokensPanel() {
           rules={[{ required: true, message: 'Bezeichnung fehlt' }]}
         >
           <Input placeholder="FüKw Großbild" />
+        </Form.Item>
+        <Form.Item name="einsatztagebuch" valuePropName="checked">
+          <Checkbox>Für die IUK-Suite (Einsatztagebuch)</Checkbox>
         </Form.Item>
         <Button type="primary" htmlType="submit" loading={create.isPending}>
           Großbild-Zugang erzeugen

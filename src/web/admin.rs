@@ -102,7 +102,9 @@ async fn create_kiosk(
     if label.is_empty() || label.chars().count() > 80 {
         return Err(AppError::Validation("Bezeichnung: 1 bis 80 Zeichen".into()));
     }
-    let (token, secret) = store::kiosk::create(&state.pool, label, now_ms()).await?;
+    let einsatztagebuch = body.einsatztagebuch.unwrap_or(false);
+    let (token, secret) =
+        store::kiosk::create_with(&state.pool, label, einsatztagebuch, now_ms()).await?;
     let url = format!(
         "{}/kiosk#{secret}",
         state.boot.public_url.as_str().trim_end_matches('/')

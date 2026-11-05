@@ -874,6 +874,7 @@ export const remoteControllers: RemoteControllerView[] = [
 export const kioskTokens: KioskTokenView[] = [
   {
     "created_at_ms": 1792146400000,
+    "einsatztagebuch": false,
     "id": 1,
     "label": "FüKw Großbild"
   }

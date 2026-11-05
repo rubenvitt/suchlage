@@ -2,7 +2,9 @@
 //! wird wie beim Lagemonitor mit einem Großbild-Token als `Authorization: Bearer …`: Der Server der
 //! Suite fragt selbst und reicht die Liste an die Rechner des Einsatztagebuchs weiter. Schreiben
 //! darf sie nur eines: dass ein Eintrag mit einem Einsatz verknüpft ist (`POST
-//! /einsaetze/{id}/verknuepfung`). Der Einsatz ist dann gesperrt. Kein CORS.
+//! /einsaetze/{id}/verknuepfung`). Der Einsatz ist dann gesperrt. Das darf nur ein Zugang, der für
+//! die IUK-Suite angelegt wurde (`kiosk_tokens.einsatztagebuch`); ein reiner Anzeige-Zugang
+//! bekommt 403. Kein CORS.
 
 use axum::extract::{FromRef, FromRequestParts, Path, Query, State};
 use axum::http::StatusCode;
@@ -31,7 +33,10 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// Ein gültiger Großbild-Token. Widerrufen wirkt sofort, denn jede Anfrage prüft neu.
-pub struct EinsatztagebuchClient;
+pub struct EinsatztagebuchClient {
+    /// Ein Zugang der IUK-Suite: darf Einsätze sperren.
+    may_link: bool,
+}
 
 impl<S: Send + Sync> FromRequestParts<S> for EinsatztagebuchClient
 where
@@ -46,9 +51,9 @@ where
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or(AppError::Unauthorized)?;
-        store::kiosk::find_by_token(&SqlitePool::from_ref(state), secret.trim())
+        store::kiosk::einsatztagebuch_by_token(&SqlitePool::from_ref(state), secret.trim())
             .await?
-            .map(|_| EinsatztagebuchClient)
+            .map(|may_link| EinsatztagebuchClient { may_link })
             .ok_or(AppError::Unauthorized)
     }
 }
@@ -113,10 +118,13 @@ async fn einsaetze(
 /// Ein versiegelter Eintrag im Einsatztagebuch nennt diesen Einsatz. Wiederholbar: Die Suite meldet,
 /// bis Suchlage einmal bestätigt hat.
 async fn verknuepfung(
-    _: EinsatztagebuchClient,
+    client: EinsatztagebuchClient,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
+    if !client.may_link {
+        return Err(AppError::Forbidden);
+    }
     state.missions.link_einsatztagebuch(id, now_ms()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -266,7 +274,10 @@ mod tests {
     #[tokio::test]
     async fn a_linked_mission_is_not_offered_again_and_cannot_be_deleted() {
         let app = test_app().await;
-        let (_, secret) = store::kiosk::create(&app.state.pool, "Suite", 0)
+        let (_, secret) = store::kiosk::create_with(&app.state.pool, "Suite", true, 0)
+            .await
+            .unwrap();
+        let (_, anzeige) = store::kiosk::create(&app.state.pool, "FüKw Großbild", 0)
             .await
             .unwrap();
         let m = app
@@ -290,6 +301,15 @@ mod tests {
         assert_eq!(
             send(&app.router, post_bearer("falsch", &link)).await.0,
             StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            send(&app.router, post_bearer(&anzeige, &link)).await.0,
+            StatusCode::FORBIDDEN,
+            "ein reiner Anzeige-Zugang sperrt nichts"
+        );
+        assert_eq!(
+            app.state.missions.get(m.id).await.unwrap().etb_linked_at_ms,
+            None
         );
         assert_eq!(
             send(

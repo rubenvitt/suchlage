@@ -2,3 +2,5 @@
 -- ms seit Epoch, UTC). Gesetzt bleibt er für immer: Der Eintrag ist versiegelt, der Einsatz lässt
 -- sich danach nicht mehr löschen und wird dem Einsatztagebuch nicht mehr angeboten.
 ALTER TABLE missions ADD COLUMN etb_linked_at_ms INTEGER;
+-- Nur ein Großbild-Zugang für die IUK-Suite darf verknüpfen; ein reiner Anzeige-Zugang liest nur.
+ALTER TABLE kiosk_tokens ADD COLUMN einsatztagebuch INTEGER NOT NULL DEFAULT 0;
