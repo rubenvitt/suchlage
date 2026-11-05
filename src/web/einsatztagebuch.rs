@@ -319,6 +319,38 @@ mod tests {
 
         let (_, json) = send(&app.router, bearer(&secret, PATH)).await;
         assert_eq!(json["missions"].as_array().unwrap().len(), 0);
+        let vorbereitet = app
+            .state
+            .missions
+            .create(
+                MissionCreate {
+                    name: "Vorbereitet".into(),
+                    location: None,
+                },
+                "T",
+                1,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            send(
+                &app.router,
+                post_bearer(&secret, &format!("{PATH}/{}/verknuepfung", vorbereitet.id))
+            )
+            .await
+            .0,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "nie gelaufen"
+        );
+        assert_eq!(
+            app.state
+                .missions
+                .get(vorbereitet.id)
+                .await
+                .unwrap()
+                .etb_linked_at_ms,
+            None
+        );
         assert!(matches!(
             app.state.deleter.delete_mission(m.id).await,
             Err(AppError::Unprocessable(_))

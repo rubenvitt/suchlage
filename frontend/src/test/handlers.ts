@@ -123,6 +123,11 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
           { error: 'Ein laufender Einsatz lässt sich nicht löschen' },
           { status: 422 },
         );
+      if (m.etb_linked_at_ms !== null)
+        return HttpResponse.json(
+          { error: 'Der Einsatz ist im Einsatztagebuch verknüpft und lässt sich nicht löschen' },
+          { status: 422 },
+        );
       missions.splice(missions.indexOf(m), 1);
       return new HttpResponse(null, { status: 204 });
     }),
