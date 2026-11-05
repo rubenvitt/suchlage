@@ -1,164 +1,254 @@
-import { Alert, Button, Form, Input } from 'antd';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router';
-import { ApiError, apiSend } from '../api/client';
-import { queryKeys, useMissions } from '../api/queries';
-import { Paneel } from '../components/instrument';
+import { Alert, Button, Input } from 'antd';
+import { Fragment, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { ApiError } from '../api/client';
+import { useMissionSummaries, useMissions, useStartMission } from '../api/queries';
+import { useViewMode } from '../app/viewMode';
+import { Kennzahl, Kennzahlenband, Paneel, Segmentleiste, StatusChip } from '../components/instrument';
 import type { Mission } from '../contract/generated/Mission';
-import type { MissionCreate } from '../contract/generated/MissionCreate';
-import type { MissionState } from '../contract/generated/MissionState';
-import type { SectionCreate } from '../contract/generated/SectionCreate';
+import type { MissionSummary } from '../contract/generated/MissionSummary';
+import { useServerNow } from '../live/LiveProvider';
 import { Frame } from '../shell/Frame';
-import { activeLinks, FlugmappeLinks, FlugmappeNote, SECTIONS_FROM_FLUGMAPPE, SectionList } from './flugmappe';
+import { MissionHeader } from './MissionHeader';
+import {
+  dateText,
+  hoursMinutes,
+  listGroup,
+  listOrder,
+  matchesSearch,
+  missionDayMs,
+  missionDurationMs,
+  STATE_CHIP,
+  timeText,
+} from './missionInfo';
+import { NewMissionDialog } from './NewMissionDialog';
 import './missions.css';
 
-// Der laufende Einsatz steht in der Kopfleiste; das Archiv zeigt die zuletzt abgeschlossenen zuerst.
-const GROUPS: { state: MissionState; title: string }[] = [
-  { state: 'prepared', title: 'Vorbereitet' },
-  { state: 'closed', title: 'Archiv' },
-];
-const newestClosedFirst = (a: Mission, b: Mission) => (b.closed_at_ms ?? 0) - (a.closed_at_ms ?? 0);
+type Filter = 'alle' | 'prepared' | 'closed';
 
-type Act = (method: 'POST', path: string, body?: unknown, onOk?: () => void) => void;
+const DASH = '–';
 
-function SectionForm({ mission, act }: { mission: Mission; act: Act }) {
-  const [form] = Form.useForm<{ label: string }>();
+/** Kennzeichen, die über den Einsatz hinaus wirken: Flugmappe und Einsatztagebuch. */
+export function MissionMarks({ mission }: { mission: Mission }) {
+  const fm = mission.origin === 'flugmappe' || mission.flugmappe_links.length > 0;
+  if (!fm && mission.etb_linked_at_ms == null) return null;
   return (
-    <Form
-      form={form}
-      layout="inline"
-      onFinish={(v) => {
-        act(
-          'POST',
-          `/api/missions/${mission.id}/sections`,
-          {
-            label: v.label,
-            location: null,
-          } satisfies SectionCreate,
-          () => form.resetFields(),
-        );
-      }}
-    >
-      <Form.Item name="label" rules={[{ required: true, message: 'Name fehlt' }]}>
-        <Input size="small" placeholder="Neuer Abschnitt" aria-label={`Abschnitt zu ${mission.name}`} />
-      </Form.Item>
-      <Button size="small" htmlType="submit" aria-label={`Abschnitt anlegen: ${mission.name}`}>
-        Abschnitt anlegen
-      </Button>
-    </Form>
+    <span className="sl-marks">
+      {fm && <StatusChip ton="bedien" wort="Flugmappe" />}
+      {mission.etb_linked_at_ms != null && <StatusChip ton="bedien" wort="Einsatztagebuch" />}
+    </span>
   );
 }
 
-function MissionRow({ mission, act }: { mission: Mission; act: Act }) {
+function Row({
+  mission,
+  summary,
+  canStart,
+  onStart,
+  starting,
+}: {
+  mission: Mission;
+  summary: MissionSummary | undefined;
+  canStart: boolean;
+  onStart: () => void;
+  starting: boolean;
+}) {
+  const navigate = useNavigate();
+  const chip = STATE_CHIP[mission.state];
+  const duration = missionDurationMs(mission, 0);
+  const open = `/einsaetze/${mission.id}`;
   return (
-    <li className="sl-mission">
-      <div className="sl-mission-head">
-        <strong>{mission.name}</strong>
-        {mission.location && <span>{mission.location}</span>}
-        <div className="sl-mission-actions">
-          {mission.state === 'prepared' && (
-            <Button
-              size="small"
-              type="primary"
-              aria-label={`Starten: ${mission.name}`}
-              onClick={() => act('POST', `/api/missions/${mission.id}/start`)}
-            >
-              Starten
-            </Button>
-          )}
-          <Link to={`/?einsatz=${mission.id}`} aria-label={`Auf der Lage öffnen: ${mission.name}`}>
-            Auf der Lage öffnen
-          </Link>
-        </div>
-      </div>
-      <FlugmappeNote mission={mission} />
-      <FlugmappeLinks mission={mission} />
-      <SectionList mission={mission} />
-      {/* Verknüpft: Die Flugmappe legt die Abschnitte an, der Server lehnt hier ab (422). */}
-      {mission.state !== 'closed' &&
-        (activeLinks(mission).length > 0 ? (
-          <p className="sl-mission-fm-sections">{SECTIONS_FROM_FLUGMAPPE}</p>
-        ) : (
-          <SectionForm mission={mission} act={act} />
-        ))}
+    // Die ganze Zeile öffnet den Einsatz; für Tastatur und Vorleser ist der Name der Link.
+    <li className="sl-mrow" onClick={() => void navigate(open)}>
+      <span className="sl-mrow-state">
+        <StatusChip ton={chip.ton} wort={chip.wort} />
+      </span>
+      <span className="sl-mrow-name">
+        <Link to={open} onClick={(e) => e.stopPropagation()}>
+          {mission.name}
+        </Link>
+        <span>{mission.location ?? DASH}</span>
+      </span>
+      <span className="sl-mrow-nums">
+        <span className="sl-mrow-num" data-label="Datum">
+          {dateText(missionDayMs(mission))}
+        </span>
+        <span className="sl-mrow-num" data-label="Dauer">
+          {mission.state === 'closed' && duration != null ? `${hoursMinutes(duration)} h` : DASH}
+        </span>
+        <span className="sl-mrow-num" data-label="Flüge">
+          {summary?.flights ?? DASH}
+        </span>
+        <span className="sl-mrow-num" data-label="Fotos">
+          {summary?.photos ?? DASH}
+        </span>
+      </span>
+      <span className="sl-mrow-marks">
+        <MissionMarks mission={mission} />
+      </span>
+      <span className="sl-mrow-action">
+        {mission.state === 'prepared' && canStart && (
+          <Button
+            size="small"
+            loading={starting}
+            aria-label={`Starten: ${mission.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStart();
+            }}
+          >
+            Starten
+          </Button>
+        )}
+      </span>
     </li>
   );
 }
 
-export function MissionsPage() {
-  const { data = [] } = useMissions();
-  const client = useQueryClient();
-  const [form] = Form.useForm<{ name: string; location?: string }>();
-  const run = useMutation({
-    mutationFn: (a: { path: string; body?: unknown }) => apiSend<unknown>('POST', a.path, a.body),
-    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.missions }),
-  });
-  const act: Act = (_m, path, body, onOk) => run.mutate({ path, body }, { onSuccess: onOk });
-  const error = run.error;
+function RunningPanel({ mission, summary }: { mission: Mission; summary: MissionSummary | undefined }) {
+  const now = useServerNow(15_000);
+  const navigate = useNavigate();
   return (
-    <Frame>
+    <Paneel
+      titel="Laufender Einsatz"
+      aktion={
+        <Link className="sl-panel-link" to="/">
+          Zur Lage
+        </Link>
+      }
+    >
+      <button type="button" className="sl-running" onClick={() => void navigate(`/einsaetze/${mission.id}`)}>
+        <span className="sl-running-name">{mission.name}</span>
+        <span className="sl-running-meta">
+          {[mission.location, mission.started_at_ms != null && `seit ${timeText(mission.started_at_ms)}`]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>
+        <MissionMarks mission={mission} />
+      </button>
+      <Kennzahlenband beschriftung="Laufender Einsatz in Zahlen">
+        <Kennzahl titel="Dauer" wert={hoursMinutes(missionDurationMs(mission, now) ?? 0)} einheit="h" punkt="normal" />
+        <Kennzahl
+          titel="Flüge"
+          wert={summary?.flights ?? DASH}
+          notiz={summary ? `${hoursMinutes(summary.flight_ms)} h Flugzeit` : undefined}
+        />
+        <Kennzahl titel="Fotos" wert={summary?.photos ?? DASH} />
+        <Kennzahl titel="Abschnitte" wert={mission.sections.length} />
+      </Kennzahlenband>
+    </Paneel>
+  );
+}
+
+/**
+ * Einsatzverwaltung (SUL-119): der laufende Einsatz mit Kennzahlen, darunter alle anderen mit Filter
+ * und Suche, das Archiv nach Monaten. Jede Zeile führt auf die Einsatzseite.
+ */
+export function MissionsPage() {
+  const missions = useMissions();
+  const summaries = useMissionSummaries();
+  const mobile = useViewMode() === 'mobile';
+  const start = useStartMission();
+  const [filter, setFilter] = useState<Filter>('alle');
+  const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(false);
+  const all = useMemo(() => missions.data ?? [], [missions.data]);
+  const running = all.find((m) => m.state === 'running');
+  const byId = useMemo(() => new Map(summaries.data?.map((s) => [s.mission_id, s])), [summaries.data]);
+  const others = all.filter((m) => m.state !== 'running');
+  const shown = others
+    .filter((m) => filter === 'alle' || m.state === filter)
+    .filter((m) => matchesSearch(m, query))
+    .sort(listOrder);
+  const count = (state: Filter) => others.filter((m) => m.state === state).length;
+
+  return (
+    <Frame mission={!mobile && <MissionHeader />}>
       <div className="sl-page sl-missions">
-        {error && (
+        <div className="sl-title-row">
+          <h1 className="sl-h1">Einsätze</h1>
+          <Button type="primary" onClick={() => setCreating(true)}>
+            Neuer Einsatz
+          </Button>
+        </div>
+        {start.error && (
           <Alert
             type="error"
             title={
-              error instanceof ApiError
-                ? error.status === 409 && run.variables?.path.endsWith('/start')
+              start.error instanceof ApiError
+                ? start.error.status === 409
                   ? 'Es läuft schon ein Einsatz'
-                  : error.message
+                  : start.error.message
                 : 'Server nicht erreichbar.'
             }
           />
         )}
-        <Paneel titel="Einsätze">
-          <Form
-            form={form}
-            layout="inline"
-            className="sl-create"
-            colon={false}
-            requiredMark={false}
-            onFinish={(v) => {
-              act(
-                'POST',
-                '/api/missions',
-                {
-                  name: v.name,
-                  location: v.location || null,
-                } satisfies MissionCreate,
-                () => form.resetFields(),
+        {missions.isError && <Alert type="error" title="Einsätze nicht geladen" />}
+
+        {running && <RunningPanel mission={running} summary={byId.get(running.id)} />}
+
+        <Paneel titel="Alle Einsätze" meta={missions.data ? `${shown.length} von ${others.length}` : undefined}>
+          <div className="sl-mlist-tools">
+            <Segmentleiste<Filter>
+              beschriftung="Einsätze filtern"
+              wert={filter}
+              onWechsel={setFilter}
+              optionen={[
+                { wert: 'alle', label: 'Alle' },
+                { wert: 'prepared', label: `Vorbereitet ${count('prepared')}` },
+                { wert: 'closed', label: `Abgeschlossen ${count('closed')}` },
+              ]}
+            />
+            <Input.Search
+              allowClear
+              className="sl-mlist-search"
+              placeholder="Name oder Ort"
+              aria-label="Einsätze durchsuchen"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <ul className="sl-mlist" aria-label="Einsätze">
+            <li className="sl-mrow sl-mrow-head" aria-hidden="true">
+              <span>Status</span>
+              <span>Einsatz</span>
+              <span className="sl-mrow-nums">
+                <span>Datum</span>
+                <span>Dauer</span>
+                <span>Flüge</span>
+                <span>Fotos</span>
+              </span>
+              <span />
+              <span />
+            </li>
+            {shown.map((m, i) => {
+              const group = listGroup(m);
+              return (
+                <Fragment key={m.id}>
+                  {(i === 0 || listGroup(shown[i - 1]!) !== group) && <li className="sl-mgroup">{group}</li>}
+                  <Row
+                    mission={m}
+                    summary={byId.get(m.id)}
+                    canStart={!running}
+                    starting={start.isPending && start.variables === m.id}
+                    onStart={() => start.mutate(m.id)}
+                  />
+                </Fragment>
               );
-            }}
-          >
-            <Form.Item label="Name" name="name" rules={[{ required: true, message: 'Name fehlt' }]}>
-              <Input placeholder="Vermisste Person Ebstorf" />
-            </Form.Item>
-            <Form.Item label="Ort" name="location">
-              <Input />
-            </Form.Item>
-            <Button type="primary" htmlType="submit" loading={run.isPending}>
-              Einsatz anlegen
-            </Button>
-          </Form>
+            })}
+            {missions.data && shown.length === 0 && (
+              <li className="sl-mlist-empty">{others.length === 0 ? 'Noch keine Einsätze' : 'Keine Treffer'}</li>
+            )}
+          </ul>
         </Paneel>
-        {GROUPS.map((g) => (
-          <Paneel key={g.state} titel={g.title}>
-            <ul className="sl-mission-list">
-              {data
-                .filter((m) => m.state === g.state)
-                .sort(newestClosedFirst)
-                .map((m) => (
-                  <MissionRow key={m.id} mission={m} act={act} />
-                ))}
-            </ul>
-          </Paneel>
-        ))}
+
         <Paneel titel="Ohne Einsatz">
-          <p>
-            Was ohne laufenden Einsatz entstanden ist, lässt sich dort einem Einsatz zuordnen.{' '}
-            <Link to="/?einsatz=ohne">Lage ohne Einsatz</Link> · <Link to="/flights?einsatz=ohne">Flüge ohne Einsatz</Link>
-          </p>
+          <div className="sl-without">
+            <Link to="/?einsatz=ohne">Lage ohne Einsatz</Link>
+            <Link to="/flights?einsatz=ohne">Flüge ohne Einsatz</Link>
+          </div>
         </Paneel>
       </div>
+      {creating && <NewMissionDialog running={running !== undefined} onClose={() => setCreating(false)} />}
     </Frame>
   );
 }

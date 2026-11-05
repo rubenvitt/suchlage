@@ -139,6 +139,20 @@ pub struct MissionContents {
     pub video_segments: u32,
 }
 
+/// Kennzahlen eines Einsatzes für die Einsatzliste (SUL-119), eine Zeile je Einsatz.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MissionSummary {
+    #[ts(type = "number")]
+    pub mission_id: i64,
+    pub flights: u32,
+    /// Summe der Dauer aller beendeten Flüge; ein laufender Flug zählt erst nach der Landung.
+    #[ts(type = "number")]
+    pub flight_ms: i64,
+    pub photos: u32,
+    pub map_elements: u32,
+}
+
 /// Woher ein Eintrag der Flugliste eines Einsatzes kommt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]

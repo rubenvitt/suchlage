@@ -5,7 +5,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::contract::{
     FlugmappeLink, Mission, MissionCreate, MissionOrigin, MissionSection, MissionState,
-    MissionUpdate, SectionCreate,
+    MissionSummary, MissionUpdate, SectionCreate,
 };
 
 fn state_str(s: MissionState) -> &'static str {
@@ -278,6 +278,33 @@ pub async fn link_einsatztagebuch(
 }
 
 /// Anzahl Flüge, Fotodateien (Zeilen, nicht Auslösungen) und Kartenelemente.
+/// Kennzahlen aller Einsätze in einer Abfrage, Zählweise wie [`counts`].
+pub async fn summaries(pool: &SqlitePool) -> Result<Vec<MissionSummary>, sqlx::Error> {
+    let rows: Vec<(i64, u32, i64, u32, u32)> = sqlx::query_as(
+        "SELECT m.id, \
+         (SELECT COUNT(*) FROM flights f WHERE f.mission_id = m.id), \
+         (SELECT COALESCE(SUM(f.ended_at_ms - f.started_at_ms), 0) FROM flights f \
+          WHERE f.mission_id = m.id AND f.ended_at_ms IS NOT NULL), \
+         (SELECT COUNT(*) FROM photos p WHERE p.mission_id = m.id), \
+         (SELECT COUNT(*) FROM map_elements e WHERE e.mission_id = m.id) \
+         FROM missions m ORDER BY m.id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(mission_id, flights, flight_ms, photos, map_elements)| MissionSummary {
+                mission_id,
+                flights,
+                flight_ms,
+                photos,
+                map_elements,
+            },
+        )
+        .collect())
+}
+
 pub async fn counts(pool: &SqlitePool, id: i64) -> Result<(u32, u32, u32), sqlx::Error> {
     let (f, p, e): (u32, u32, u32) = sqlx::query_as(
         "SELECT (SELECT COUNT(*) FROM flights WHERE mission_id = ?1), \

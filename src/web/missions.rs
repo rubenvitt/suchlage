@@ -11,8 +11,8 @@ use axum::{Json, Router};
 use crate::app::AppState;
 use crate::auth::session::{Admin, Operator, Viewer};
 use crate::contract::{
-    Mission, MissionAssign, MissionContents, MissionCreate, MissionFlight, MissionUpdate,
-    SectionCreate,
+    Mission, MissionAssign, MissionContents, MissionCreate, MissionFlight, MissionSummary,
+    MissionUpdate, SectionCreate,
 };
 use crate::error::AppError;
 use crate::extract::JsonBody;
@@ -23,6 +23,7 @@ pub fn routes() -> Router<AppState> {
         .route("/missions", get(list).post(create))
         .route("/missions/{id}", put(update).delete(delete))
         .route("/missions/{id}/contents", get(contents))
+        .route("/mission-summaries", get(summaries))
         .route("/missions/{id}/start", post(start))
         .route("/missions/{id}/close", post(close))
         .route("/missions/{id}/sections", post(add_section))
@@ -75,6 +76,14 @@ async fn update(
     JsonBody(input): JsonBody<MissionUpdate>,
 ) -> Result<Json<Mission>, AppError> {
     Ok(Json(state.missions.update(id, input).await?))
+}
+
+/// Kennzahlen aller Einsätze für die Einsatzliste.
+async fn summaries(
+    _: Operator,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<MissionSummary>>, AppError> {
+    Ok(Json(crate::store::missions::summaries(&state.pool).await?))
 }
 
 async fn contents(

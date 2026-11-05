@@ -8,6 +8,7 @@ import type { KioskTokenView } from '../contract/generated/KioskTokenView';
 import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
 import type { MissionContents } from '../contract/generated/MissionContents';
+import type { MissionSummary } from '../contract/generated/MissionSummary';
 import type { MissionCreate } from '../contract/generated/MissionCreate';
 import type { MissionFlight } from '../contract/generated/MissionFlight';
 import type { MissionUpdate } from '../contract/generated/MissionUpdate';
@@ -174,6 +175,17 @@ export function useDeleteMission(onDeleted: () => void) {
     },
   });
 }
+/**
+ * Kennzahlen aller Einsätze für die Einsatzliste und die Einsatzseite. Unter `missions`, damit
+ * `missions_changed` sie mit erneuert; Flugstart und Landung erneuern sie über `flights` nicht,
+ * darum hier ein ruhiger Takt.
+ */
+export const useMissionSummaries = () =>
+  useQuery({
+    queryKey: [...queryKeys.missions, 'summaries'],
+    queryFn: () => apiGet<MissionSummary[]>('/api/mission-summaries'),
+    refetchInterval: 60_000,
+  });
 /** Mengen für die Lösch-Rückfrage. */
 export const useMissionContents = (id: number) =>
   useQuery({

@@ -18,12 +18,20 @@
   background: var(--lfh-paneel);
   padding: 8px 12px;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 12px;
   align-items: center;
   justify-items: start;
   color: var(--lfh-text-2);
   font: var(--lfh-typo-text-gewicht) var(--lfh-typo-text-klein-groesse) var(--lfh-schrift-text);
+}
+/* Lange Quellen („Telemetrie, bestätigt in Flugmappe …“) brechen bei 320 px um, statt die Seite zu
+   verbreitern. Der Chip setzt `nowrap` und 22 px inline, darum `!important`. */
+.sl-card-row > [data-lfh='status-chip'] {
+  max-width: 100%;
+  min-height: 22px;
+  height: auto !important;
+  white-space: normal !important;
 }
 .sl-card-duration {
   color: var(--lfh-text);

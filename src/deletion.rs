@@ -634,6 +634,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn summaries_count_like_contents() {
+        let (app, seen, admin) = as_admin().await;
+        let f = filled(&app, &seen).await;
+        let empty = mission(&app, "Leer").await;
+        let (status, body) = send(
+            &app.router,
+            with_cookie(get("/api/mission-summaries"), &admin),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let row = |id: i64| {
+            body.as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["mission_id"] == id)
+                .cloned()
+                .unwrap()
+        };
+        let full = row(f.mission);
+        assert_eq!(
+            (&full["flights"], &full["photos"], &full["map_elements"]),
+            (&json!(1), &json!(2), &json!(1))
+        );
+        assert!(full["flight_ms"].as_i64().unwrap() >= 0);
+        assert_eq!(
+            row(empty),
+            json!({"mission_id": empty, "flights": 0, "flight_ms": 0, "photos": 0, "map_elements": 0})
+        );
+        let kiosk = app.cookie(Role::Kiosk).await;
+        let (status, _) = send(
+            &app.router,
+            with_cookie(get("/api/mission-summaries"), &kiosk),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
     async fn contents_counts() {
         let (app, seen, admin) = as_admin().await;
         let f = filled(&app, &seen).await;

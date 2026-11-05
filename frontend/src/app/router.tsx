@@ -6,6 +6,7 @@ import KioskEnrollPage from '../auth/KioskEnrollPage';
 import LoginPage from '../auth/LoginPage';
 import { FlightDetailPage } from '../flights/FlightDetailPage';
 import { FlightsPage } from '../flights/FlightsPage';
+import { MissionPage } from '../missions/MissionPage';
 import { MissionsPage } from '../missions/MissionsPage';
 import { EntryPage } from '../missions/WelcomePage';
 import { Frame } from '../shell/Frame';
@@ -31,6 +32,14 @@ export const routes = [
             element: (
               <RequireRole roles={['admin', 'operator']}>
                 <MissionsPage />
+              </RequireRole>
+            ),
+          },
+          {
+            path: '/einsaetze/:id',
+            element: (
+              <RequireRole roles={['admin', 'operator']}>
+                <MissionPage />
               </RequireRole>
             ),
           },

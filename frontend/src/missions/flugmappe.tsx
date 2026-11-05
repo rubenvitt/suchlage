@@ -38,18 +38,6 @@ export function flugmappeHint(m: Mission): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-/** Hinweis unter dem Einsatz in Listen: Herkunft als Chip, Verknüpfung als Text. */
-export function FlugmappeNote({ mission }: { mission: Mission }) {
-  const link = linkText(mission);
-  if (mission.origin !== 'flugmappe' && !link) return null;
-  return (
-    <p className="sl-mission-fm">
-      {mission.origin === 'flugmappe' && <StatusChip ton="neutral" wort="aus der Flugmappe" />}
-      {link && <span>{link}</span>}
-    </p>
-  );
-}
-
 /** Zustand einer Verknüpfung: offen (arbeitet), fertig (Teil abgeschlossen), gelöst (in Suchlage). */
 export function linkState(l: FlugmappeLink): { wort: string; ton: StatusTon } {
   if (l.released_at_ms != null) return { wort: 'gelöst', ton: 'neutral' };
@@ -118,20 +106,5 @@ export function MapPhotoThumb({ missionId, section }: { missionId: number; secti
     >
       <img src={url} alt={`Kartenfoto ${section.label}`} loading="lazy" />
     </a>
-  );
-}
-
-/** Abschnitte eines Einsatzes, älteste zuerst, je mit Kartenfoto, wenn eines vorliegt. */
-export function SectionList({ mission }: { mission: Mission }) {
-  if (mission.sections.length === 0) return null;
-  return (
-    <ul className="sl-mission-sections" aria-label={`Abschnitte von ${mission.name}`}>
-      {mission.sections.map((s) => (
-        <li key={s.id}>
-          <span>{s.label}</span>
-          <MapPhotoThumb missionId={mission.id} section={s} />
-        </li>
-      ))}
-    </ul>
   );
 }
