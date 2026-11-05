@@ -657,7 +657,7 @@ mod tests {
             (&full["flights"], &full["photos"], &full["map_elements"]),
             (&json!(1), &json!(2), &json!(1))
         );
-        assert!(full["flight_ms"].as_i64().unwrap() >= 0);
+        assert_eq!(full["flight_ms"].as_i64().unwrap(), 13 * MIN);
         assert_eq!(
             row(empty),
             json!({"mission_id": empty, "flights": 0, "flight_ms": 0, "photos": 0, "map_elements": 0})
