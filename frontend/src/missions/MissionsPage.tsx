@@ -107,7 +107,6 @@ function Row({
 
 function RunningPanel({ mission, summary }: { mission: Mission; summary: MissionSummary | undefined }) {
   const now = useServerNow(15_000);
-  const navigate = useNavigate();
   return (
     <Paneel
       titel="Laufender Einsatz"
@@ -117,7 +116,7 @@ function RunningPanel({ mission, summary }: { mission: Mission; summary: Mission
         </Link>
       }
     >
-      <button type="button" className="sl-running" onClick={() => void navigate(`/einsaetze/${mission.id}`)}>
+      <Link className="sl-running" to={`/einsaetze/${mission.id}`}>
         <span className="sl-running-name">{mission.name}</span>
         <span className="sl-running-meta">
           {[mission.location, mission.started_at_ms != null && `seit ${timeText(mission.started_at_ms)}`]
@@ -125,7 +124,7 @@ function RunningPanel({ mission, summary }: { mission: Mission; summary: Mission
             .join(' · ')}
         </span>
         <MissionMarks mission={mission} />
-      </button>
+      </Link>
       <Kennzahlenband beschriftung="Laufender Einsatz in Zahlen">
         <Kennzahl titel="Dauer" wert={hoursMinutes(missionDurationMs(mission, now) ?? 0)} einheit="h" punkt="normal" />
         <Kennzahl

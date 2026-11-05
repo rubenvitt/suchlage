@@ -1,6 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
+import { http, HttpResponse } from 'msw';
 import { Route, Routes, useLocation } from 'react-router';
 import { missionList } from '../contract/fixtures.generated';
 import type { Mission } from '../contract/generated/Mission';
@@ -49,11 +50,11 @@ test('der laufende steht oben mit Kennzahlen und öffnet seine Seite, nicht in d
   const [running, prepared] = missionFixtures();
   show([running!, prepared!]);
   const panel = within(await screen.findByRole('region', { name: 'Laufender Einsatz' }));
-  expect(panel.getByRole('button', { name: /Übung Wietze/ })).toBeInTheDocument();
+  expect(panel.getByRole('link', { name: /Übung Wietze/ })).toBeInTheDocument();
   expect(await panel.findByRole('group', { name: 'Laufender Einsatz in Zahlen' })).toHaveTextContent('Flüge3');
   expect(panel.getByRole('link', { name: 'Zur Lage' })).toHaveAttribute('href', '/');
   expect(list().queryByRole('link', { name: 'Übung Wietze' })).not.toBeInTheDocument();
-  await userEvent.click(panel.getByRole('button', { name: /Übung Wietze/ }));
+  await userEvent.click(panel.getByRole('link', { name: /Übung Wietze/ }));
   expect(screen.getByLabelText('Adresse')).toHaveTextContent('/einsaetze/1');
 });
 
@@ -69,6 +70,25 @@ test('neuer Einsatz bei laufendem nur vorbereiten, danach auf seine Seite', asyn
   await userEvent.type(dialog.getByLabelText('Einsatzname'), 'Vermisste Person Ebstorf');
   await userEvent.click(dialog.getByRole('button', { name: 'Vorbereiten' }));
   await vi.waitFor(() => expect(screen.getByLabelText('Adresse')).toHaveTextContent('/einsaetze/2'));
+});
+
+test('zweimal Enter legt nur einen Einsatz an', async () => {
+  const [running] = missionFixtures();
+  show([running!]);
+  let posts = 0;
+  server.use(
+    http.post('/api/missions', async () => {
+      posts += 1;
+      await new Promise((r) => setTimeout(r, 50));
+      return HttpResponse.json({ ...running!, id: 9, state: 'prepared', name: 'Doppelt' }, { status: 201 });
+    }),
+  );
+  await screen.findByRole('region', { name: 'Laufender Einsatz' });
+  await userEvent.click(screen.getByRole('button', { name: 'Neuer Einsatz' }));
+  const dialog = within(await screen.findByRole('dialog'));
+  await userEvent.type(dialog.getByLabelText('Einsatzname'), 'Doppelt{Enter}{Enter}');
+  await vi.waitFor(() => expect(screen.getByLabelText('Adresse')).toHaveTextContent('/einsaetze/9'));
+  expect(posts).toBe(1);
 });
 
 test('ohne laufenden: anlegen und starten führt in die Lage; „Starten“ in der Zeile startet', async () => {

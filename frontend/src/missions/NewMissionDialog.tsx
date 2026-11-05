@@ -1,5 +1,5 @@
 import { Alert, Button, Form, Input, Modal } from 'antd';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { useCreateMission, useStartMission } from '../api/queries';
@@ -20,7 +20,20 @@ export function NewMissionDialog({ running, onClose }: { running: boolean; onClo
   const busy = create.isPending || start.isPending;
   const error = create.error ?? start.error;
 
+  // Synchrone Sperre: zweimal Enter schneller als der nächste Render legt sonst zwei Einsätze an.
+  const sending = useRef(false);
+
   const send = async (run: boolean) => {
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      await submit(run);
+    } finally {
+      sending.current = false;
+    }
+  };
+
+  const submit = async (run: boolean) => {
     const v = await form.validateFields().catch(() => null);
     if (!v) return;
     const id =
@@ -46,7 +59,7 @@ export function NewMissionDialog({ running, onClose }: { running: boolean; onClo
       footer={
         <div className="sl-dialog-actions">
           <Button onClick={onClose}>Abbrechen</Button>
-          <Button type={running ? 'primary' : 'default'} loading={busy && !start.isPending} onClick={() => void send(false)}>
+          <Button type={running ? 'primary' : 'default'} loading={create.isPending} disabled={start.isPending} onClick={() => void send(false)}>
             Vorbereiten
           </Button>
           {!running && (

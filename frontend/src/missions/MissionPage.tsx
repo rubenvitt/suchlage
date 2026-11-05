@@ -1,6 +1,6 @@
 import { Button, Dropdown, type MenuProps } from 'antd';
-import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { type MouseEvent, useMemo, useState } from 'react';
+import { Link, type NavigateFunction, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../api/client';
 import {
   useMapPhotos,
@@ -34,6 +34,13 @@ import { MissionMarks } from './MissionsPage';
 import { dateText, dateTimeText, hoursMinutes, missionDurationMs, STATE_CHIP, timeText } from './missionInfo';
 import './missions.css';
 
+/** Linkknopf: einfacher Klick bleibt in der App, Mittelklick und Strg/Cmd öffnen wie ein Link. */
+function routerClick(e: MouseEvent, navigate: NavigateFunction, to: string) {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  void navigate(to);
+}
+
 const DASH = '–';
 /** So viele Vorschaubilder zeigt die Seite; alle stehen auf der Lage. */
 const PHOTO_PREVIEW = 24;
@@ -64,7 +71,7 @@ function Actions({
     <div className="sl-mission-actions">
       {mission.state === 'running' && (
         <>
-          <Button type="primary" onClick={() => void navigate('/')}>
+          <Button type="primary" href="/" onClick={(e) => routerClick(e, navigate, '/')}>
             Zur Lage
           </Button>
           <Button onClick={() => open('edit')}>Bearbeiten</Button>
@@ -82,7 +89,7 @@ function Actions({
         </Button>
       )}
       {mission.state !== 'running' && (
-        <Button onClick={() => void navigate(`/?einsatz=${mission.id}`)}>
+        <Button href={`/?einsatz=${mission.id}`} onClick={(e) => routerClick(e, navigate, `/?einsatz=${mission.id}`)}>
           {mission.state === 'closed' ? 'Auf der Lage ansehen' : 'Auf der Lage vorbereiten'}
         </Button>
       )}

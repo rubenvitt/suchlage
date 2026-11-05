@@ -64,7 +64,7 @@ test('abgeschlossen: Kennzahlen, Verlauf, Pfad; „Auf der Lage ansehen“ öffn
   expect(region('Verlauf').getByText('nicht verknüpft')).toBeInTheDocument();
   expect(screen.getByRole('navigation', { name: 'Pfad' })).toHaveTextContent('Einsätze/Flächenbrand Heide');
   expect(screen.queryByRole('button', { name: 'Abschnitt anlegen' })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole('button', { name: 'Auf der Lage ansehen' }));
+  await userEvent.click(screen.getByRole('link', { name: 'Auf der Lage ansehen' }));
   expect(address()).toHaveTextContent('/?einsatz=7');
 });
 
@@ -116,14 +116,14 @@ test('laufend: „Zur Lage“, Bearbeiten, Abschnitt anlegen; Abschließen bleib
   await userEvent.click(close.getByRole('button', { name: 'Abschließen' }));
   await vi.waitFor(() => expect(titleLine().getByText('Abgeschlossen')).toBeInTheDocument());
   expect(screen.queryByLabelText('Adresse')).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole('button', { name: 'Auf der Lage ansehen' }));
+  await userEvent.click(screen.getByRole('link', { name: 'Auf der Lage ansehen' }));
   expect(address()).toHaveTextContent('/?einsatz=1');
 });
 
 test('vorbereitet, während ein anderer läuft: Starten gesperrt; ohne laufenden startet er in die Lage', async () => {
   show([running!, prepared!], 2);
   expect(await screen.findByRole('button', { name: 'Starten' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Auf der Lage vorbereiten' })).toBeEnabled();
+  expect(screen.getByRole('link', { name: 'Auf der Lage vorbereiten' })).toHaveAttribute('href', expect.stringContaining('einsatz='));
 });
 
 test('vorbereitet ohne laufenden: Starten führt in die Lage', async () => {
