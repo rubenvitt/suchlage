@@ -8,6 +8,7 @@ import type { Me } from '../contract/generated/Me';
 import type { Mission } from '../contract/generated/Mission';
 import type { MissionContents } from '../contract/generated/MissionContents';
 import type { MissionCreate } from '../contract/generated/MissionCreate';
+import type { MissionSummary } from '../contract/generated/MissionSummary';
 import type { MissionUpdate } from '../contract/generated/MissionUpdate';
 import type { SectionCreate } from '../contract/generated/SectionCreate';
 import type { RemoteControllerCreate } from '../contract/generated/RemoteControllerCreate';
@@ -106,6 +107,20 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
       Object.assign(m, (await request.json()) as MissionUpdate);
       return HttpResponse.json(m);
     }),
+    // Feste Mengen je Einsatz, aus der ID abgeleitet: Die Vorschau zählt keine echten Flüge und Fotos.
+    http.get('/api/mission-summaries', () =>
+      HttpResponse.json(
+        missions.map(
+          (m): MissionSummary => ({
+            mission_id: m.id,
+            flights: m.state === 'prepared' ? 0 : 2 + (m.id % 5),
+            flight_ms: m.state === 'prepared' ? 0 : (40 + (m.id % 7) * 11) * 60_000,
+            photos: m.state === 'prepared' ? 0 : 10 + ((m.id * 13) % 50),
+            map_elements: (m.id * 3) % 9,
+          }),
+        ),
+      ),
+    ),
     // Feste Mengen: Die Vorschau zählt keine echten Flüge und Fotos.
     http.get('/api/missions/:id/contents', () =>
       HttpResponse.json({

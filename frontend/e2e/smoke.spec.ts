@@ -108,9 +108,12 @@ test('Arbeitsplatz: Einsatz anlegen', async ({ page }, info) => {
   await devLogin(page);
   await page.goto('/einsaetze');
   const name = `E2E-Einsatz ${Date.now()}`;
-  await page.getByLabel('Name').fill(name);
-  await page.getByRole('button', { name: 'Einsatz anlegen' }).click();
+  await page.getByRole('button', { name: 'Neuer Einsatz' }).click();
+  await page.getByLabel('Einsatzname').fill(name);
   // Vorbereitet, noch nicht gestartet: Der Simulator-Flug der anderen Tests bleibt unberührt.
-  await expect(page.getByRole('button', { name: `Starten: ${name}` })).toBeVisible();
+  await page.getByRole('button', { name: 'Vorbereiten' }).click();
+  await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+  await page.getByRole('link', { name: 'Einsätze', exact: true }).first().click();
+  await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
