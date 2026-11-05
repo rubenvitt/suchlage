@@ -93,6 +93,8 @@ pub fn router(state: AppState) -> Router {
         )
         // Schnittstelle für den Lagemonitor: Großbild-Token als Bearer, nur lesen.
         .nest("/lagemonitor/v1", crate::web::lagemonitor::routes())
+        // Schnittstelle für das Einsatztagebuch der Suite: Großbild-Token als Bearer, nur lesen.
+        .nest("/einsatztagebuch/v1", crate::web::einsatztagebuch::routes())
         .fallback(|| async { crate::error::AppError::NotFound });
 
     Router::new()

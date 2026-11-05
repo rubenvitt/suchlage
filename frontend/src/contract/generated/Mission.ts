@@ -13,4 +13,9 @@ sections: Array<MissionSection>, origin: MissionOrigin,
  * Verknüpfte Flugmappen, älteste zuerst, auch gelöste. Ohne nicht gelöste legt Suchlage
  * auch Abschnitte an.
  */
-flugmappe_links: Array<FlugmappeLink>, };
+flugmappe_links: Array<FlugmappeLink>, 
+/**
+ * Seit wann ein Eintrag im Einsatztagebuch der IUK-Suite mit dem Einsatz verknüpft ist. Dann
+ * lässt er sich nicht mehr löschen.
+ */
+etb_linked_at_ms: number | null, };

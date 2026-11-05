@@ -98,6 +98,26 @@ impl MissionHub {
         Ok(mission)
     }
 
+    /// Ein Eintrag im Einsatztagebuch ist mit dem Einsatz verknüpft (IDA-359). Unter der
+    /// Schreibsperre, damit keine Löschung dazwischenfällt: Entweder ist der Einsatz danach
+    /// gesperrt, oder es gibt ihn nicht mehr.
+    /// Ein Einsatz, der nie lief, wird nie angeboten; ihn zu sperren hieße, ihn für immer zu
+    /// behalten (422). Ein schon verknüpfter bleibt wiederholbar.
+    pub async fn link_einsatztagebuch(&self, id: i64, now_ms: i64) -> Result<(), AppError> {
+        let _serial = self.writes.lock().await;
+        let mission = self.get(id).await?;
+        if mission.etb_linked_at_ms.is_none() && mission.started_at_ms.is_none() {
+            return Err(AppError::Unprocessable(
+                "Ein Einsatz, der nie lief, lässt sich nicht verknüpfen".into(),
+            ));
+        }
+        if !store::link_einsatztagebuch(&self.pool, id, now_ms).await? {
+            return Err(AppError::NotFound);
+        }
+        self.changed();
+        Ok(())
+    }
+
     pub async fn start(&self, id: i64, now_ms: i64) -> Result<Mission, AppError> {
         self.change_state(id, MissionState::Running, now_ms).await
     }

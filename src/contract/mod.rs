@@ -3,6 +3,7 @@
 
 pub mod admin;
 pub mod devicelog;
+pub mod einsatztagebuch;
 pub mod examples;
 pub mod flights;
 pub mod flugmappe;
@@ -17,6 +18,7 @@ mod fixtures;
 
 pub use admin::*;
 pub use devicelog::*;
+pub use einsatztagebuch::*;
 pub use flights::*;
 pub use flugmappe::*;
 pub use lagemonitor::*;

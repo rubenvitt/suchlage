@@ -41,6 +41,7 @@ export const missionFixtures = (): Mission[] => [
     ],
     origin: 'web',
     flugmappe_links: [],
+    etb_linked_at_ms: null,
   },
   {
     id: 2,
@@ -54,6 +55,7 @@ export const missionFixtures = (): Mission[] => [
     sections: [],
     origin: 'web',
     flugmappe_links: [],
+    etb_linked_at_ms: null,
   },
 ];
 
@@ -77,6 +79,7 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         sections: [],
         origin: 'web',
         flugmappe_links: [],
+        etb_linked_at_ms: null,
       };
       missions.push(created);
       return HttpResponse.json(created);
@@ -118,6 +121,11 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
       if (m.state === 'running')
         return HttpResponse.json(
           { error: 'Ein laufender Einsatz lässt sich nicht löschen' },
+          { status: 422 },
+        );
+      if (m.etb_linked_at_ms !== null)
+        return HttpResponse.json(
+          { error: 'Der Einsatz ist im Einsatztagebuch verknüpft und lässt sich nicht löschen' },
           { status: 422 },
         );
       missions.splice(missions.indexOf(m), 1);
@@ -246,9 +254,9 @@ export const handlersFor = (me: Me, missions: Mission[] = missionFixtures()) => 
     http.delete('/api/remote-controllers/:id', noContent),
     http.get('/api/kiosk-tokens', () => HttpResponse.json(fx.kioskTokens)),
     http.post('/api/kiosk-tokens', async ({ request }) => {
-      const { label } = (await request.json()) as KioskTokenCreate;
+      const { label, einsatztagebuch } = (await request.json()) as KioskTokenCreate;
       const created: KioskTokenCreated = {
-        token: { id: 2, label, created_at_ms: Date.now() },
+        token: { id: 2, label, created_at_ms: Date.now(), einsatztagebuch: einsatztagebuch ?? false },
         url: 'https://suchlage.example.org/kiosk#vorschau',
       };
       return HttpResponse.json(created);

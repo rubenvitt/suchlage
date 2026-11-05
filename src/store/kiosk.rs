@@ -9,33 +9,49 @@ pub async fn create(
     label: &str,
     now_ms: i64,
 ) -> Result<(KioskTokenView, String), sqlx::Error> {
+    create_with(pool, label, false, now_ms).await
+}
+
+/// Wie [`create`]; `einsatztagebuch` macht ihn zum Zugang der IUK-Suite (IDA-359).
+pub async fn create_with(
+    pool: &SqlitePool,
+    label: &str,
+    einsatztagebuch: bool,
+    now_ms: i64,
+) -> Result<(KioskTokenView, String), sqlx::Error> {
     let secret = token::generate();
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO kiosk_tokens (label, token_hash, created_at_ms) VALUES (?, ?, ?) RETURNING id",
+        "INSERT INTO kiosk_tokens (label, token_hash, created_at_ms, einsatztagebuch) \
+         VALUES (?, ?, ?, ?) RETURNING id",
     )
     .bind(label)
     .bind(token::hash(&secret))
     .bind(now_ms)
+    .bind(einsatztagebuch)
     .fetch_one(pool)
     .await?;
     let view = KioskTokenView {
         id,
         label: label.into(),
         created_at_ms: now_ms,
+        einsatztagebuch,
     };
     Ok((view, secret))
 }
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<KioskTokenView>, sqlx::Error> {
-    let rows = sqlx::query("SELECT id, label, created_at_ms FROM kiosk_tokens ORDER BY id")
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, label, created_at_ms, einsatztagebuch FROM kiosk_tokens ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(rows
         .iter()
         .map(|r| KioskTokenView {
             id: r.get("id"),
             label: r.get("label"),
             created_at_ms: r.get("created_at_ms"),
+            einsatztagebuch: r.get("einsatztagebuch"),
         })
         .collect())
 }
@@ -47,6 +63,17 @@ pub async fn delete(pool: &SqlitePool, id: i64) -> Result<bool, sqlx::Error> {
         .execute(pool)
         .await?;
     Ok(done.rows_affected() == 1)
+}
+
+/// Gibt es den Token, ob er ein Zugang der IUK-Suite ist.
+pub async fn einsatztagebuch_by_token(
+    pool: &SqlitePool,
+    secret: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar("SELECT einsatztagebuch FROM kiosk_tokens WHERE token_hash = ?")
+        .bind(token::hash(secret))
+        .fetch_optional(pool)
+        .await
 }
 
 pub async fn find_by_token(pool: &SqlitePool, secret: &str) -> Result<Option<i64>, sqlx::Error> {
