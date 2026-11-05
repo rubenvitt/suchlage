@@ -79,6 +79,11 @@ impl Deleter {
                 "Ein laufender Einsatz lässt sich nicht löschen".into(),
             ));
         }
+        if mission.etb_linked_at_ms.is_some() {
+            return Err(AppError::Unprocessable(
+                "Der Einsatz ist im Einsatztagebuch verknüpft und lässt sich nicht löschen".into(),
+            ));
+        }
         let flights = store::flights::of_mission(&self.pool, id).await?;
         ensure_ended(&flights)?;
         // Wie `store::missions::delete_rows`: Fotos des Einsatzes und Fotos seiner Flüge.

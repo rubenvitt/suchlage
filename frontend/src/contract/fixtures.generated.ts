@@ -1029,6 +1029,7 @@ export const missionList: Mission[] = [
     "closed_at_ms": null,
     "created_at_ms": 1792146400000,
     "created_by": "Gruppenführer I&K",
+    "etb_linked_at_ms": 1792149940000,
     "flugmappe_links": [
       {
         "aircraft_label": "Matrice 350 RTK",
@@ -1084,6 +1085,7 @@ export const missionList: Mission[] = [
     "closed_at_ms": null,
     "created_at_ms": 1792149400000,
     "created_by": "Erika Mustermann",
+    "etb_linked_at_ms": null,
     "flugmappe_links": [],
     "id": 4,
     "location": null,

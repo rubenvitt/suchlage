@@ -490,6 +490,7 @@ pub fn missions() -> Vec<Mission> {
                     released_at_ms: Some(T0 - 2_800_000),
                 },
             ],
+            etb_linked_at_ms: Some(T0 - 60_000),
         },
         Mission {
             id: 4,
@@ -503,6 +504,7 @@ pub fn missions() -> Vec<Mission> {
             sections: vec![section(6, "Abschnitt 1", T0 - 600_000, None)],
             origin: MissionOrigin::Web,
             flugmappe_links: vec![],
+            etb_linked_at_ms: None,
         },
     ]
 }

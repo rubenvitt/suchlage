@@ -98,6 +98,18 @@ impl MissionHub {
         Ok(mission)
     }
 
+    /// Ein Eintrag im Einsatztagebuch ist mit dem Einsatz verknüpft (IDA-359). Unter der
+    /// Schreibsperre, damit keine Löschung dazwischenfällt: Entweder ist der Einsatz danach
+    /// gesperrt, oder es gibt ihn nicht mehr.
+    pub async fn link_einsatztagebuch(&self, id: i64, now_ms: i64) -> Result<(), AppError> {
+        let _serial = self.writes.lock().await;
+        if !store::link_einsatztagebuch(&self.pool, id, now_ms).await? {
+            return Err(AppError::NotFound);
+        }
+        self.changed();
+        Ok(())
+    }
+
     pub async fn start(&self, id: i64, now_ms: i64) -> Result<Mission, AppError> {
         self.change_state(id, MissionState::Running, now_ms).await
     }

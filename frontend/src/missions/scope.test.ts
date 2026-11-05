@@ -13,6 +13,7 @@ const mission = (id: number, state: Mission['state']): Mission => ({
   sections: [],
   origin: 'web',
   flugmappe_links: [],
+  etb_linked_at_ms: null,
 });
 const m7 = mission(7, 'prepared');
 const running = mission(3, 'running');

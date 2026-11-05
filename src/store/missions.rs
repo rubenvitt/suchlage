@@ -76,6 +76,7 @@ async fn mission(pool: &SqlitePool, r: &sqlx::sqlite::SqliteRow) -> Result<Missi
             .into_iter()
             .map(LinkRow::view)
             .collect(),
+        etb_linked_at_ms: r.get("etb_linked_at_ms"),
     })
 }
 
@@ -84,7 +85,7 @@ macro_rules! select_missions {
     ($tail:literal) => {
         concat!(
             "SELECT id, name, location, state, created_by, created_at_ms, started_at_ms, closed_at_ms, \
-             origin FROM missions ",
+             origin, etb_linked_at_ms FROM missions ",
             $tail
         )
     };
@@ -256,6 +257,23 @@ pub async fn update(pool: &SqlitePool, id: i64, u: &MissionUpdate) -> Result<boo
         .bind(id)
         .execute(pool)
         .await?;
+    Ok(done.rows_affected() == 1)
+}
+
+/// Merkt die Verknüpfung mit dem Einsatztagebuch; eine schon gesetzte bleibt mit ihrer Zeit.
+/// `false`, wenn es den Einsatz nicht gibt.
+pub async fn link_einsatztagebuch(
+    pool: &SqlitePool,
+    id: i64,
+    now_ms: i64,
+) -> Result<bool, sqlx::Error> {
+    let done = sqlx::query(
+        "UPDATE missions SET etb_linked_at_ms = COALESCE(etb_linked_at_ms, ?) WHERE id = ?",
+    )
+    .bind(now_ms)
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(done.rows_affected() == 1)
 }
 
@@ -1223,6 +1241,7 @@ mod tests {
             include_str!("../../migrations/0005_flugmappe.sql"),
             include_str!("../../migrations/0006_account_block.sql"),
             include_str!("../../migrations/0007_flugmappe_links.sql"),
+            include_str!("../../migrations/0008_einsatztagebuch_link.sql"),
         ];
         for sql in &all[..last] {
             sqlx::raw_sql(sqlx::AssertSqlSafe(*sql))

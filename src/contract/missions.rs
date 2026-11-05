@@ -86,6 +86,10 @@ pub struct Mission {
     /// Verknüpfte Flugmappen, älteste zuerst, auch gelöste. Ohne nicht gelöste legt Suchlage
     /// auch Abschnitte an.
     pub flugmappe_links: Vec<FlugmappeLink>,
+    /// Seit wann ein Eintrag im Einsatztagebuch der IUK-Suite mit dem Einsatz verknüpft ist. Dann
+    /// lässt er sich nicht mehr löschen.
+    #[ts(type = "number | null")]
+    pub etb_linked_at_ms: Option<i64>,
 }
 
 impl Mission {

@@ -203,6 +203,14 @@ test('Archiv: Löschen nennt die Mengen und verlangt den Namen', async () => {
   expect(missions.map((m) => m.id)).toEqual([1]);
 });
 
+test('Archiv: im Einsatztagebuch verknüpft, auch die Verwaltung löscht nicht', async () => {
+  asAdmin();
+  show('/?einsatz=5', [running, { ...closed, etb_linked_at_ms: 1792160000000 }]);
+  const head = await screen.findByText(/^Archiv:/);
+  expect(head.parentElement).toHaveTextContent('· im Einsatztagebuch');
+  expect(screen.queryByRole('button', { name: 'Löschen …' })).not.toBeInTheDocument();
+});
+
 test('Löschen: Einzahl und Fehler des Servers', async () => {
   asAdmin();
   show('/?einsatz=5', [running, closed]);

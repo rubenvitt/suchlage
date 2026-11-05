@@ -41,6 +41,7 @@ export const missionFixtures = (): Mission[] => [
     ],
     origin: 'web',
     flugmappe_links: [],
+    etb_linked_at_ms: null,
   },
   {
     id: 2,
@@ -54,6 +55,7 @@ export const missionFixtures = (): Mission[] => [
     sections: [],
     origin: 'web',
     flugmappe_links: [],
+    etb_linked_at_ms: null,
   },
 ];
 
@@ -77,6 +79,7 @@ export const missionHandlers = (initial: Mission[] = missionFixtures()) => {
         sections: [],
         origin: 'web',
         flugmappe_links: [],
+        etb_linked_at_ms: null,
       };
       missions.push(created);
       return HttpResponse.json(created);

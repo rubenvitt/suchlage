@@ -1,12 +1,14 @@
 //! Schnittstelle für das Einsatztagebuch der IUK-Suite (`/api/einsatztagebuch/v1`). Angemeldet
 //! wird wie beim Lagemonitor mit einem Großbild-Token als `Authorization: Bearer …`: Der Server der
-//! Suite fragt selbst und reicht die Liste an die Rechner des Einsatztagebuchs weiter. Nur lesen,
-//! kein CORS.
+//! Suite fragt selbst und reicht die Liste an die Rechner des Einsatztagebuchs weiter. Schreiben
+//! darf sie nur eines: dass ein Eintrag mit einem Einsatz verknüpft ist (`POST
+//! /einsaetze/{id}/verknuepfung`). Der Einsatz ist dann gesperrt. Kein CORS.
 
-use axum::extract::{FromRef, FromRequestParts, Query, State};
+use axum::extract::{FromRef, FromRequestParts, Path, Query, State};
+use axum::http::StatusCode;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use sqlx::SqlitePool;
@@ -23,7 +25,9 @@ use crate::time::now_ms;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/einsaetze", get(einsaetze))
+    Router::new()
+        .route("/einsaetze", get(einsaetze))
+        .route("/einsaetze/{id}/verknuepfung", post(verknuepfung))
 }
 
 /// Ein gültiger Großbild-Token. Widerrufen wirkt sofort, denn jede Anfrage prüft neu.
@@ -57,10 +61,12 @@ pub struct EinsaetzeQuery {
 
 /// Laufende und seit `since_ms` abgeschlossene Einsätze; laufende zuerst, dann zuletzt beendete
 /// zuerst. Vorbereitete fehlen: Sie liefen nie, im Einsatztagebuch gibt es nichts zu verknüpfen.
-/// Aus demselben Grund fehlt ein Einsatz, der ohne Start geschlossen wurde.
+/// Aus demselben Grund fehlt ein Einsatz, der ohne Start geschlossen wurde. Ein schon verknüpfter
+/// fehlt auch: Jeder Einsatz gehört zu höchstens einem Eintrag.
 pub fn selectable(missions: Vec<Mission>, since_ms: i64) -> Vec<EtbMission> {
     let mut out: Vec<EtbMission> = missions
         .into_iter()
+        .filter(|m| m.etb_linked_at_ms.is_none())
         .filter(|m| match m.state {
             MissionState::Running => true,
             MissionState::Closed => {
@@ -102,6 +108,17 @@ async fn einsaetze(
         server_time_ms: now,
         missions,
     }))
+}
+
+/// Ein versiegelter Eintrag im Einsatztagebuch nennt diesen Einsatz. Wiederholbar: Die Suite meldet,
+/// bis Suchlage einmal bestätigt hat.
+async fn verknuepfung(
+    _: EinsatztagebuchClient,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    state.missions.link_einsatztagebuch(id, now_ms()).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
@@ -238,6 +255,75 @@ mod tests {
             1,
             "gestern liegt vor einem Tag"
         );
+    }
+
+    fn post_bearer(token: &str, path: &str) -> Request<axum::body::Body> {
+        let mut req = bearer(token, path);
+        *req.method_mut() = axum::http::Method::POST;
+        req
+    }
+
+    #[tokio::test]
+    async fn a_linked_mission_is_not_offered_again_and_cannot_be_deleted() {
+        let app = test_app().await;
+        let (_, secret) = store::kiosk::create(&app.state.pool, "Suite", 0)
+            .await
+            .unwrap();
+        let m = app
+            .state
+            .missions
+            .create(
+                MissionCreate {
+                    name: "Verknüpft".into(),
+                    location: None,
+                },
+                "T",
+                1,
+            )
+            .await
+            .unwrap();
+        let now = now_ms();
+        app.state.missions.start(m.id, now - 2000).await.unwrap();
+        app.state.missions.close(m.id, now - 1000).await.unwrap();
+        let link = format!("{PATH}/{}/verknuepfung", m.id);
+
+        assert_eq!(
+            send(&app.router, post_bearer("falsch", &link)).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            send(
+                &app.router,
+                post_bearer(&secret, &format!("{PATH}/999/verknuepfung"))
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            send(&app.router, post_bearer(&secret, &link)).await.0,
+            StatusCode::NO_CONTENT
+        );
+        let erste = app.state.missions.get(m.id).await.unwrap().etb_linked_at_ms;
+        assert!(erste.is_some());
+        assert_eq!(
+            send(&app.router, post_bearer(&secret, &link)).await.0,
+            StatusCode::NO_CONTENT,
+            "wiederholbar"
+        );
+        assert_eq!(
+            app.state.missions.get(m.id).await.unwrap().etb_linked_at_ms,
+            erste,
+            "die erste Zeit bleibt"
+        );
+
+        let (_, json) = send(&app.router, bearer(&secret, PATH)).await;
+        assert_eq!(json["missions"].as_array().unwrap().len(), 0);
+        assert!(matches!(
+            app.state.deleter.delete_mission(m.id).await,
+            Err(AppError::Unprocessable(_))
+        ));
+        assert!(app.state.missions.get(m.id).await.is_ok());
     }
 
     #[tokio::test]

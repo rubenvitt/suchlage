@@ -110,7 +110,10 @@ function Without({ running }: { running: boolean }) {
   );
 }
 
-/** „Löschen …“ mit Rückfrage, nur für die Verwaltung (vorbereitete und abgeschlossene Einsätze). */
+/**
+ * „Löschen …“ mit Rückfrage, nur für die Verwaltung (vorbereitete und abgeschlossene Einsätze).
+ * Ein im Einsatztagebuch verknüpfter Einsatz bleibt (IDA-359); verknüpft wird nur ein gelaufener.
+ */
 function DeleteAction({ mission }: { mission: Mission }) {
   const [deleting, setDeleting] = useState(false);
   return (
@@ -156,7 +159,11 @@ function Archived({ mission, admin }: { mission: Mission; admin: boolean }) {
       <span>Archiv:</span> <strong>{mission.name}</strong> <span>· abgeschlossen</span>
       <FlugmappeShort mission={mission} />
       <Link to={`/flights?einsatz=${mission.id}`}>Flüge</Link>
-      {admin && <DeleteAction mission={mission} />}
+      {mission.etb_linked_at_ms !== null ? (
+        <span>· im Einsatztagebuch</span>
+      ) : (
+        admin && <DeleteAction mission={mission} />
+      )}
       <Link to="/einsaetze">Zurück</Link>
     </div>
   );

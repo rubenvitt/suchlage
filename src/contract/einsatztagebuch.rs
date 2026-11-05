@@ -1,9 +1,11 @@
-//! Schnittstelle für das Einsatztagebuch der IUK-Suite (`/api/einsatztagebuch/v1`). Nur lesen,
-//! angemeldet mit einem Großbild-Token als `Authorization: Bearer …`. Felder `snake_case`, Zeiten
-//! in ms seit Epoch.
+//! Schnittstelle für das Einsatztagebuch der IUK-Suite (`/api/einsatztagebuch/v1`), angemeldet mit
+//! einem Großbild-Token als `Authorization: Bearer …`. Felder `snake_case`, Zeiten in ms seit Epoch.
 //!
 //! Das Einsatztagebuch wird immer nach dem Einsatz ausgefüllt. Deshalb nennt die Liste neben dem
 //! laufenden Einsatz auch die kürzlich abgeschlossenen; vorbereitete fehlen, sie liefen nie.
+//!
+//! `POST /einsaetze/{id}/verknuepfung` (ohne Körper, 204) meldet einen versiegelten Eintrag, der
+//! den Einsatz nennt. Der Einsatz fehlt danach in der Liste und lässt sich nicht mehr löschen.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
