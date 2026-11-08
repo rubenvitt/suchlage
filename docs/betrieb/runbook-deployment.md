@@ -148,7 +148,8 @@ ssh <host> /srv/suchlage/deploy/broker-init.sh
 ```
 
 Das Skript gibt das Passwort für `suchlage-admin` **genau einmal** aus. Notieren und in Schritt 8
-eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts.
+eintragen, sonst nirgends speichern. Ein zweiter Aufruf ändert nichts; neue Zugänge gibt es unter
+„Geheimnisse erneuern“ (Abschnitt *Betrieb*).
 
 Danach den Fotospeicher (M3):
 
@@ -532,6 +533,65 @@ von selbst.
 **Broker neu aufbauen.** Ist `mqtt-data` verloren, Schritt 5 wiederholen und das neue Passwort
 unter *Einstellungen → Broker* eintragen. Die Zugänge der Fernsteuerungen legt der Server beim
 nächsten Koppeln wieder an.
+
+**Geheimnisse erneuern.** Die Datenbank hält einige Geheimnisse im Klartext (ADR 0004). Wird sie
+bekannt, etwa als kopiertes Volume oder als Sicherung samt privatem `age`-Schlüssel, erneuerst du alle
+Geheimnisse in dieser Reihenfolge. Was Suchlage nur als Hash hält (Sitzungen, Großbild-Zugänge,
+Kopplungscodes, API-Tokens der Fernsteuerungen), musst du nicht erneuern. Nicht während eines Flugs:
+Von Schritt 1 bis Schritt 7 gibt es kein Livebild, keine Telemetrie und keine Fotos. Die Oberfläche
+bleibt erreichbar, angemeldete Konten bleiben angemeldet.
+
+1. **Fernsteuerungen löschen.** *Einstellungen → Fernsteuerungen*, jede Fernsteuerung löschen. Der
+   Server widerruft dabei ihren Zugang am Broker, MQTT-Passwort und Stream-Schlüssel fallen mit dem
+   Eintrag weg. Das geht nur, solange der Broker verbunden ist, deshalb vor Schritt 2.
+2. **Broker.** Baut die Zugänge des Brokers neu auf und gibt das neue Passwort von `suchlage-admin`
+   genau einmal aus. Danach gilt kein alter Zugang mehr, auch keiner, den jemand mit dem alten
+   Passwort zusätzlich angelegt hat:
+
+   ```sh
+   ssh <host> /srv/suchlage/deploy/broker-erneuern.sh --ja
+   ```
+
+   Das Passwort unter *Einstellungen → Broker* als Admin-Passwort eintragen. Der Server verbindet sich
+   damit neu, unter *System* steht der Broker wieder auf „verbunden“.
+3. **Fotospeicher.** Erneuert das RPC-Geheimnis von Garage, löscht alle S3-Schlüssel und
+   Admin-Tokens (auch fremde) und legt Server-Schlüssel und Admin-Token neu an. Buckets und Fotos
+   bleiben:
+
+   ```sh
+   ssh <host> /srv/suchlage/deploy/fotos-erneuern.sh --ja
+   ```
+
+   Schlüssel-ID, geheimen Schlüssel und Admin-Token unter *Einstellungen → Fotospeicher* eintragen,
+   die Adressen bleiben. Bis dahin zeigt Suchlage keine Fotos.
+4. **Anmeldung (Pocket ID).** In Pocket ID unter *OIDC Clients → Suchlage* bei den Client-Secrets
+   *Generate secret…* wählen. Das neue Secret unter *Einstellungen → Anmeldung* als Client-Secret
+   eintragen und in einem privaten Fenster einmal anmelden. Gelingt das, in Pocket ID das alte Secret
+   löschen (die ersten vier Zeichen stehen in der Liste). Eine ältere Pocket ID kennt nur ein Secret,
+   dort heißt der Knopf *Create new client secret* und das alte gilt sofort nicht mehr; Anmeldungen
+   scheitern dann, bis das neue in Suchlage steht.
+5. **DJI.** Im Entwicklerportal (`developer.dji.com`, *Apps*) für die App von Suchlage einen neuen
+   App-Key erzeugen, falls das Portal das anbietet. Sonst eine neue App vom Typ *Cloud API* anlegen,
+   die Aktivierungsmail bestätigen und die alte App löschen. App-ID, App-Key und Lizenz in 1Password
+   (Item „DJI Cloud API – Suchlage“) und unter *Einstellungen → DJI* ersetzen. Die Workspace-ID
+   bleibt, sonst kennt Pilot 2 die Kartenelemente nicht mehr. Pilot 2 holt die Lizenz bei jedem
+   Öffnen der Cloud-Seite neu; allein dafür muss keine Fernsteuerung neu koppeln.
+6. **Internes MediaMTX-Geheimnis.** Es entsteht bei jedem Start des Servers neu und steht nicht in
+   der Datenbank (seit SUL-108; das Update darauf löscht den alten Wert). Ein Neustart genügt:
+
+   ```sh
+   ssh <host> 'cd /srv/suchlage/deploy && docker compose -f compose.m1.yaml restart server'
+   ```
+
+7. **Fernsteuerungen neu koppeln** wie in Schritt 9. Jede bekommt einen neuen Kopplungscode, ein
+   neues MQTT-Passwort, einen neuen Stream-Schlüssel und einen neuen API-Token.
+8. **Sicherung.** Danach eine neue Sicherung anlegen. Die alten enthalten nur noch ungültige
+   Geheimnisse, aber weiter Konten, Einsätze und Flugspuren. War der private `age`-Schlüssel betroffen,
+   einen neuen erzeugen wie unter „Sicherung“ beschrieben, `backup-empfaenger.txt` ersetzen und
+   die mit dem alten Schlüssel verschlüsselten Archive löschen.
+
+Am Ende unter *System* prüfen: Broker „verbunden“, nach dem Koppeln die Fernsteuerung mit Livebild,
+ein Testfoto kommt an (`docs/betrieb/m3-realflug-checkliste.md`).
 
 **Fehlersuche.**
 
