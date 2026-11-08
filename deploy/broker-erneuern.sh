@@ -17,6 +17,11 @@ cd "$(dirname "$0")"
 }
 DC="docker compose -f compose.m1.yaml"
 
+# Bricht ein Schritt ab, bleibt der Broker bewusst gestoppt: Ein Start mit der alten Datei ließe die
+# alten Zugänge wieder gelten, ohne Datei startet er nicht (entrypoint.sh). Ein zweiter Lauf setzt
+# an jeder Stelle wieder auf.
+trap '[ $? -eq 0 ] || echo "Abgebrochen, der Broker bleibt gestoppt. Fehler beheben und broker-erneuern.sh --ja erneut ausführen." >&2' EXIT
+
 # Gestoppt, damit der Broker die alte Datei nicht beim nächsten Befehl aus dem Speicher zurückschreibt.
 $DC stop mqtt
 # Das Volume trägt nur diese Datei (persistence false); broker-init.sh legt sie neu an.

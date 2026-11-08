@@ -41,14 +41,20 @@ for b in "$BUCKET" "$INBOX"; do
   g bucket info "$b" >/dev/null 2>&1 || { echo "Bucket $b fehlt – erst fotos-init.sh ausführen" >&2; exit 1; }
 done
 
-# IDs aus der ersten Spalte; Kopfzeile und Leerzeilen fallen am Muster heraus.
-for id in $(g key list | awk '$1 ~ /^GK[0-9a-f]+$/ { print $1 }'); do
+# Jede Liste erst in eine Variable: In einer Pipeline zählte nur der Status von awk, und eine
+# gescheiterte Liste sähe aus wie eine leere. IDs aus der ersten Spalte; die Kopfzeile fällt am
+# Muster heraus.
+keys=$(g key list)
+for id in $(printf '%s\n' "$keys" | awk '$1 ~ /^GK[0-9a-f]+$/ { print $1 }'); do
   g key delete --yes "$id" >/dev/null
 done
-for id in $(g admin-token list | awk 'NR > 1 && $1 ~ /^[0-9a-f]+$/ { print $1 }'); do
+tokens=$(g admin-token list)
+for id in $(printf '%s\n' "$tokens" | awk 'NR > 1 && $1 ~ /^[0-9a-f]+$/ { print $1 }'); do
   g admin-token delete --yes "$id" >/dev/null
 done
-rest=$(g key list | awk '$1 ~ /^GK/' ; g admin-token list | awk 'NR > 1 && NF')
+keys=$(g key list)
+tokens=$(g admin-token list)
+rest=$(printf '%s\n' "$keys" | awk '$1 ~ /^GK/'; printf '%s\n' "$tokens" | awk 'NR > 1 && NF')
 [ -z "$rest" ] || { printf 'Nicht alles gelöscht:\n%s\n' "$rest" >&2; exit 1; }
 
 echo "== Server-Schlüssel (Key ID und Secret key in Suchlage eintragen) =="
