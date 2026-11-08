@@ -67,7 +67,8 @@ pub struct Settings {
     /// Schnittstelle für die Flugmappe (SUL-66); ohne sie ist sie aus.
     pub flugmappe: Option<FlugmappeSettings>,
     pub general: GeneralSettings,
-    /// Geheimnis des internen MediaMTX-Lesers (ADR 0003); beim ersten Start erzeugt.
+    /// Geheimnis des internen MediaMTX-Lesers (ADR 0003). Bei jedem Start neu und nur im Speicher:
+    /// Nur dieser Prozess prüft und benutzt es, ein Neustart erneuert es (ADR 0004, SUL-108).
     pub internal_secret: String,
 }
 
@@ -230,15 +231,7 @@ pub fn validate_oidc(input: &OidcSettingsInput) -> Result<(), AppError> {
 
 impl SettingsHandle {
     pub async fn load(pool: SqlitePool) -> Result<Self, sqlx::Error> {
-        let internal_secret = match store::settings::get::<String>(&pool, "internal_secret").await?
-        {
-            Some(s) => s,
-            None => {
-                let s = crate::token::generate();
-                store::settings::put(&pool, "internal_secret", &s, now_ms()).await?;
-                s
-            }
-        };
+        let internal_secret = crate::token::generate();
         let settings = Settings {
             oidc: store::settings::get(&pool, "oidc").await?,
             dji: store::settings::get(&pool, "dji").await?,
@@ -485,7 +478,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_survive_a_reload_and_internal_secret_is_stable() {
+    async fn settings_survive_a_reload_and_internal_secret_is_renewed() {
         let pool = crate::db::test_pool().await;
         let h = SettingsHandle::load(pool.clone()).await.unwrap();
         assert_eq!(h.current().general, default_general());
@@ -505,7 +498,12 @@ mod tests {
             "http://media:8889",
             "ohne Schrägstrich am Ende"
         );
-        assert_eq!(again.current().internal_secret, secret);
+        assert_ne!(again.current().internal_secret, secret);
+        assert_eq!(again.current().internal_secret.len(), 64);
+        let stored: Option<String> = store::settings::get(&again.pool, "internal_secret")
+            .await
+            .unwrap();
+        assert_eq!(stored, None, "nie in der DB (ADR 0004)");
     }
 
     #[tokio::test]
