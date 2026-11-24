@@ -9,25 +9,28 @@ pub async fn create(
     label: &str,
     now_ms: i64,
 ) -> Result<(KioskTokenView, String), sqlx::Error> {
-    create_with(pool, label, false, now_ms).await
+    create_with(pool, label, false, false, now_ms).await
 }
 
-/// Wie [`create`]; `einsatztagebuch` macht ihn zum Zugang der IUK-Suite (IDA-359).
+/// Wie [`create`]; `einsatztagebuch` macht ihn zum Zugang der IUK-Suite (IDA-359), `photos` gibt
+/// ihm die Vorschaubilder des laufenden Einsatzes für Lifeline Hub (SUL-49).
 pub async fn create_with(
     pool: &SqlitePool,
     label: &str,
     einsatztagebuch: bool,
+    photos: bool,
     now_ms: i64,
 ) -> Result<(KioskTokenView, String), sqlx::Error> {
     let secret = token::generate();
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO kiosk_tokens (label, token_hash, created_at_ms, einsatztagebuch) \
-         VALUES (?, ?, ?, ?) RETURNING id",
+        "INSERT INTO kiosk_tokens (label, token_hash, created_at_ms, einsatztagebuch, photos) \
+         VALUES (?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(label)
     .bind(token::hash(&secret))
     .bind(now_ms)
     .bind(einsatztagebuch)
+    .bind(photos)
     .fetch_one(pool)
     .await?;
     let view = KioskTokenView {
@@ -35,13 +38,14 @@ pub async fn create_with(
         label: label.into(),
         created_at_ms: now_ms,
         einsatztagebuch,
+        photos,
     };
     Ok((view, secret))
 }
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<KioskTokenView>, sqlx::Error> {
     let rows = sqlx::query(
-        "SELECT id, label, created_at_ms, einsatztagebuch FROM kiosk_tokens ORDER BY id",
+        "SELECT id, label, created_at_ms, einsatztagebuch, photos FROM kiosk_tokens ORDER BY id",
     )
     .fetch_all(pool)
     .await?;
@@ -52,6 +56,7 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<KioskTokenView>, sqlx::Error>
             label: r.get("label"),
             created_at_ms: r.get("created_at_ms"),
             einsatztagebuch: r.get("einsatztagebuch"),
+            photos: r.get("photos"),
         })
         .collect())
 }
@@ -71,6 +76,14 @@ pub async fn einsatztagebuch_by_token(
     secret: &str,
 ) -> Result<Option<bool>, sqlx::Error> {
     sqlx::query_scalar("SELECT einsatztagebuch FROM kiosk_tokens WHERE token_hash = ?")
+        .bind(token::hash(secret))
+        .fetch_optional(pool)
+        .await
+}
+
+/// Gibt es den Token, ob er die Fotos des laufenden Einsatzes abrufen darf (Lifeline Hub).
+pub async fn photos_by_token(pool: &SqlitePool, secret: &str) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar("SELECT photos FROM kiosk_tokens WHERE token_hash = ?")
         .bind(token::hash(secret))
         .fetch_optional(pool)
         .await
@@ -108,5 +121,26 @@ mod tests {
         assert!(delete(&pool, view.id).await.unwrap());
         assert!(!delete(&pool, view.id).await.unwrap());
         assert!(list(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_photos_flag_is_off_unless_asked_for() {
+        let pool = test_pool().await;
+        let (plain, plain_secret) = create(&pool, "FüKw", 1).await.unwrap();
+        let (hub, hub_secret) = create_with(&pool, "Lifeline Hub", false, true, 2)
+            .await
+            .unwrap();
+        assert!(!plain.photos);
+        assert!(hub.photos);
+        assert_eq!(list(&pool).await.unwrap(), vec![plain, hub]);
+        assert_eq!(
+            photos_by_token(&pool, &plain_secret).await.unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            photos_by_token(&pool, &hub_secret).await.unwrap(),
+            Some(true)
+        );
+        assert_eq!(photos_by_token(&pool, "falsch").await.unwrap(), None);
     }
 }

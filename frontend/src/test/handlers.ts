@@ -269,9 +269,15 @@ export const handlersFor = (me: Me, missions: Mission[] = missionFixtures()) => 
     http.delete('/api/remote-controllers/:id', noContent),
     http.get('/api/kiosk-tokens', () => HttpResponse.json(fx.kioskTokens)),
     http.post('/api/kiosk-tokens', async ({ request }) => {
-      const { label, einsatztagebuch } = (await request.json()) as KioskTokenCreate;
+      const { label, einsatztagebuch, photos } = (await request.json()) as KioskTokenCreate;
       const created: KioskTokenCreated = {
-        token: { id: 2, label, created_at_ms: Date.now(), einsatztagebuch: einsatztagebuch ?? false },
+        token: {
+          id: 2,
+          label,
+          created_at_ms: Date.now(),
+          einsatztagebuch: einsatztagebuch ?? false,
+          photos: photos ?? false,
+        },
         url: 'https://suchlage.example.org/kiosk#vorschau',
       };
       return HttpResponse.json(created);

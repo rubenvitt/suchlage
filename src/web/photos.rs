@@ -65,6 +65,17 @@ async fn thumb(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
+    // Ein Vorschaubild ändert sich nie; nur die Sitzung entscheidet, wer es sieht.
+    serve_thumb(&state, id, "private, max-age=86400, immutable").await
+}
+
+/// Das fertige Vorschaubild eines Fotos als JPEG, sonst 404. Auch für Lifeline Hub
+/// (`/api/lagemonitor/v1/photos/{id}/thumb`), dort mit kürzerer Cache-Dauer.
+pub async fn serve_thumb(
+    state: &AppState,
+    id: i64,
+    cache_control: &'static str,
+) -> Result<Response, AppError> {
     // Ein Job kann nach dem Löschen noch eine Datei schreiben, auch für eine neu vergebene ID; die
     // gilt erst, wenn der Job dieser Zeile sie als fertig markiert hat.
     if !state.photos.thumb_ready(id).await? {
@@ -77,8 +88,7 @@ async fn thumb(
     };
     Response::builder()
         .header(header::CONTENT_TYPE, "image/jpeg")
-        // Ein Vorschaubild ändert sich nie; nur die Sitzung entscheidet, wer es sieht.
-        .header(header::CACHE_CONTROL, "private, max-age=86400, immutable")
+        .header(header::CACHE_CONTROL, cache_control)
         .body(Body::from(bytes))
         .map_err(|e| AppError::Internal(e.to_string()))
 }

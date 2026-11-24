@@ -5,4 +5,8 @@ export type KioskTokenCreate = { label: string,
  * Zugang der IUK-Suite (siehe [`KioskTokenView::einsatztagebuch`]); fehlt er, ein reiner
  * Anzeige-Zugang.
  */
-einsatztagebuch?: boolean, };
+einsatztagebuch?: boolean, 
+/**
+ * Fotos für Lifeline Hub (siehe [`KioskTokenView::photos`]); fehlt er, keine Fotos.
+ */
+photos?: boolean, };

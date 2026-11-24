@@ -103,8 +103,9 @@ async fn create_kiosk(
         return Err(AppError::Validation("Bezeichnung: 1 bis 80 Zeichen".into()));
     }
     let einsatztagebuch = body.einsatztagebuch.unwrap_or(false);
+    let photos = body.photos.unwrap_or(false);
     let (token, secret) =
-        store::kiosk::create_with(&state.pool, label, einsatztagebuch, now_ms()).await?;
+        store::kiosk::create_with(&state.pool, label, einsatztagebuch, photos, now_ms()).await?;
     let url = format!(
         "{}/kiosk#{secret}",
         state.boot.public_url.as_str().trim_end_matches('/')
@@ -397,6 +398,15 @@ mod tests {
         let (status, created) = send(&app.router, with_cookie(req, &admin)).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(created["token"]["label"], "ELW 1", "Bezeichnung ohne Rand");
+        assert_eq!(created["token"]["photos"], false, "Fotos nur auf Wunsch");
+        let req = post_json(
+            "/api/kiosk-tokens",
+            serde_json::json!({ "label": "Lifeline Hub", "photos": true }),
+        );
+        let (status, hub) = send(&app.router, with_cookie(req, &admin)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(hub["token"]["photos"], true);
+        assert_eq!(hub["token"]["einsatztagebuch"], false);
         assert!(
             created["url"]
                 .as_str()

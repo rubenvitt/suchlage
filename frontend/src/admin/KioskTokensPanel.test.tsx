@@ -9,7 +9,7 @@ import { KioskTokensPanel } from './KioskTokensPanel';
 test('neuer Großbild-Zugang zeigt den Link einmal, Widerrufen löscht den Zugang', async () => {
   const url = 'https://suchlage.example.org/kiosk#neuertoken';
   const created: KioskTokenCreated = {
-    token: { id: 2, label: 'Lagezelt', created_at_ms: 1792150000000, einsatztagebuch: false },
+    token: { id: 2, label: 'Lagezelt', created_at_ms: 1792150000000, einsatztagebuch: false, photos: false },
     url,
   };
   let deleted: string | undefined;
@@ -38,7 +38,7 @@ test('ein Zugang für die IUK-Suite schickt den Haken mit', async () => {
     http.post('/api/kiosk-tokens', async ({ request }) => {
       body = await request.json();
       return HttpResponse.json({
-        token: { id: 2, label: 'Suite', created_at_ms: 1792150000000, einsatztagebuch: true },
+        token: { id: 2, label: 'Suite', created_at_ms: 1792150000000, einsatztagebuch: true, photos: false },
         url: 'https://suchlage.example.org/kiosk#suite',
       } satisfies KioskTokenCreated);
     }),
@@ -50,4 +50,29 @@ test('ein Zugang für die IUK-Suite schickt den Haken mit', async () => {
   await userEvent.click(screen.getByRole('checkbox', { name: 'Für die IUK-Suite (Einsatztagebuch)' }));
   await userEvent.click(screen.getByRole('button', { name: 'Großbild-Zugang erzeugen' }));
   await vi.waitFor(() => expect(body).toEqual({ label: 'Suite', einsatztagebuch: true }));
+});
+
+test('ein Zugang für Lifeline Hub schickt den Foto-Haken mit und ist in der Liste erkennbar', async () => {
+  let body: unknown;
+  const hub: KioskTokenCreated = {
+    token: { id: 2, label: 'Lifeline Hub', created_at_ms: 1792150000000, einsatztagebuch: false, photos: true },
+    url: 'https://suchlage.example.org/kiosk#hub',
+  };
+  let tokens = [{ id: 1, label: 'FüKw Großbild', created_at_ms: 1792150000000, einsatztagebuch: false, photos: false }];
+  server.use(
+    http.get('/api/kiosk-tokens', () => HttpResponse.json(tokens)),
+    http.post('/api/kiosk-tokens', async ({ request }) => {
+      body = await request.json();
+      tokens = [...tokens, hub.token];
+      return HttpResponse.json(hub);
+    }),
+  );
+  renderWithApp(<KioskTokensPanel />);
+  await screen.findByText('FüKw Großbild');
+  expect(screen.queryByText('Fotos für Lifeline Hub', { selector: '.ant-tag' })).not.toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText('Bezeichnung'), 'Lifeline Hub');
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Fotos für Lifeline Hub' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Großbild-Zugang erzeugen' }));
+  await vi.waitFor(() => expect(body).toEqual({ label: 'Lifeline Hub', photos: true }));
+  expect(await screen.findByText('Fotos für Lifeline Hub', { selector: '.ant-tag' })).toBeInTheDocument();
 });

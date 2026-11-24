@@ -4,4 +4,8 @@ export type KioskTokenView = { id: number, label: string, created_at_ms: number,
 /**
  * Zugang der IUK-Suite: darf Einsätze für das Einsatztagebuch sperren (IDA-359).
  */
-einsatztagebuch: boolean, };
+einsatztagebuch: boolean, 
+/**
+ * Zugang für Lifeline Hub: darf die Vorschaubilder des laufenden Einsatzes abrufen (SUL-49).
+ */
+photos: boolean, };
