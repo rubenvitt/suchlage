@@ -78,10 +78,10 @@ pub async fn serve_thumb(
 ) -> Result<Response, AppError> {
     // Ein Job kann nach dem Löschen noch eine Datei schreiben, auch für eine neu vergebene ID; die
     // gilt erst, wenn der Job dieser Zeile sie als fertig markiert hat.
-    if !state.photos.thumb_ready(id).await? {
+    let Some(path) = state.photos.ready_thumb_path(id).await? else {
         return Err(AppError::NotFound);
-    }
-    let bytes = match tokio::fs::read(state.photos.thumb_path(id)).await {
+    };
+    let bytes = match tokio::fs::read(&path).await {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(AppError::NotFound),
         Err(e) => return Err(AppError::Internal(format!("Vorschaubild {id}: {e}"))),

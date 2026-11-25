@@ -217,12 +217,13 @@ impl PhotoHub {
         Ok(())
     }
 
-    /// Hat das Foto ein fertiges Vorschaubild? `NotFound` ohne Foto.
-    pub async fn thumb_ready(&self, id: i64) -> Result<bool, AppError> {
-        Ok(store::get(&self.pool, id)
+    /// Pfad des fertigen Vorschaubilds, `None` solange es nicht fertig ist, `NotFound` ohne Foto.
+    /// Der Dateiname kommt aus der gespeicherten Zeile, nie aus der Anfrage.
+    pub async fn ready_thumb_path(&self, id: i64) -> Result<Option<PathBuf>, AppError> {
+        let photo = store::get(&self.pool, id)
             .await?
-            .ok_or(AppError::NotFound)?
-            .thumb_ready)
+            .ok_or(AppError::NotFound)?;
+        Ok(photo.thumb_ready.then(|| self.thumb_path(photo.id)))
     }
 
     /// Objektschlüssel und Name eines Fotos für den Download.
