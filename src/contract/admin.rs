@@ -239,6 +239,8 @@ pub struct KioskTokenView {
     pub created_at_ms: i64,
     /// Zugang der IUK-Suite: darf Einsätze für das Einsatztagebuch sperren (IDA-359).
     pub einsatztagebuch: bool,
+    /// Zugang für Lifeline Hub: darf die Vorschaubilder des laufenden Einsatzes abrufen (SUL-49).
+    pub photos: bool,
 }
 
 /// Ein Konto aus Pocket ID, wie es die Verwaltung sieht. Die Rolle kommt bei jeder Anmeldung aus
@@ -269,6 +271,10 @@ pub struct KioskTokenCreate {
     #[serde(default)]
     #[ts(optional)]
     pub einsatztagebuch: Option<bool>,
+    /// Fotos für Lifeline Hub (siehe [`KioskTokenView::photos`]); fehlt er, keine Fotos.
+    #[serde(default)]
+    #[ts(optional)]
+    pub photos: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

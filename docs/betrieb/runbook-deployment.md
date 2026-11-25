@@ -322,6 +322,17 @@ wirkt beim nächsten Abruf (alle 5 s).
 curl -s -H "Authorization: Bearer <Teil hinter #>" https://suchlage.iuk-ue.de/api/lagemonitor/v1/lage | jq .mission
 ```
 
+**Lifeline Hub** bekommt Lage, Livebild und zusätzlich die Fotos des laufenden Einsatzes: einen
+eigenen Zugang „Lifeline Hub“ mit dem Häkchen **Fotos für Lifeline Hub** anlegen (in der Liste dann
+mit diesem Schild markiert) und den Teil hinter `#` in Lifeline Hub unter *Anbindungen → Suchlage*
+als Token eintragen. Es gehen nur Vorschaubilder (640 px, ohne EXIF) des laufenden Einsatzes hinaus,
+nie Originale. Ein Zugang ohne Häkchen bekommt auf `/photos` 403; nach dem Widerruf fehlen die Fotos
+beim nächsten Abruf.
+
+```sh
+curl -s --compressed -H "Authorization: Bearer <Teil hinter #>" https://suchlage.iuk-ue.de/api/lagemonitor/v1/photos | jq 'length'
+```
+
 ## 11. Flugmappe verknüpfen (optional)
 
 Die Flugmappe (`uav.iuk-ue.de`) legt über `/api/flugmappe/v2/…` Einsätze in Suchlage an, verknüpft

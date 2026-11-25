@@ -195,6 +195,23 @@ pub async fn in_mission(pool: &SqlitePool, mission: i64) -> Result<Vec<PhotoRow>
     Ok(rows.iter().map(row).collect())
 }
 
+/// Zeit der jüngsten Auslösung eines Einsatzes mit Position und mindestens einem fertigen
+/// Vorschaubild, wie sie `rules::shots` bildet (früheste Datei der Auslösung).
+pub async fn latest_shot_with_thumb(
+    pool: &SqlitePool,
+    mission: i64,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT MAX(t) FROM (SELECT MIN(COALESCE(taken_at_ms, uploaded_at_ms)) AS t FROM photos \
+         WHERE mission_id = ? GROUP BY shot_key \
+         HAVING MAX(thumb_ready) = 1 \
+         AND MAX(lat IS NOT NULL AND lon IS NOT NULL AND NOT (lat = 0 AND lon = 0)) = 1)",
+    )
+    .bind(mission)
+    .fetch_one(pool)
+    .await
+}
+
 /// Fotos ohne Einsatz mit Aufnahme- oder Uploadzeit ab `since_ms`, neueste zuerst.
 pub async fn since_unassigned(
     pool: &SqlitePool,

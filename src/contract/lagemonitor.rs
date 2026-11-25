@@ -9,6 +9,7 @@ use ts_rs::TS;
 
 use super::flugmappe::FmFeatureCollection;
 use super::live::GeoPoint;
+use super::photos::PhotoLens;
 
 /// Version der Schnittstelle, steht im Pfad (`/v1`) und in [`LmLage`].
 pub const LAGEMONITOR_API_VERSION: u32 = 1;
@@ -71,4 +72,38 @@ pub struct LmLage {
     pub map_etag: Option<String>,
     pub aircraft: Vec<LmAircraft>,
     pub videos: Vec<LmVideo>,
+    /// Zeit der jüngsten Auslösung des laufenden Einsatzes, die `GET /photos` liefert. Nur für
+    /// einen Zugang mit Fotos (Lifeline Hub), sonst `null`. Ändert sie sich, lohnt ein neuer Abruf.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub photos_latest_ms: Option<i64>,
+}
+
+/// Eine Datei einer Auslösung, nur als Vorschaubild (640 px, neu kodiert, ohne EXIF).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LmPhoto {
+    pub lens: PhotoLens,
+    /// Pfad auf diesem Server, z. B. `/api/lagemonitor/v1/photos/17/thumb?v=…`; abrufen mit
+    /// demselben Bearer-Token.
+    pub thumb_url: String,
+}
+
+/// `GET /photos`: eine Auslösung des laufenden Einsatzes mit Position und fertigem Vorschaubild.
+/// Seriennummern von Fluggerät und Fernsteuerung fehlen mit Absicht.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LmPhotoShot {
+    /// Kleinste Foto-ID der Auslösung; bleibt gleich, wenn weitere Linsen dazukommen.
+    #[ts(type = "number")]
+    pub id: i64,
+    /// Aufnahmezeit, sonst die Zeit des Uploads.
+    #[ts(type = "number")]
+    pub taken_at_ms: i64,
+    pub position: GeoPoint,
+    /// Höhe über dem Startpunkt laut Pilot 2.
+    pub relative_altitude_m: Option<f64>,
+    pub gimbal_yaw_deg: Option<f64>,
+    /// Wärmebild zuerst, dann Weit, Zoom, sichtbar, unbekannt; nur Linsen mit Vorschaubild.
+    pub photos: Vec<LmPhoto>,
 }

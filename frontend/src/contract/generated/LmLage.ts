@@ -17,4 +17,9 @@ map?: FmFeatureCollection,
  * Fassung von `map`, auch wenn sie fehlt. Zurück als `?karte=<map_etag>` kommt die Karte nur
  * bei einer Änderung; `?karte=aus` lässt sie ganz weg. Ohne `karte` kommt sie wie immer.
  */
-map_etag?: string, aircraft: Array<LmAircraft>, videos: Array<LmVideo>, };
+map_etag?: string, aircraft: Array<LmAircraft>, videos: Array<LmVideo>, 
+/**
+ * Zeit der jüngsten Auslösung des laufenden Einsatzes, die `GET /photos` liefert. Nur für
+ * einen Zugang mit Fotos (Lifeline Hub), sonst `null`. Ändert sie sich, lohnt ein neuer Abruf.
+ */
+photos_latest_ms: number | null, };

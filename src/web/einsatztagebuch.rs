@@ -274,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn a_linked_mission_is_not_offered_again_and_cannot_be_deleted() {
         let app = test_app().await;
-        let (_, secret) = store::kiosk::create_with(&app.state.pool, "Suite", true, 0)
+        let (_, secret) = store::kiosk::create_with(&app.state.pool, "Suite", true, false, 0)
             .await
             .unwrap();
         let (_, anzeige) = store::kiosk::create(&app.state.pool, "FüKw Großbild", 0)

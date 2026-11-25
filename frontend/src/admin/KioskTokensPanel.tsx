@@ -63,6 +63,7 @@ export function KioskTokensPanel() {
                   <td>
                     {t.label}
                     {t.einsatztagebuch && <Tag style={{ marginInlineStart: 8 }}>IUK-Suite</Tag>}
+                    {t.photos && <Tag style={{ marginInlineStart: 8 }}>Fotos für Lifeline Hub</Tag>}
                   </td>
                   <td className="sl-num">{createdAt(t.created_at_ms)}</td>
                   <td className="sl-cell-action">
@@ -106,6 +107,9 @@ export function KioskTokensPanel() {
         <Form.Item name="einsatztagebuch" valuePropName="checked">
           <Checkbox>Für die IUK-Suite (Einsatztagebuch)</Checkbox>
         </Form.Item>
+        <Form.Item name="photos" valuePropName="checked">
+          <Checkbox>Fotos für Lifeline Hub</Checkbox>
+        </Form.Item>
         <Button type="primary" htmlType="submit" loading={create.isPending}>
           Großbild-Zugang erzeugen
         </Button>
@@ -113,7 +117,7 @@ export function KioskTokensPanel() {
       {created && (
         <OnceVisibleLink
           url={created.url}
-          hint="Auf dem Großbild-Rechner im Browser öffnen; er bleibt angemeldet, bis der Zugang widerrufen wird. Für den Lagemonitor die Adresse in der IUK-Suite unter Lagemonitor → Suchlage einfügen."
+          hint="Auf dem Großbild-Rechner im Browser öffnen; er bleibt angemeldet, bis der Zugang widerrufen wird. Für den Lagemonitor die Adresse in der IUK-Suite unter Lagemonitor → Suchlage einfügen, für Lifeline Hub unter Anbindungen → Suchlage."
         />
       )}
     </div>
